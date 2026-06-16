@@ -316,6 +316,27 @@ export function SettingsModal({
                   className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
                 />
               </div>
+
+              {/* Nexa Turbo Mode */}
+              <div className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-xl">
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-4 h-4 text-[#C96A3D] shrink-0 animate-pulse" />
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#14213D] dark:text-slate-200">
+                      Nexa Turbo Mode
+                    </h5>
+                    <p className="text-[10px] text-slate-400 font-normal">
+                      Enable ultra-low latency & 10x faster replies.
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.turboMode !== false}
+                  onChange={(e) => onUpdateSettings({ turboMode: e.target.checked })}
+                  className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
+                />
+              </div>
             </div>
 
             {/* Device & Storage Privileges */}

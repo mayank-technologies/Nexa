@@ -236,6 +236,7 @@ export default function App() {
       personalizationActive: true,
       personalizationNotes: "",
       privacySaveHistory: true,
+      turboMode: true,
       isAdminVerified: false,
     };
   });
@@ -692,6 +693,7 @@ export default function App() {
         quizTopic: activeMode === "quiz" ? quizTopic : "",
         quizDifficulty: quizDifficulty,
         personalizationContext: settings.personalizationNotes,
+        turboMode: settings.turboMode !== false,
       };
 
       const response = await fetch("/api/chat", {
@@ -857,6 +859,7 @@ export default function App() {
         quizTopic: activeMode === "quiz" ? quizTopic : "",
         quizDifficulty: quizDifficulty,
         personalizationContext: settings.personalizationNotes,
+        turboMode: settings.turboMode !== false,
       };
 
       const response = await fetch("/api/chat", {
@@ -1120,6 +1123,7 @@ export default function App() {
         quizTopic: activeMode === "quiz" ? quizTopic : "",
         quizDifficulty: quizDifficulty,
         personalizationContext: settings.personalizationNotes,
+        turboMode: settings.turboMode !== false,
       };
 
       const response = await fetch("/api/chat", {

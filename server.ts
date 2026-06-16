@@ -6,7 +6,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -41,6 +41,7 @@ async function generateContentWithRetry(params: {
   contents: any[];
   config?: any;
   initialModel?: string;
+  turboMode?: boolean;
 }): Promise<any> {
   const modelsToTry = [
     params.initialModel || "gemini-3.5-flash",
@@ -53,10 +54,30 @@ async function generateContentWithRetry(params: {
     try {
       console.info(`[Nexa Core Server] Querying content generation via model ${model}...`);
       const ai = getGeminiClient();
+
+      // Create a copy of the configuration to decorate
+      const currentConfig = { ...params.config };
+
+      // Set thinkingLevel based on turboMode
+      const isGemini3 = model.includes("gemini-3") || model.includes("gemini-3.5");
+      if (isGemini3) {
+        if (params.turboMode !== false) {
+          // Bypasses thinking phase completely for near-instant responses
+          currentConfig.thinkingConfig = {
+            thinkingLevel: ThinkingLevel.MINIMAL
+          };
+        }
+      } else {
+        // Legacy or other fallback models don't support thinkingConfig
+        if (currentConfig.thinkingConfig) {
+          delete currentConfig.thinkingConfig;
+        }
+      }
+
       const result = await ai.models.generateContent({
         model: model,
         contents: params.contents,
-        config: params.config,
+        config: currentConfig,
       });
       return result;
     } catch (err: any) {
@@ -131,7 +152,8 @@ async function startServer() {
         writingStyle = "casual",
         quizTopic = "",
         quizDifficulty = "medium",
-        personalizationContext = ""
+        personalizationContext = "",
+        turboMode = true
       } = req.body;
 
       if (!messages || messages.length === 0) {
@@ -256,7 +278,8 @@ async function startServer() {
             systemInstruction,
             responseMimeType: "application/json",
             responseSchema
-          }
+          },
+          turboMode: turboMode
         });
 
         const quizData = JSON.parse(result.text || "{}");
@@ -297,7 +320,8 @@ async function startServer() {
             tools,
             responseMimeType: "application/json",
             responseSchema
-          }
+          },
+          turboMode: turboMode
         });
 
         const factData = JSON.parse(result.text || "{}");
@@ -353,7 +377,8 @@ async function startServer() {
             tools,
             responseMimeType: "application/json",
             responseSchema
-          }
+          },
+          turboMode: turboMode
         });
 
         const reportData = JSON.parse(result.text || "{}");
@@ -431,7 +456,8 @@ async function startServer() {
         config: {
           systemInstruction,
           tools,
-        }
+        },
+        turboMode: turboMode
       });
 
       const responseText = result.text || "";

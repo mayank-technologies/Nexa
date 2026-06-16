@@ -107,6 +107,7 @@ export interface AppSettings {
   personalizationActive: boolean;
   personalizationNotes: string;
   privacySaveHistory: boolean;
+  turboMode?: boolean;
   isAdminVerified?: boolean;
 }
 

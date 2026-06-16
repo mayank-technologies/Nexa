@@ -187,15 +187,22 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
             {/* Header: Role Title + Engine badges */}
             <div className="flex justify-between items-center select-none mb-1">
               <div className="flex items-center gap-2.5">
-                <div
-                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border shadow-2xs ${
-                    isModel
-                      ? "bg-[#C96A3D]/10 text-[#C96A3D] border-[#C96A3D]/15"
-                      : "bg-[#14213D] text-white border-[#14213D]"
-                  }`}
-                >
-                  {isModel ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
-                </div>
+                {isModel ? (
+                  <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                    <img
+                      src="https://i.ibb.co/LdwTKxL5/Nexa-App.png"
+                      alt="Nexa-App"
+                      className="w-7 h-7 object-contain select-none"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-[#14213D] shadow-2xs bg-[#14213D] text-white"
+                  >
+                    <User className="w-4 h-4" />
+                  </div>
+                )}
                 <div>
                   <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight">
                     {isModel ? "Nexa Intelligence" : "User Account"}
@@ -209,38 +216,16 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
 
               {/* Engine Badge Routing + Dedicated Copy Button + User Edit Actions */}
               <div className="flex items-center gap-2">
-                {isModel && msg.engineId && <EngineBadge engineId={msg.engineId} size="sm" />}
-                {isModel ? (
+                {!isModel && !isEditing && (
                   <button
-                    onClick={() => handleCopy(msg.id, msg.content)}
-                    className="p-1.5 px-2.5 text-[10px] font-bold text-slate-400 hover:text-[#C96A3D] bg-slate-100/50 dark:bg-slate-800/40 hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/10 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-slate-100/20"
-                    title="Copy full response to clipboard"
-                    id={`nexa-copy-header-${msg.id}`}
+                    onClick={() => handleStartEdit(msg)}
+                    className="p-1.5 px-3 text-[10px] font-bold text-slate-500 hover:text-[#C96A3D] dark:text-slate-400 hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/15 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-slate-150 dark:border-slate-800"
+                    title="Edit original prompt message"
+                    id={`nexa-edit-header-${msg.id}`}
                   >
-                    {copyingId === msg.id ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-500" />
-                        <span className="text-emerald-500">Copied to Clipboard!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy to Clipboard</span>
-                      </>
-                    )}
+                    <Edit2 className="w-3.5 h-3.5" />
+                    <span>Edit</span>
                   </button>
-                ) : (
-                  !isEditing && (
-                    <button
-                      onClick={() => handleStartEdit(msg)}
-                      className="p-1.5 px-3 text-[10px] font-bold text-slate-500 hover:text-[#C96A3D] dark:text-slate-400 hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/15 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-slate-150 dark:border-slate-800"
-                      title="Edit original prompt message"
-                      id={`nexa-edit-header-${msg.id}`}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
-                  )
                 )}
               </div>
             </div>
@@ -620,8 +605,13 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
           {/* Header */}
           <div className="flex justify-between items-center select-none mb-1">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-[#C96A3D]/20 bg-[#C96A3D]/10 text-[#C96A3D]">
-                <Bot className="w-4 h-4 animate-pulse" />
+              <div className="w-8 h-8 flex items-center justify-center shrink-0">
+                <img
+                  src="https://i.ibb.co/LdwTKxL5/Nexa-App.png"
+                  alt="Nexa-App"
+                  className="w-7 h-7 object-contain select-none animate-pulse"
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <div>
                 <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight">

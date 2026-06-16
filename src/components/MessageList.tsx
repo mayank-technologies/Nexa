@@ -1,0 +1,739 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  Copy,
+  Check,
+  Share2,
+  Bookmark,
+  RefreshCw,
+  Edit2,
+  Globe2,
+  Download,
+  AlertCircle,
+  Clock,
+  Sparkles,
+  Link,
+  Bot,
+  User,
+  Volume2,
+  VolumeX,
+  Smile,
+} from "lucide-react";
+import { Message, GroundingSource, NexaEngineId } from "../types";
+import { EngineBadge } from "./EngineBadge";
+import { FactCheckWidget } from "./FactCheckWidget";
+import { DeepResearchReport } from "./DeepResearchReport";
+import { QuizGeneratorCenter } from "./QuizGeneratorCenter";
+
+interface MessageListProps {
+  messages: Message[];
+  activeEngine: string;
+  onAction: (
+    action: "copy" | "share" | "bookmark" | "regenerate" | "translate" | "export",
+    msgId: string
+  ) => void;
+  onEditPrompt: (msgId: string, newContent: string) => void;
+  onReact?: (msgId: string, reaction: string | null) => void;
+  isLoading?: boolean;
+  onCompleteQuiz?: (score: number, total: number) => void;
+}
+
+export function MessageList({ messages, activeEngine, onAction, onEditPrompt, onReact, isLoading, onCompleteQuiz }: MessageListProps) {
+  const [copyingId, setCopyingId] = useState<string | null>(null);
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editPromptValue, setEditPromptValue] = useState("");
+  const [showTranslatorId, setShowTranslatorId] = useState<string | null>(null);
+  const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
+  const [showReactionPickerId, setShowReactionPickerId] = useState<string | null>(null);
+
+  // Stop active speech on list change or unmounting
+  useEffect(() => {
+    return () => {
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [messages]);
+
+  const handleToggleSpeech = (msgId: string, content: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      console.warn("Speech synthesis (TTS) is not supported or accessible on this browser.");
+      return;
+    }
+
+    if (activeSpeechId === msgId) {
+      window.speechSynthesis.cancel();
+      setActiveSpeechId(null);
+      return;
+    }
+
+    // Stop copy, clear existing utterances
+    window.speechSynthesis.cancel();
+
+    // Advanced markdown/text cleaner for highly natural speech
+    const cleanSpeechText = content
+      .replace(/\*\*|__/g, "") // Bold
+      .replace(/\*|_/g, "") // Italic
+      .replace(/`{1,3}[\s\S]*?`{1,3}/g, "[Code excerpt omitted]") // Code segments
+      .replace(/#+\s+/g, "") // Headers
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1") // Links URL removal
+      .replace(/>\s+/g, "") // Blockquotes
+      .replace(/[-*+]\s+/g, "") // Bullet list symbols
+      .replace(/\s+/g, " ") // Normalize multiple spaces
+      .trim();
+
+    if (!cleanSpeechText) return;
+
+    const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
+    const voices = window.speechSynthesis.getVoices();
+    const optimalVoice = voices.find(
+      (v) =>
+        (v.lang.startsWith("en-") && v.name.toLowerCase().includes("natural")) ||
+        (v.lang.startsWith("en-") && v.name.toLowerCase().includes("google")) ||
+        v.lang.startsWith("en-")
+    ) || voices[0];
+
+    if (optimalVoice) {
+      utterance.voice = optimalVoice;
+    }
+
+    utterance.onend = () => {
+      setActiveSpeechId(null);
+    };
+
+    utterance.onerror = () => {
+      setActiveSpeechId(null);
+    };
+
+    setActiveSpeechId(msgId);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopyingId(id);
+    onAction("copy", id);
+    setTimeout(() => setCopyingId(null), 1500);
+  };
+
+  const handleStartEdit = (msg: Message) => {
+    setEditingMsgId(msg.id);
+    setEditPromptValue(msg.content);
+  };
+
+  const handleSaveEdit = (id: string) => {
+    if (editPromptValue.trim()) {
+      onEditPrompt(id, editPromptValue);
+    }
+    setEditingMsgId(null);
+  };
+
+  const translationShortlist = [
+    "English",
+    "Hindi (हिन्दी)",
+    "Hinglish",
+    "Urdu (اردو)",
+    "Tamil (தமிழ்)",
+    "Telugu (తెలుగు)",
+    "Gujarati (ગુજરાતી)",
+  ];
+
+  return (
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto py-4 select-text" id="nexa-message-list">
+      <AnimatePresence initial={false}>
+        {messages.map((msg) => {
+          const isModel = msg.role === "assistant";
+          const isEditing = editingMsgId === msg.id;
+
+          return (
+            <motion.div
+              key={msg.id}
+              initial={isModel ? { opacity: 0, y: 22, scale: 0.98 } : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -10, scale: 0.98 }}
+              transition={
+                isModel
+                  ? { type: "spring", stiffness: 100, damping: 15, mass: 0.9 }
+                  : { duration: 0.25, ease: "easeOut" }
+              }
+              className={`flex flex-col gap-2 p-5 md:p-6 rounded-3xl border transition-all duration-300 relative w-full max-w-[88%] md:max-w-[78%] shadow-xs ${
+                isModel
+                  ? "bg-slate-50/45 dark:bg-[#11192e]/40 border-slate-100 dark:border-slate-800/60 self-start"
+                  : "bg-white dark:bg-[#0c1222] border-[#C96A3D]/10 dark:border-slate-800 self-end"
+              }`}
+              id={`m-card-${msg.id}`}
+            >
+            {/* Header: Role Title + Engine badges */}
+            <div className="flex justify-between items-center select-none mb-1">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border shadow-2xs ${
+                    isModel
+                      ? "bg-[#C96A3D]/10 text-[#C96A3D] border-[#C96A3D]/15"
+                      : "bg-[#14213D] text-white border-[#14213D]"
+                  }`}
+                >
+                  {isModel ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight">
+                    {isModel ? "Nexa Intelligence" : "User Account"}
+                  </h5>
+                  <div className="flex items-center gap-1 mt-0.5 text-[9px] text-slate-400 font-semibold font-mono">
+                    <Clock className="w-3 h-3 shrink-0" />
+                    <span>{msg.timestamp}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Engine Badge Routing + Dedicated Copy Button + User Edit Actions */}
+              <div className="flex items-center gap-2">
+                {isModel && msg.engineId && <EngineBadge engineId={msg.engineId} size="sm" />}
+                {isModel ? (
+                  <button
+                    onClick={() => handleCopy(msg.id, msg.content)}
+                    className="p-1.5 px-2.5 text-[10px] font-bold text-slate-400 hover:text-[#C96A3D] bg-slate-100/50 dark:bg-slate-800/40 hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/10 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-slate-100/20"
+                    title="Copy full response to clipboard"
+                    id={`nexa-copy-header-${msg.id}`}
+                  >
+                    {copyingId === msg.id ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        <span className="text-emerald-500">Copied to Clipboard!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy to Clipboard</span>
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  !isEditing && (
+                    <button
+                      onClick={() => handleStartEdit(msg)}
+                      className="p-1.5 px-3 text-[10px] font-bold text-slate-500 hover:text-[#C96A3D] dark:text-slate-400 hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/15 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-slate-150 dark:border-slate-800"
+                      title="Edit original prompt message"
+                      id={`nexa-edit-header-${msg.id}`}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+
+            {/* Prompt editing container with enhanced controls */}
+            {!isModel && isEditing ? (
+              <div className="space-y-2 mt-2 leading-none" id={`nexa-edit-container-${msg.id}`}>
+                <div className="flex justify-between items-center text-[10px] text-slate-400 select-none">
+                  <span className="font-semibold text-slate-500 dark:text-slate-400">Editing Message Prompt</span>
+                  <span className="font-mono text-[9px] opacity-80">Press Enter to submit, Shift+Enter for new line</span>
+                </div>
+                <textarea
+                  value={editPromptValue}
+                  onChange={(e) => setEditPromptValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSaveEdit(msg.id);
+                    }
+                  }}
+                  rows={3}
+                  className="w-full text-xs p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] focus:ring-2 focus:ring-[#C96A3D]/10 outline-none text-[#14213D] dark:text-white transition-all shadow-inner"
+                  placeholder="Enter your new prompt here to re-trigger the query..."
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end items-center pt-1 select-none">
+                  <button
+                    onClick={() => setEditingMsgId(null)}
+                    className="px-3 py-1.5 text-[10px] font-bold rounded-lg border border-slate-150 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-500 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleSaveEdit(msg.id)}
+                    className="px-4 py-1.5 text-[10px] font-extrabold bg-[#C96A3D] hover:bg-[#b0582e] text-white rounded-lg transition-colors flex items-center gap-1 cursor-pointer shadow-3xs"
+                  >
+                    <span>Resubmit Prompt</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              // Message Text Body Content
+              <div className="space-y-4 text-xs font-normal text-slate-650 dark:text-slate-200 mt-2 text-left leading-relaxed">
+                {/* 1. Attachment preview card */}
+                {msg.attachment && (
+                  <div className="inline-flex items-center gap-2.5 p-3.5 bg-slate-100/50 dark:bg-slate-900 border border-slate-150/10 rounded-2xl max-w-xs mb-2">
+                    <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shrink-0">
+                      <Link className="w-4 h-4 text-[#C96A3D]" />
+                    </div>
+                    <div className="text-left select-none min-w-0">
+                      <h6 className="text-xs font-bold text-slate-700 dark:text-slate-200 truncate max-w-[150px]">
+                        {msg.attachment.name}
+                      </h6>
+                      <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-50 dark:bg-slate-800 px-1 py-0.5 rounded-sm capitalize">
+                        {msg.attachment.type} ({msg.attachment.size})
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Structured Quiz custom view */}
+                {isModel && msg.quiz && (
+                  <QuizGeneratorCenter quiz={msg.quiz} onRestart={() => {}} onCompleteQuiz={onCompleteQuiz} />
+                )}
+
+                {/* 3. Structured Fact Check custom view */}
+                {isModel && msg.factCheck && <FactCheckWidget details={msg.factCheck} />}
+
+                {/* 4. Structured Deep Research custom view */}
+                {isModel && msg.researchReport && (
+                  <DeepResearchReport
+                    report={msg.researchReport}
+                    onExport={() => onAction("export", msg.id)}
+                  />
+                )}
+
+                {/* 5. Custom parsed text body (supports bolding headers bullet checks etc.) */}
+                {!msg.quiz && !msg.factCheck && !msg.researchReport && (
+                  <div className="space-y-3 prose prose-sm max-w-none dark:prose-invert" id="nexa-rich-text-container">
+                    {parseCustomMarkdown(msg.content)}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Citations/Grounding Sources bibliography if present */}
+            {isModel && msg.sources && msg.sources.length > 0 && (
+              <div className="border-t border-slate-150/10 dark:border-slate-805/30 pt-4 mt-4 text-left space-y-2 select-none">
+                <h6 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 cursor-pointer">
+                  <Globe2 className="w-3.5 h-3.5" /> Checked Citations Sources ({msg.sources.length})
+                </h6>
+                <div className="flex flex-wrap gap-2">
+                  {msg.sources.map((src, idx) => (
+                    <a
+                      key={idx}
+                      href={src.uri}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] text-indigo-500 hover:text-white bg-indigo-500/10 hover:bg-indigo-500 border border-indigo-500/15 rounded-xl transition-all font-medium"
+                    >
+                      <span className="font-bold shrink-0">{idx + 1}.</span>
+                      <span className="truncate max-w-[160px]">{src.title}</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Actions Row */}
+            <div className="flex flex-wrap items-center justify-between border-t border-slate-150/10 dark:border-slate-805/35 pt-3 mt-4 text-slate-400 select-none text-[11px]">
+              
+              {/* Left actions: Copy Share Bookmark */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleCopy(msg.id, msg.content)}
+                  className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                  title="Copy to Clipboard"
+                >
+                  {copyingId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copyingId === msg.id ? "Copied to Clipboard!" : "Copy to Clipboard"}</span>
+                </button>
+
+                <button
+                  onClick={() => onAction("share", msg.id)}
+                  className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share</span>
+                </button>
+
+
+
+                {/* 1. React Button Group and picker container */}
+                {isModel && (
+                  <div className="relative flex items-center">
+                    <button
+                      onClick={() => setShowReactionPickerId(showReactionPickerId === msg.id ? null : msg.id)}
+                      className={`flex items-center gap-1.5 cursor-pointer hover:text-[#C96A3D] transition-colors ${
+                        showReactionPickerId === msg.id ? "text-[#C96A3D]" : ""
+                      }`}
+                      title="React to response"
+                      id={`react-btn-${msg.id}`}
+                    >
+                      <Smile className="w-3.5 h-3.5" />
+                      <span>{msg.reaction ? "Reacted" : "React"}</span>
+                    </button>
+
+                    {/* Floating Reactions Picker Menu with AnimatePresence */}
+                    <AnimatePresence>
+                      {showReactionPickerId === msg.id && (
+                        <>
+                          {/* Invisible overlay window for click-outside close */}
+                          <div
+                            className="fixed inset-0 z-40 bg-transparent cursor-default"
+                            onClick={() => setShowReactionPickerId(null)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute bottom-7 left-0 z-50 flex items-center gap-1.5 p-1.5 bg-white dark:bg-[#121c33] border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-2xl"
+                            id={`react-picker-${msg.id}`}
+                          >
+                            {["👍", "❤️", "💡", "😄", "👎"].map((emoji) => (
+                              <button
+                                key={emoji}
+                                onClick={() => {
+                                  if (onReact) {
+                                    onReact(msg.id, msg.reaction === emoji ? null : emoji);
+                                  }
+                                  setShowReactionPickerId(null);
+                                }}
+                                className={`text-[15px] p-1.5 hover:scale-130 active:scale-95 transition-all duration-150 cursor-pointer rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 ${
+                                  msg.reaction === emoji ? "bg-slate-100 dark:bg-slate-800 scale-110" : ""
+                                }`}
+                                title={
+                                  emoji === "👍" ? "Thumbs Up" :
+                                  emoji === "👍" ? "Thumbs Up" :
+                                  emoji === "👎" ? "Thumbs Down" :
+                                  emoji === "❤️" ? "Love It" :
+                                  emoji === "💡" ? "Insightful" :
+                                  emoji === "😄" ? "Amused" : "React"
+                                }
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* 2. Selected Active Reaction Pill Indicator */}
+                {isModel && msg.reaction && (
+                  <motion.button
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    onClick={() => {
+                      if (onReact) onReact(msg.id, null);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#C96A3D]/10 hover:bg-[#C96A3D]/20 text-[#C96A3D] border border-[#C96A3D]/25 hover:border-[#C96A3D]/40 transition-all cursor-pointer font-bold text-[11px]+"
+                    title="Click to remove your reaction"
+                    id={`active-reaction-pill-${msg.id}`}
+                  >
+                    <span>{msg.reaction}</span>
+                    <span className="text-[8px] opacity-60 ml-0.5">✕</span>
+                  </motion.button>
+                )}
+              </div>
+
+              {/* Right actions: Translator trigger, Regenerate, Edit Prompt */}
+              <div className="flex items-center gap-3.5 mt-2 sm:mt-0">
+                {isModel ? (
+                  <>
+                    {/* Read Aloud Speak toggle action */}
+                    <button
+                      onClick={() => handleToggleSpeech(msg.id, msg.content)}
+                      className={`flex items-center gap-1.5 cursor-pointer transition-all duration-200 ${
+                        activeSpeechId === msg.id 
+                          ? "text-[#C96A3D] font-bold bg-[#C96A3D]/5 dark:bg-[#C96A3D]/10 px-2 py-0.5 rounded-lg border border-[#C96A3D]/20 shadow-3xs" 
+                          : "hover:text-[#C96A3D]"
+                      }`}
+                      title={activeSpeechId === msg.id ? "Stop Speaking" : "Listen to Response (TTS)"}
+                    >
+                      {activeSpeechId === msg.id ? (
+                        <div className="flex items-center gap-1">
+                          <VolumeX className="w-3.5 h-3.5 text-[#C96A3D] animate-pulse" />
+                          <span className="relative flex h-1.5 w-1.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#C96A3D] opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#C96A3D]"></span>
+                          </span>
+                        </div>
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5" />
+                      )}
+                      <span>{activeSpeechId === msg.id ? "Stop" : "Speak"}</span>
+                    </button>
+
+                    {/* Translate widget toggle */}
+                    <button
+                      onClick={() => setShowTranslatorId(showTranslatorId === msg.id ? null : msg.id)}
+                      className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                    >
+                      <Globe2 className="w-3.5 h-3.5" />
+                      <span>Translate</span>
+                    </button>
+
+                    <button
+                      onClick={() => onAction("regenerate", msg.id)}
+                      className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Regenerate</span>
+                    </button>
+
+
+                  </>
+                ) : (
+                  <button
+                    onClick={() => handleStartEdit(msg)}
+                    className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    <span>Edit Prompt</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Translation Selection drawer */}
+            {isModel && showTranslatorId === msg.id && (
+              <div className="mt-4 p-4 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl select-none animate-fadeIn text-left space-y-2">
+                <h6 className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                  Translate Response to regional channel
+                </h6>
+                <div className="flex flex-wrap gap-2">
+                  {translationShortlist.map((lang) => (
+                    <button
+                      key={lang}
+                      onClick={() => {
+                        onAction("translate", `${msg.id}::${lang}`);
+                        setShowTranslatorId(null);
+                      }}
+                      className="px-2.5 py-1 text-[10px] font-semibold hover:text-white bg-white dark:bg-[#151f38] hover:bg-[#C96A3D] border border-slate-150 dark:border-slate-800 rounded-xl transition-colors shrink-0"
+                    >
+                      {lang}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </motion.div>
+        );
+      })}
+
+      {isLoading && (
+        <motion.div
+          key="nexa-thinking-loader"
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
+          className="flex flex-col gap-2 p-5 md:p-6 rounded-3xl border border-slate-100 dark:border-slate-800/60 bg-slate-50/45 dark:bg-[#11192e]/40 relative w-full max-w-[88%] md:max-w-[78%] self-start"
+          id="nexa-thinking-bubble"
+        >
+          {/* Header */}
+          <div className="flex justify-between items-center select-none mb-1">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border border-[#C96A3D]/20 bg-[#C96A3D]/10 text-[#C96A3D]">
+                <Bot className="w-4 h-4 animate-pulse" />
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight">
+                  Nexa Intelligence
+                </h5>
+                <div className="flex items-center gap-1 mt-0.5 text-[9px] text-slate-400 font-semibold font-mono">
+                  <Clock className="w-3 h-3 shrink-0 animate-spin [animation-duration:3s]" />
+                  <span>Formulating response...</span>
+                </div>
+              </div>
+            </div>
+            {activeEngine && <EngineBadge engineId={activeEngine as NexaEngineId} size="sm" />}
+          </div>
+
+          {/* Body with bouncing dots */}
+          <div className="space-y-4 text-xs font-normal mt-2 text-left leading-relaxed">
+            <div className="flex items-center gap-1.5 px-1 py-1">
+              <motion.div
+                className="w-2 h-2 rounded-full bg-[#C96A3D]"
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut", delay: 0 }}
+              />
+              <motion.div
+                className="w-2 h-2 rounded-full bg-[#C96A3D]/70"
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut", delay: 0.15 }}
+              />
+              <motion.div
+                className="w-2 h-2 rounded-full bg-[#C96A3D]/40"
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut", delay: 0.3 }}
+              />
+              <span className="text-xs text-slate-400 dark:text-slate-505 font-medium ml-2 select-none">
+                Nexa is thinking...
+              </span>
+            </div>
+          </div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Highly polished parsing tokenizer helper translating markdown tags directly into premium layout HTML
+function parseCustomMarkdown(content: string) {
+  if (!content) return null;
+
+  const lines = content.split("\n");
+
+  let inCodeBlock = false;
+  let codeSnippet: string[] = [];
+  let codeLang = "";
+
+  return lines.map((line, idx) => {
+    const trimmedLine = line.trim();
+
+    // 1. Code Block boundary check
+    if (trimmedLine.startsWith("```")) {
+      if (inCodeBlock) {
+        // Close block
+        inCodeBlock = false;
+        const completeCode = codeSnippet.join("\n");
+        codeSnippet = [];
+        return (
+          <div key={idx} className="my-4 bg-slate-900 dark:bg-black text-slate-100 rounded-2xl p-5 border border-slate-800 shadow-lg font-mono text-[11px] overflow-x-auto text-left relative">
+            <div className="flex justify-between items-center text-[9px] font-extrabold text-slate-500 uppercase tracking-widest border-b border-slate-805/50 pb-2 mb-3 select-none leading-none">
+              <span>{codeLang || "code segment"}</span>
+              <button
+                onClick={() => navigator.clipboard.writeText(completeCode)}
+                className="hover:text-white font-semibold transition-colors"
+              >
+                Copy Code
+              </button>
+            </div>
+            <pre className="p-0 m-0 leading-relaxed font-mono select-text">{completeCode}</pre>
+          </div>
+        );
+      } else {
+        // Start block
+        inCodeBlock = true;
+        codeLang = trimmedLine.replace("```", "").trim();
+        return null;
+      }
+    }
+
+    if (inCodeBlock) {
+      codeSnippet.push(line);
+      return null;
+    }
+
+    // 2. Headings
+    if (trimmedLine.startsWith("###")) {
+      return (
+        <h4 key={idx} className="text-sm font-extrabold text-[#14213D] dark:text-white mt-4 mb-2 first:mt-0 font-sans tracking-tight">
+          {trimmedLine.replace("###", "").trim()}
+        </h4>
+      );
+    }
+    if (trimmedLine.startsWith("##")) {
+      return (
+        <h3 key={idx} className="text-base font-black text-[#14213D] dark:text-white mt-5 mb-2 first:mt-0 font-sans tracking-tight border-b border-slate-100 dark:border-slate-800 pb-1">
+          {trimmedLine.replace("##", "").trim()}
+        </h3>
+      );
+    }
+    if (trimmedLine.startsWith("#")) {
+      return (
+        <h2 key={idx} className="text-lg font-black text-[#14213D] dark:text-white mt-6 mb-3 first:mt-0 font-sans tracking-tight">
+          {trimmedLine.replace("#", "").trim()}
+        </h2>
+      );
+    }
+
+    // 3. Bullet list items
+    if (trimmedLine.startsWith("*") || trimmedLine.startsWith("-")) {
+      const bulletContent = trimmedLine.substring(1).trim();
+      return (
+        <div key={idx} className="flex items-start gap-2.5 my-1.5 pl-2 leading-relaxed">
+          <div className="w-1.5 h-1.5 rounded-full bg-[#C96A3D] mt-2 shrink-0 select-none" />
+          <p className="text-xs text-slate-700 dark:text-slate-200 mt-0 flex-1 font-normal select-text">
+            {parseInlineStyles(bulletContent)}
+          </p>
+        </div>
+      );
+    }
+
+    // 4. Numbered list items
+    const numRegex = /^(\d+)\.\s+(.*)$/;
+    if (numRegex.test(trimmedLine)) {
+      const match = trimmedLine.match(numRegex);
+      if (match) {
+        const num = match[1];
+        const text = match[2];
+        return (
+          <div key={idx} className="flex items-start gap-2.5 my-1.5 pl-2 leading-relaxed">
+            <span className="font-black text-[#C96A3D] font-mono shrink-0 select-none">{num}.</span>
+            <p className="text-xs text-slate-700 dark:text-slate-200 mt-0 flex-1 font-normal select-text">
+              {parseInlineStyles(text)}
+            </p>
+          </div>
+        );
+      }
+    }
+
+    // 5. Empty spacer lines
+    if (!trimmedLine) {
+      return <div key={idx} className="h-2 select-none" />;
+    }
+
+    // 6. Regular paragraphs
+    return (
+      <p key={idx} className="text-xs text-slate-705 dark:text-slate-200 leading-relaxed font-normal select-text">
+        {parseInlineStyles(line)}
+      </p>
+    );
+  });
+}
+
+// Inline parser handling strong bold structures **text** and inline variable backticks `var`
+function parseInlineStyles(text: string) {
+  if (!text) return "";
+
+  // Tokenize by inline markers
+  // Supports dynamic splits easily
+  const strongRegex = /\*\*(.*?)\*\*/g;
+  const backtickRegex = /`(.*?)`/g;
+
+  let parts: Array<{ type: "text" | "bold" | "code"; value: string }> = [];
+  
+  // Minimal recursive inline chunking
+  let currentStr = text;
+  
+  // We can do a simpler rendering by converting HTML/React elements directly
+  // However, simple split mapping is completely robust and type safe for code and strong bold blocks
+  const segments = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+
+  return segments.map((seg, idx) => {
+    if (seg.startsWith("**") && seg.endsWith("**")) {
+      return (
+        <strong key={idx} className="font-extrabold text-[#14213D] dark:text-white">
+          {seg.replace(/\*\*/g, "")}
+        </strong>
+      );
+    }
+    if (seg.startsWith("`") && seg.endsWith("`")) {
+      return (
+        <code
+          key={idx}
+          className="bg-slate-100 dark:bg-slate-800 text-[#C96A3D] dark:text-[#C96A3D] font-mono text-[10px] px-1.5 py-0.5 rounded-md font-semibold select-text"
+        >
+          {seg.replace(/`/g, "")}
+        </code>
+      );
+    }
+    return seg;
+  });
+}

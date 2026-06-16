@@ -32,7 +32,9 @@ import {
   X,
   ShieldCheck,
   Trophy,
-  Award
+  Award,
+  MoreVertical,
+  ThumbsUp
 } from "lucide-react";
 import { trackAction } from "./utils/gamification";
 import {
@@ -82,7 +84,9 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
+  const [showInputMoreActions, setShowInputMoreActions] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [showFeedbackToast, setShowFeedbackToast] = useState(false);
   const uploadOptionsRef = useRef<HTMLDivElement>(null);
   const [unlockedBadgesToast, setUnlockedBadgesToast] = useState<{ id: string; title: string; description: string; pointsAwarded: number } | null>(null);
 
@@ -183,6 +187,7 @@ export default function App() {
     function handleClickOutside(event: MouseEvent) {
       if (uploadOptionsRef.current && !uploadOptionsRef.current.contains(event.target as Node)) {
         setShowUploadOptions(false);
+        setShowInputMoreActions(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -190,6 +195,16 @@ export default function App() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
+
+  // Auto-dismiss feedback toast after 5 seconds
+  useEffect(() => {
+    if (showFeedbackToast) {
+      const timer = setTimeout(() => {
+        setShowFeedbackToast(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [showFeedbackToast]);
 
   // Core App states load persistent or set default
   const [user, setUser] = useState<UserProfile>(() => {
@@ -226,29 +241,57 @@ export default function App() {
   });
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const cached = localStorage.getItem("nexa_sessions");
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed && parsed.length > 0) return parsed;
+    const cachedUser = localStorage.getItem("nexa_user");
+    const parsedUser = cachedUser ? JSON.parse(cachedUser) : null;
+    const isGuestUser = !parsedUser || parsedUser.isGuest === true || parsedUser.email === "guest@nexa.ai";
+
+    const newSessionId = `session-${Date.now()}`;
+    const newRootSession: ChatSession = {
+      id: newSessionId,
+      title: "Start an Intelligent Chat",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+      isPinned: false,
+      mode: "general",
+    };
+
+    if (isGuestUser) {
+      // Guests don't persist sessions when returning/reloading
+      return [newRootSession];
+    } else {
+      // Logged-in users: retrieve past history but prepend a fresh new session if they have any messages
+      const cached = localStorage.getItem("nexa_sessions");
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as ChatSession[];
+          if (parsed && parsed.length > 0) {
+            const hasMessages = parsed.some((s) => s.messages && s.messages.length > 0);
+            if (hasMessages) {
+              return [newRootSession, ...parsed];
+            }
+            return parsed;
+          }
+        } catch (e) {
+          console.error("Failed to parse cached sessions", e);
+        }
+      }
+      return [newRootSession];
     }
-    // Create seed first empty chat session
-    const rootId = `session-${Date.now()}`;
-    return [
-      {
-        id: rootId,
-        title: "Start an Intelligent Chat",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [],
-        isPinned: false,
-        mode: "general",
-      },
-    ];
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    const cached = localStorage.getItem("nexa_active_session_id");
-    return cached || (sessions.length > 0 ? sessions[0].id : "");
+    const cachedUser = localStorage.getItem("nexa_user");
+    const parsedUser = cachedUser ? JSON.parse(cachedUser) : null;
+    const isGuestUser = !parsedUser || parsedUser.isGuest === true || parsedUser.email === "guest@nexa.ai";
+
+    if (isGuestUser) {
+      // Guests always use the single fresh session we initialized
+      return sessions.length > 0 ? sessions[0].id : "";
+    } else {
+      // Logged-in users start on the first session (either the newly prepended fresh one or the sole empty one)
+      return sessions.length > 0 ? sessions[0].id : "";
+    }
   });
 
   // Controls Chat thread inputs
@@ -891,6 +934,11 @@ export default function App() {
   };
 
   const handleMessageReaction = (msgId: string, reaction: string | null) => {
+    if (reaction === "👍") {
+      setShowFeedbackToast(true);
+    } else {
+      setShowFeedbackToast(false);
+    }
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id === activeSessionId) {
@@ -1361,6 +1409,40 @@ export default function App() {
           {/* Dynamic Active input Dock Control Bars anchored */}
           <div className="sticky bottom-0 inset-x-0 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0" id="nexa-dock">
             
+            {/* Thumbs Up Feedback Toast Slide-in from Right */}
+            <AnimatePresence>
+              {showFeedbackToast && (
+                <div className="absolute bottom-full right-4 sm:right-0 mb-3 z-50 flex justify-end pointer-events-auto">
+                  <motion.div
+                    initial={{ opacity: 0, x: 120, scale: 0.9 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 120, scale: 0.9 }}
+                    transition={{ type: "spring", stiffness: 280, damping: 22 }}
+                    className="flex items-center gap-3 p-3.5 rounded-2xl bg-white dark:bg-[#11192e] text-slate-800 dark:text-white border border-[#C96A3D]/45 dark:border-[#C96A3D]/45 shadow-xl backdrop-blur-md max-w-[340px] w-full"
+                    id="feedback-toast-popup"
+                  >
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-500 shrink-0">
+                      <ThumbsUp className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="text-[9px] font-black uppercase tracking-widest text-[#C96A3D] leading-none mb-1">Feedback Logged</div>
+                      <p className="text-[11.5px] font-bold text-slate-700 dark:text-slate-300 leading-snug">
+                        Thank you! Your feedback helps Nexa learn & provide better answers.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowFeedbackToast(false)}
+                      className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer transition-colors shrink-0"
+                      title="Dismiss"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
+
             {/* Slide up uploaded file pairing triggers */}
             {attachment && (
               <div className="mb-3">
@@ -1418,9 +1500,9 @@ export default function App() {
                       <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-550 mb-2">
                         Files & Capture
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-4 gap-2">
                         {/* Document Upload Option */}
-                        <label className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 dark:hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 dark:hover:border-[#C96A3D]/25 cursor-pointer transition-all active:scale-95">
+                        <label className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 dark:hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 dark:hover:border-[#C96A3D]/25 cursor-pointer transition-all active:scale-95 text-center min-h-[64px]">
                           <input
                             type="file"
                             className="hidden"
@@ -1431,11 +1513,11 @@ export default function App() {
                             }}
                           />
                           <FileText className="w-5 h-5 text-sky-500 mb-1" />
-                          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">Document</span>
+                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 leading-tight">Document</span>
                         </label>
 
                         {/* Image Upload Option */}
-                        <label className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 dark:hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 dark:hover:border-[#C96A3D]/25 cursor-pointer transition-all active:scale-95">
+                        <label className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 dark:hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 dark:hover:border-[#C96A3D]/25 cursor-pointer transition-all active:scale-95 text-center min-h-[64px]">
                           <input
                             type="file"
                             className="hidden"
@@ -1446,7 +1528,7 @@ export default function App() {
                             }}
                           />
                           <Image className="w-5 h-5 text-[#C96A3D] mb-1" />
-                          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">Image</span>
+                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 leading-tight">Image</span>
                         </label>
 
                         {/* Take Photo Option (Camera Snapshot) */}
@@ -1461,113 +1543,145 @@ export default function App() {
                               setShowCamera(true);
                             }
                           }}
-                          className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 dark:hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 dark:hover:border-[#C96A3D]/25 cursor-pointer transition-all active:scale-95 text-center"
+                          className="flex flex-col items-center justify-center p-2 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 dark:hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 dark:hover:border-[#C96A3D]/25 cursor-pointer transition-all active:scale-95 text-center min-h-[64px]"
                         >
                           <Camera className="w-5 h-5 text-emerald-500 mb-1" />
-                          <span className="text-[10px] font-bold text-slate-600 dark:text-slate-300">Take Photo</span>
+                          <span className="text-[9px] font-bold text-slate-600 dark:text-slate-300 leading-tight">Take Photo</span>
                         </button>
-                      </div>
-                    </div>
 
-                    {/* Category B: Change Nexa Intelligence Mode */}
-                    <div id="nexa-tour-modes" className="border-t border-slate-100 dark:border-slate-800/60 pt-3">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-550 mb-2 flex justify-between items-center">
-                        <span>Nexa Intelligence Modes</span>
-                        <span className="text-[9px] uppercase text-[#C96A3D] font-mono font-bold bg-[#C96A3D]/10 px-1.5 py-0.5 rounded">
-                          {activeMode}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { id: "general", name: "General Chat", icon: <HelpCircle className="w-3.5 h-3.5 text-indigo-500" /> },
-                          { id: "research", name: "Deep Research", icon: <Search className="w-3.5 h-3.5 text-blue-500" /> },
-                          { id: "study", name: "Study Arena", icon: <BookOpen className="w-3.5 h-3.5 text-amber-500" /> },
-                          { id: "factcheck", name: "Fact Checker", icon: <CheckCircle className="w-3.5 h-3.5 text-[#C96A3D]" /> },
-                          { id: "writing", name: "Writer Desk", icon: <Feather className="w-3.5 h-3.5 text-emerald-500" /> },
-                          { id: "quiz", name: "Quiz Engine", icon: <Brain className="w-3.5 h-3.5 text-pink-500" /> },
-                        ].map((m) => {
-                          const isActive = activeMode === m.id;
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => {
-                                setActiveMode(m.id as any);
-                                setShowUploadOptions(false);
-                              }}
-                              className={`flex items-center gap-2 p-2 rounded-xl text-left cursor-pointer transition-all active:scale-95 border ${
-                                isActive
-                                  ? "border-[#C96A3D] bg-[#C96A3D]/5 text-[#C96A3D] font-bold"
-                                  : "border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40"
-                              }`}
-                            >
-                              <div className="shrink-0">{m.icon}</div>
-                              <span className="text-[10.5px] font-bold truncate leading-none">{m.name}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Category C: Active Model Engine Override */}
-                    <div id="nexa-tour-engines" className="border-t border-slate-100 dark:border-slate-800/60 pt-3">
-                      <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-550 mb-2 flex justify-between items-center">
-                        <span>Direct Engine Override</span>
-                        <span className="text-[9px] uppercase text-emerald-600 dark:text-emerald-400 font-mono font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                          {activeSession?.selectedEngineId ? activeSession.selectedEngineId : "Smart Router"}
-                        </span>
-                      </div>
-                      <div className="space-y-1.5">
+                        {/* More Actions Toggle Option */}
                         <button
                           type="button"
                           onClick={() => {
-                            setSessions((prev) =>
-                              prev.map((s) => (s.id === activeSessionId ? { ...s, selectedEngineId: undefined } : s))
-                            );
-                            setShowUploadOptions(false);
+                            setShowInputMoreActions(!showInputMoreActions);
                           }}
-                          className={`w-full flex items-center justify-center gap-2 p-1.5 rounded-xl text-center cursor-pointer transition-all active:scale-95 border ${
-                            !activeSession?.selectedEngineId
-                              ? "border-emerald-550 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold"
-                              : "border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                          className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all active:scale-95 text-center min-h-[64px] cursor-pointer ${
+                            showInputMoreActions
+                              ? "border-[#C96A3D] bg-[#C96A3D]/10 text-[#C96A3D]"
+                              : "border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-[#C96A3D]/5 hover:border-[#C96A3D]/25 text-slate-650 dark:text-slate-300"
                           }`}
+                          title="More Actions"
                         >
-                          <Sparkles className="w-3.5 h-3.5 text-emerald-500 animate-spin-slow" />
-                          <span className="text-[10.5px] font-bold">Smart Auto-Routing Matrix</span>
+                          <MoreVertical className={`w-5 h-5 mb-1 transition-transform ${showInputMoreActions ? "rotate-90 text-[#C96A3D]" : "text-slate-400"}`} />
+                          <span className="text-[9px] font-bold leading-tight">more action</span>
                         </button>
+                      </div>
+                    </div>
 
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: "core", name: "Core Engine", icon: <Cpu className="w-3.5 h-3.5 text-blue-500" /> },
-                            { id: "reasoning", name: "Reasoning Engine", icon: <Database className="w-3.5 h-3.5 text-indigo-500" /> },
-                            { id: "vision", name: "Vision Engine", icon: <Image className="w-3.5 h-3.5 text-emerald-500" /> },
-                            { id: "language", name: "Language Tech", icon: <Feather className="w-3.5 h-3.5 text-sky-500" /> },
-                          ].map((eng) => {
-                            const isActive = activeSession?.selectedEngineId === eng.id;
-                            return (
+                    <AnimatePresence>
+                      {showInputMoreActions && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="space-y-4 pt-3 border-t border-slate-100 dark:border-slate-800/60 overflow-hidden"
+                        >
+                          {/* Category B: Change Nexa Intelligence Mode */}
+                          <div id="nexa-tour-modes">
+                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-550 mb-2 flex justify-between items-center">
+                              <span>Nexa Intelligence Modes</span>
+                              <span className="text-[9px] uppercase text-[#C96A3D] font-mono font-bold bg-[#C96A3D]/10 px-1.5 py-0.5 rounded">
+                                {activeMode}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {[
+                                { id: "general", name: "General Chat", icon: <HelpCircle className="w-3.5 h-3.5 text-indigo-500" /> },
+                                { id: "research", name: "Deep Research", icon: <Search className="w-3.5 h-3.5 text-blue-500" /> },
+                                { id: "study", name: "Study Arena", icon: <BookOpen className="w-3.5 h-3.5 text-amber-500" /> },
+                                { id: "factcheck", name: "Fact Checker", icon: <CheckCircle className="w-3.5 h-3.5 text-[#C96A3D]" /> },
+                                { id: "writing", name: "Writer Desk", icon: <Feather className="w-3.5 h-3.5 text-emerald-500" /> },
+                                { id: "quiz", name: "Quiz Engine", icon: <Brain className="w-3.5 h-3.5 text-pink-500" /> },
+                              ].map((m) => {
+                                const isActive = activeMode === m.id;
+                                return (
+                                  <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setActiveMode(m.id as any);
+                                      setShowUploadOptions(false);
+                                      setShowInputMoreActions(false);
+                                    }}
+                                    className={`flex items-center gap-2 p-2 rounded-xl text-left cursor-pointer transition-all active:scale-95 border ${
+                                      isActive
+                                        ? "border-[#C96A3D] bg-[#C96A3D]/5 text-[#C96A3D] font-bold"
+                                        : "border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                                    }`}
+                                  >
+                                    <div className="shrink-0">{m.icon}</div>
+                                    <span className="text-[10.5px] font-bold truncate leading-none">{m.name}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Category C: Active Model Engine Override */}
+                          <div id="nexa-tour-engines">
+                            <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-550 mb-2 flex justify-between items-center">
+                              <span>Direct Engine Override</span>
+                              <span className="text-[9px] uppercase text-emerald-600 dark:text-emerald-400 font-mono font-bold bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                {activeSession?.selectedEngineId ? activeSession.selectedEngineId : "Smart Router"}
+                              </span>
+                            </div>
+                            <div className="space-y-1.5">
                               <button
-                                key={eng.id}
                                 type="button"
                                 onClick={() => {
                                   setSessions((prev) =>
-                                    prev.map((s) => (s.id === activeSessionId ? { ...s, selectedEngineId: eng.id as any } : s))
+                                    prev.map((s) => (s.id === activeSessionId ? { ...s, selectedEngineId: undefined } : s))
                                   );
                                   setShowUploadOptions(false);
+                                  setShowInputMoreActions(false);
                                 }}
-                                className={`flex items-center gap-2 p-2 rounded-xl text-left cursor-pointer transition-all active:scale-95 border ${
-                                  isActive
-                                    ? "border-[#C96A3D] bg-[#C96A3D]/5 text-[#C96A3D] font-bold"
+                                className={`w-full flex items-center justify-center gap-2 p-1.5 rounded-xl text-center cursor-pointer transition-all active:scale-95 border ${
+                                  !activeSession?.selectedEngineId
+                                    ? "border-emerald-550 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold"
                                     : "border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40"
                                 }`}
                               >
-                                <div className="shrink-0">{eng.icon}</div>
-                                <span className="text-[10.5px] font-bold truncate leading-none">{eng.name}</span>
+                                <Sparkles className="w-3.5 h-3.5 text-emerald-500 animate-spin-slow" />
+                                <span className="text-[10.5px] font-bold">Smart Auto-Routing Matrix</span>
                               </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                {[
+                                  { id: "core", name: "Core Engine", icon: <Cpu className="w-3.5 h-3.5 text-blue-500" /> },
+                                  { id: "reasoning", name: "Reasoning Engine", icon: <Database className="w-3.5 h-3.5 text-indigo-500" /> },
+                                  { id: "vision", name: "Vision Engine", icon: <Image className="w-3.5 h-3.5 text-emerald-500" /> },
+                                  { id: "language", name: "Language Tech", icon: <Feather className="w-3.5 h-3.5 text-sky-500" /> },
+                                ].map((eng) => {
+                                  const isActive = activeSession?.selectedEngineId === eng.id;
+                                  return (
+                                    <button
+                                      key={eng.id}
+                                      type="button"
+                                      onClick={() => {
+                                        setSessions((prev) =>
+                                          prev.map((s) => (s.id === activeSessionId ? { ...s, selectedEngineId: eng.id as any } : s))
+                                        );
+                                        setShowUploadOptions(false);
+                                        setShowInputMoreActions(false);
+                                      }}
+                                      className={`flex items-center gap-2 p-2 rounded-xl text-left cursor-pointer transition-all active:scale-95 border ${
+                                        isActive
+                                          ? "border-[#C96A3D] bg-[#C96A3D]/5 text-[#C96A3D] font-bold"
+                                          : "border-slate-100 dark:border-slate-800/40 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                                      }`}
+                                    >
+                                      <div className="shrink-0">{eng.icon}</div>
+                                      <span className="text-[10.5px] font-bold truncate leading-none">{eng.name}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 )}
               </div>

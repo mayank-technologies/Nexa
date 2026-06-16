@@ -23,6 +23,9 @@ import {
   Volume2,
   VolumeX,
   Smile,
+  MoreVertical,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { Message, GroundingSource, NexaEngineId } from "../types";
 import { EngineBadge } from "./EngineBadge";
@@ -50,6 +53,19 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
   const [showTranslatorId, setShowTranslatorId] = useState<string | null>(null);
   const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
   const [showReactionPickerId, setShowReactionPickerId] = useState<string | null>(null);
+  const [showThumbsDownReasonsId, setShowThumbsDownReasonsId] = useState<string | null>(null);
+  const [showMoreActionsId, setShowMoreActionsId] = useState<string | null>(null);
+  const [feedbackToastId, setFeedbackToastId] = useState<string | null>(null);
+
+  // Auto-clear feedback toast after 3 seconds
+  useEffect(() => {
+    if (feedbackToastId) {
+      const timer = setTimeout(() => {
+        setFeedbackToastId(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [feedbackToastId]);
 
   // Stop active speech on list change or unmounting
   useEffect(() => {
@@ -336,81 +352,91 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
             {/* Quick Actions Row */}
             <div className="flex flex-wrap items-center justify-between border-t border-slate-150/10 dark:border-slate-805/35 pt-3 mt-4 text-slate-400 select-none text-[11px]">
               
-              {/* Left actions: Copy Share Bookmark */}
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => handleCopy(msg.id, msg.content)}
-                  className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
-                  title="Copy to Clipboard"
-                >
-                  {copyingId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copyingId === msg.id ? "Copied to Clipboard!" : "Copy to Clipboard"}</span>
-                </button>
+              {isModel ? (
+                // NEXA MESSAGE ACTIONS (only Copy, React & More Action)
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => handleCopy(msg.id, msg.content)}
+                    className="flex items-center gap-1.5 hover:text-[#C96A3D] cursor-pointer"
+                    title="Copy to Clipboard"
+                  >
+                    {copyingId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copyingId === msg.id ? "Copied" : "Copy"}</span>
+                  </button>
 
-                <button
-                  onClick={() => onAction("share", msg.id)}
-                  className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share</span>
-                </button>
+                  {/* Thumbs Up Button */}
+                  <button
+                    onClick={() => {
+                      const isActivating = msg.reaction !== "👍";
+                      if (onReact) {
+                        onReact(msg.id, isActivating ? "👍" : null);
+                      }
+                      setShowThumbsDownReasonsId(null);
+                    }}
+                    className={`flex items-center justify-center p-2 rounded-xl border border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-emerald-500/5 hover:border-emerald-500/20 cursor-pointer transition-all duration-200 ${
+                      msg.reaction === "👍"
+                        ? "text-emerald-500 border-emerald-500/25 bg-emerald-500/10!"
+                        : "text-slate-400"
+                    }`}
+                    title="Correct / Helpful response"
+                    id={`thumbs-up-btn-${msg.id}`}
+                  >
+                    <ThumbsUp className="w-4 h-4" />
+                  </button>
 
-
-
-                {/* 1. React Button Group and picker container */}
-                {isModel && (
+                  {/* Thumbs Down Button */}
                   <div className="relative flex items-center">
                     <button
-                      onClick={() => setShowReactionPickerId(showReactionPickerId === msg.id ? null : msg.id)}
-                      className={`flex items-center gap-1.5 cursor-pointer hover:text-[#C96A3D] transition-colors ${
-                        showReactionPickerId === msg.id ? "text-[#C96A3D]" : ""
+                      onClick={() => {
+                        setShowThumbsDownReasonsId(showThumbsDownReasonsId === msg.id ? null : msg.id);
+                      }}
+                      className={`flex items-center justify-center p-2 rounded-xl border border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-rose-500/5 hover:border-rose-500/20 cursor-pointer transition-all duration-200 ${
+                        msg.reaction && msg.reaction.startsWith("👎")
+                          ? "text-rose-500 border-rose-500/25 bg-rose-500/10!"
+                          : "text-slate-400"
                       }`}
-                      title="React to response"
-                      id={`react-btn-${msg.id}`}
+                      title="Incorrect / Unhelpful response"
+                      id={`thumbs-down-btn-${msg.id}`}
                     >
-                      <Smile className="w-3.5 h-3.5" />
-                      <span>{msg.reaction ? "Reacted" : "React"}</span>
+                      <ThumbsDown className="w-4 h-4" />
                     </button>
 
-                    {/* Floating Reactions Picker Menu with AnimatePresence */}
+                    {/* Thumbs Down Reasons Dialog */}
                     <AnimatePresence>
-                      {showReactionPickerId === msg.id && (
+                      {showThumbsDownReasonsId === msg.id && (
                         <>
-                          {/* Invisible overlay window for click-outside close */}
                           <div
                             className="fixed inset-0 z-40 bg-transparent cursor-default"
-                            onClick={() => setShowReactionPickerId(null)}
+                            onClick={() => setShowThumbsDownReasonsId(null)}
                           />
                           <motion.div
                             initial={{ opacity: 0, scale: 0.9, y: 10 }}
                             animate={{ opacity: 1, scale: 1, y: 0 }}
                             exit={{ opacity: 0, scale: 0.9, y: 10 }}
                             transition={{ duration: 0.15, ease: "easeOut" }}
-                            className="absolute bottom-7 left-0 z-50 flex items-center gap-1.5 p-1.5 bg-white dark:bg-[#121c33] border border-slate-200/80 dark:border-slate-800 rounded-2xl shadow-2xl"
-                            id={`react-picker-${msg.id}`}
+                            className="absolute bottom-7 left-0 z-50 min-w-[210px] flex flex-col gap-1 p-2 bg-white dark:bg-[#121c33] border border-slate-200 dark:border-slate-850 rounded-2xl shadow-xl text-left"
+                            id={`thumbs-down-reasons-${msg.id}`}
                           >
-                            {["👍", "❤️", "💡", "😄", "👎"].map((emoji) => (
+                            <div className="px-2 py-1 text-[9px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-wider mb-1">
+                              Why thumbs down?
+                            </div>
+                            {[
+                              "Inaccurate Information",
+                              "Irrelevant Response",
+                              "Poor Formatting or Hard to Read",
+                            ].map((reason) => (
                               <button
-                                key={emoji}
+                                key={reason}
+                                type="button"
                                 onClick={() => {
                                   if (onReact) {
-                                    onReact(msg.id, msg.reaction === emoji ? null : emoji);
+                                    onReact(msg.id, `👎: ${reason}`);
                                   }
-                                  setShowReactionPickerId(null);
+                                  setShowThumbsDownReasonsId(null);
                                 }}
-                                className={`text-[15px] p-1.5 hover:scale-130 active:scale-95 transition-all duration-150 cursor-pointer rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 ${
-                                  msg.reaction === emoji ? "bg-slate-100 dark:bg-slate-800 scale-110" : ""
-                                }`}
-                                title={
-                                  emoji === "👍" ? "Thumbs Up" :
-                                  emoji === "👍" ? "Thumbs Up" :
-                                  emoji === "👎" ? "Thumbs Down" :
-                                  emoji === "❤️" ? "Love It" :
-                                  emoji === "💡" ? "Insightful" :
-                                  emoji === "😄" ? "Amused" : "React"
-                                }
+                                className="px-2.5 py-1.5 w-full hover:bg-rose-500/5 dark:hover:bg-rose-500/10 hover:text-[#C96A3D] text-slate-600 dark:text-slate-300 rounded-xl cursor-pointer text-left text-[11px] font-semibold transition-colors"
                               >
-                                {emoji}
+                                {reason}
                               </button>
                             ))}
                           </motion.div>
@@ -418,83 +444,140 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                       )}
                     </AnimatePresence>
                   </div>
-                )}
 
-                {/* 2. Selected Active Reaction Pill Indicator */}
-                {isModel && msg.reaction && (
-                  <motion.button
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    onClick={() => {
-                      if (onReact) onReact(msg.id, null);
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#C96A3D]/10 hover:bg-[#C96A3D]/20 text-[#C96A3D] border border-[#C96A3D]/25 hover:border-[#C96A3D]/40 transition-all cursor-pointer font-bold text-[11px]+"
-                    title="Click to remove your reaction"
-                    id={`active-reaction-pill-${msg.id}`}
-                  >
-                    <span>{msg.reaction}</span>
-                    <span className="text-[8px] opacity-60 ml-0.5">✕</span>
-                  </motion.button>
-                )}
-              </div>
+                  {msg.reaction && msg.reaction !== "👍" && (
+                    <motion.button
+                      initial={{ scale: 0.8, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      onClick={() => {
+                        if (onReact) onReact(msg.id, null);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#C96A3D]/10 hover:bg-[#C96A3D]/20 text-[#C96A3D] border border-[#C96A3D]/25 hover:border-[#C96A3D]/40 transition-all cursor-pointer font-bold text-[10px]"
+                      title="Click to remove your feedback"
+                    >
+                      <span className="text-[11px]">{msg.reaction.startsWith("👎") ? "👎" : "👍"}</span>
+                      <span>{msg.reaction.startsWith("👎") ? msg.reaction.replace("👎:", "Feedback:").trim() : "Correct"}</span>
+                      <span className="text-[8px] opacity-60 ml-0.5">✕</span>
+                    </motion.button>
+                  )}
 
-              {/* Right actions: Translator trigger, Regenerate, Edit Prompt */}
-              <div className="flex items-center gap-3.5 mt-2 sm:mt-0">
-                {isModel ? (
-                  <>
-                    {/* Read Aloud Speak toggle action */}
+                  {/* More Action 3-dots dropdown */}
+                  <div className="relative flex items-center">
                     <button
-                      onClick={() => handleToggleSpeech(msg.id, msg.content)}
-                      className={`flex items-center gap-1.5 cursor-pointer transition-all duration-200 ${
-                        activeSpeechId === msg.id 
-                          ? "text-[#C96A3D] font-bold bg-[#C96A3D]/5 dark:bg-[#C96A3D]/10 px-2 py-0.5 rounded-lg border border-[#C96A3D]/20 shadow-3xs" 
-                          : "hover:text-[#C96A3D]"
+                      onClick={() => setShowMoreActionsId(showMoreActionsId === msg.id ? null : msg.id)}
+                      className={`flex items-center gap-1.5 cursor-pointer hover:text-[#C96A3D] transition-colors ${
+                        showMoreActionsId === msg.id ? "text-[#C96A3D]" : ""
                       }`}
-                      title={activeSpeechId === msg.id ? "Stop Speaking" : "Listen to Response (TTS)"}
+                      title="More action"
+                      id={`more-actions-btn-${msg.id}`}
                     >
-                      {activeSpeechId === msg.id ? (
-                        <div className="flex items-center gap-1">
-                          <VolumeX className="w-3.5 h-3.5 text-[#C96A3D] animate-pulse" />
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#C96A3D] opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#C96A3D]"></span>
-                          </span>
-                        </div>
-                      ) : (
-                        <Volume2 className="w-3.5 h-3.5" />
+                      <MoreVertical className="w-4 h-4 text-slate-400 group-hover:text-[#C96A3D]" />
+                      <span className="font-medium">more action</span>
+                    </button>
+
+                    <AnimatePresence>
+                      {showMoreActionsId === msg.id && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-40 bg-transparent cursor-default"
+                            onClick={() => setShowMoreActionsId(null)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                            transition={{ duration: 0.15, ease: "easeOut" }}
+                            className="absolute bottom-7 left-0 z-50 min-w-[130px] flex flex-col gap-1 p-1.5 bg-white dark:bg-[#121c33] border border-slate-200 dark:border-slate-850 rounded-2xl shadow-xl text-left"
+                            id={`more-actions-menu-${msg.id}`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAction("share", msg.id);
+                                setShowMoreActionsId(null);
+                              }}
+                              className="flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] cursor-pointer text-left font-medium transition-colors"
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
+                              <span>Share</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleToggleSpeech(msg.id, msg.content);
+                                setShowMoreActionsId(null);
+                              }}
+                              className={`flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl cursor-pointer text-left font-medium transition-colors ${
+                                activeSpeechId === msg.id ? "text-[#C96A3D]" : "text-slate-600 dark:text-slate-300 hover:text-[#C96A3D]"
+                              }`}
+                            >
+                              {activeSpeechId === msg.id ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                              <span>{activeSpeechId === msg.id ? "Stop Speak" : "Read Aloud"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowTranslatorId(showTranslatorId === msg.id ? null : msg.id);
+                                setShowMoreActionsId(null);
+                              }}
+                              className="flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl cursor-pointer text-left font-medium text-slate-600 dark:text-slate-300 hover:text-[#C96A3D] transition-colors"
+                            >
+                              <Globe2 className="w-3.5 h-3.5" />
+                              <span>Translate</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onAction("regenerate", msg.id);
+                                setShowMoreActionsId(null);
+                              }}
+                              className="flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl text-slate-600 dark:text-slate-300 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] cursor-pointer text-left font-medium transition-colors"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                              <span>Regenerate</span>
+                            </button>
+                          </motion.div>
+                        </>
                       )}
-                      <span>{activeSpeechId === msg.id ? "Stop" : "Speak"}</span>
+                    </AnimatePresence>
+                  </div>
+                </div>
+              ) : (
+                // USER MESSAGE ACTIONS
+                <>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => handleCopy(msg.id, msg.content)}
+                      className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                      title="Copy to Clipboard"
+                    >
+                      {copyingId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copyingId === msg.id ? "Copied" : "Copy"}</span>
                     </button>
 
-                    {/* Translate widget toggle */}
                     <button
-                      onClick={() => setShowTranslatorId(showTranslatorId === msg.id ? null : msg.id)}
+                      onClick={() => onAction("share", msg.id)}
                       className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
                     >
-                      <Globe2 className="w-3.5 h-3.5" />
-                      <span>Translate</span>
+                      <Share2 className="w-3.5 h-3.5" />
+                      <span>Share</span>
                     </button>
+                  </div>
 
+                  <div className="flex items-center gap-3.5 mt-2 sm:mt-0">
                     <button
-                      onClick={() => onAction("regenerate", msg.id)}
+                      onClick={() => handleStartEdit(msg)}
                       className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
                     >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Regenerate</span>
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit Prompt</span>
                     </button>
-
-
-                  </>
-                ) : (
-                  <button
-                    onClick={() => handleStartEdit(msg)}
-                    className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>Edit Prompt</span>
-                  </button>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Translation Selection drawer */}

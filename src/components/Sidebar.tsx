@@ -22,6 +22,7 @@ import {
   BookmarkCheck,
   LogOut,
   Sliders,
+  Settings,
 } from "lucide-react";
 import { ChatSession, UserProfile } from "../types";
 
@@ -37,6 +38,8 @@ interface SidebarProps {
   onPinSession: (id: string) => void;
   onChangeMode: (mode: ChatSession["mode"]) => void;
   onOpenAuth: () => void;
+  onOpenSettings?: () => void;
+  onLogout?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
 }
@@ -53,6 +56,8 @@ export function Sidebar({
   onPinSession,
   onChangeMode,
   onOpenAuth,
+  onOpenSettings,
+  onLogout,
   isMobileOpen,
   onCloseMobile,
 }: SidebarProps) {
@@ -263,11 +268,11 @@ export function Sidebar({
       </div>
 
       {/* Guest Mode Conversion Panel Warning footer */}
-      {user.isGuest && (
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 text-xs">
+      {user.isGuest ? (
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 text-xs shrink-0">
           <div className="flex gap-2.5 items-start p-3 bg-indigo-500/5 rounded-2xl border border-indigo-500/10">
             <AlertCircle className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5 animate-pulse" />
-            <div className="text-left space-y-1">
+            <div className="text-left space-y-1 session-guest-box">
               <h5 className="font-bold text-slate-700 dark:text-slate-200">Sync Guest Threads</h5>
               <p className="text-[10px] text-slate-400 leading-relaxed font-normal">
                 Authorize email or google to safely lock your bookmarks, preferences and histories.
@@ -282,6 +287,63 @@ export function Sidebar({
                 Authenticate Now &rarr;
               </button>
             </div>
+          </div>
+        </div>
+      ) : (
+        /* Logged-In User Profile bottom footer */
+        <div className="p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {user.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt={user.fullName}
+                className="w-9 h-9 rounded-2xl object-cover shrink-0 select-none border border-slate-200 dark:border-slate-800 shadow-3xs"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm">
+                {user.fullName ? user.fullName[0].toUpperCase() : "N"}
+              </div>
+            )}
+            <div className="text-left min-w-0 flex-1 leading-snug">
+              <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
+                {user.fullName}
+              </h5>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate font-mono">
+                {user.email || "Active User"}
+              </p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Settings button next to profile */}
+            {onOpenSettings && (
+              <button
+                onClick={() => {
+                  onOpenSettings();
+                  onCloseMobile?.();
+                }}
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-[#C96A3D] bg-white dark:bg-slate-900 hover:shadow-3xs transition-all cursor-pointer active:scale-95"
+                title="Profile & Preferences Settings"
+                id="sidebar-preferences-btn"
+              >
+                <Settings className="w-4 h-4 shrink-0" />
+              </button>
+            )}
+
+            {/* Logout button */}
+            {onLogout && (
+              <button
+                onClick={() => {
+                  onLogout();
+                  onCloseMobile?.();
+                }}
+                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 bg-white dark:bg-slate-900 hover:shadow-3xs transition-all cursor-pointer active:scale-95"
+                title="Logout"
+                id="sidebar-logout-btn"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       )}

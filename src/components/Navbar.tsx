@@ -98,17 +98,19 @@ export function Navbar({
           </button>
         )}
 
-        {/* Settings Modal */}
-        <button
-          onClick={onOpenSettings}
-          className="p-2.5 rounded-xl border border-slate-150 dark:border-slate-800 text-slate-500 hover:text-[#C96A3D] bg-white dark:bg-slate-900 shadow-3xs hover:shadow-2xs transition-all cursor-pointer"
-          title="Chat Configuration"
-        >
-          <Settings className="w-4 h-4 shrink-0" />
-        </button>
+        {/* Settings Modal - only in header if Guest, otherwise in sidebar bottom */}
+        {user.isGuest && (
+          <button
+            onClick={onOpenSettings}
+            className="p-2.5 rounded-xl border border-slate-150 dark:border-slate-800 text-slate-500 hover:text-[#C96A3D] bg-white dark:bg-slate-900 shadow-3xs hover:shadow-2xs transition-all cursor-pointer"
+            title="Chat Configuration"
+          >
+            <Settings className="w-4 h-4 shrink-0" />
+          </button>
+        )}
 
         {/* Profile Card / Login Trigger */}
-        {user.isGuest ? (
+        {user.isGuest && (
           <button
             onClick={onOpenAuth}
             className="flex items-center gap-1.5 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:text-[#14213D] dark:hover:bg-[#C96A3D] dark:hover:text-white text-white font-bold py-2 px-3.5 rounded-xl text-xs shadow-md transition-all cursor-pointer hover:shadow-lg"
@@ -116,30 +118,6 @@ export function Navbar({
             <LogIn className="w-3.5 h-3.5 shrink-0" />
             <span>Login</span>
           </button>
-        ) : (
-          <div className="flex items-center gap-2 bg-slate-50/80 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-800 rounded-xl py-1 px-2">
-            {user.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.fullName}
-                className="w-6 h-6 rounded-lg object-cover shrink-0 select-none"
-              />
-            ) : (
-              <div className="w-6 h-6 rounded-lg bg-indigo-500 text-white flex items-center justify-center font-bold text-xs shrink-0 select-none">
-                {user.fullName[0]}
-              </div>
-            )}
-            <span className="hidden md:inline text-xs font-bold text-[#14213D] dark:text-slate-105 pr-1 truncate max-w-[90px]">
-              {user.fullName}
-            </span>
-            <button
-              onClick={onLogout}
-              className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-rose-50/40 dark:hover:bg-rose-500/10 cursor-pointer"
-              title="Sign Out"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-            </button>
-          </div>
         )}
 
       </div>

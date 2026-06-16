@@ -1267,6 +1267,8 @@ export default function App() {
               handleNewSession(mode);
             }}
             onOpenAuth={() => setShowAuth(true)}
+            onOpenSettings={() => setShowSettings(true)}
+            onLogout={handleLogout}
             isMobileOpen={false}
           />
         </div>
@@ -1308,6 +1310,8 @@ export default function App() {
                     handleNewSession(mode);
                   }}
                   onOpenAuth={() => setShowAuth(true)}
+                  onOpenSettings={() => setShowSettings(true)}
+                  onLogout={handleLogout}
                   isMobileOpen={true}
                   onCloseMobile={() => setIsMobileSidebarOpen(false)}
                 />

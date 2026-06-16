@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from "react";
+import React, { useState, useRef } from "react";
 import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy } from "lucide-react";
 import { AppSettings, UserProfile } from "../types";
 import { Logo } from "./Logo";
@@ -39,13 +39,33 @@ export function SettingsModal({
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<"preferences" | "achievements">("preferences");
   const [profileName, setProfileName] = useState(user.fullName);
+  const [avatarUrlState, setAvatarUrlState] = useState<string | undefined>(user.avatarUrl);
   const [personalization, setPersonalization] = useState(settings.personalizationNotes);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image size should be less than 2MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarUrlState(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const handleSave = () => {
-    onUpdateUser({ fullName: profileName });
+    onUpdateUser({ 
+      fullName: profileName, 
+      avatarUrl: avatarUrlState 
+    });
     onUpdateSettings({
       personalizationNotes: personalization,
     });
@@ -180,11 +200,58 @@ export function SettingsModal({
             </div>
 
             {/* Profile Settings */}
-            <div className="space-y-3 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800/85 rounded-2xl">
+            <div className="space-y-4 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800/85 rounded-2xl">
               <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
                 <User className="w-4 h-4" />
                 User Profile Information
               </h4>
+
+              {/* Profile Avatar Selection Row */}
+              <div className="flex items-center gap-4 py-1" id="avatar-selector-section">
+                {avatarUrlState ? (
+                  <img
+                    src={avatarUrlState}
+                    alt={profileName}
+                    className="w-14 h-14 rounded-2xl object-cover border border-slate-250 dark:border-slate-800 shadow-sm"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+                    {profileName ? profileName[0].toUpperCase() : "U"}
+                  </div>
+                )}
+                
+                <div className="space-y-1.5 flex-1">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Profile Image</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-[10px] bg-slate-100 dark:bg-slate-800 hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] hover:text-white text-slate-700 dark:text-slate-300 font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Upload Picture
+                    </button>
+                    {avatarUrlState && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAvatarUrlState(undefined);
+                        }}
+                        className="text-[10px] bg-rose-50 dark:bg-rose-950/20 text-rose-500 hover:bg-rose-550 hover:text-white font-bold py-1.5 px-2.5 rounded-lg transition-all cursor-pointer"
+                      >
+                        Reset Picture
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="block text-xs text-slate-500 font-medium">Display Name</label>
                 <input

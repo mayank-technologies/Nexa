@@ -551,14 +551,28 @@ export default function App() {
   };
 
   const handleDeleteSession = (id: string) => {
-    if (sessions.length === 1) {
-      alert("Nexa requires at least one active conversation thread.");
-      return;
-    }
     const remaining = sessions.filter((s) => s.id !== id);
-    setSessions(remaining);
-    if (activeSessionId === id) {
-      setActiveSessionId(remaining[0].id);
+    if (remaining.length === 0) {
+      const freshId = `session-${Date.now()}`;
+      const freshSession: ChatSession = {
+        id: freshId,
+        title: "New Chat Session",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+        isPinned: false,
+        mode: "general",
+      };
+      setSessions([freshSession]);
+      setActiveSessionId(freshId);
+      setActiveMode("general");
+    } else {
+      setSessions(remaining);
+      if (activeSessionId === id) {
+        const nextSession = remaining[0];
+        setActiveSessionId(nextSession.id);
+        setActiveMode(nextSession.mode || "general");
+      }
     }
   };
 

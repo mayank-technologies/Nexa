@@ -349,6 +349,26 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                     <span>{copyingId === msg.id ? "Copied" : "Copy"}</span>
                   </button>
 
+                  <button
+                    onClick={() => handleToggleSpeech(msg.id, msg.content)}
+                    className={`flex items-center gap-1.5 hover:text-[#C96A3D] cursor-pointer transition-colors ${
+                      activeSpeechId === msg.id ? "text-[#C96A3D] font-extrabold" : ""
+                    }`}
+                    title={activeSpeechId === msg.id ? "Stop reading response" : "Read response aloud"}
+                  >
+                    {activeSpeechId === msg.id ? (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5 text-[#C96A3D] animate-pulse" />
+                        <span>Stop</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="w-3.5 h-3.5" />
+                        <span>Read Aloud</span>
+                      </>
+                    )}
+                  </button>
+
                   {/* Thumbs Up Button */}
                   <button
                     onClick={() => {

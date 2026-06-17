@@ -242,9 +242,17 @@ export default function App() {
   });
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const cachedUser = localStorage.getItem("nexa_user");
-    const parsedUser = cachedUser ? JSON.parse(cachedUser) : null;
-    const isGuestUser = !parsedUser || parsedUser.isGuest === true || parsedUser.email === "guest@nexa.ai";
+    const cached = localStorage.getItem("nexa_sessions");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as ChatSession[];
+        if (parsed && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {
+        console.error("Failed to parse cached sessions", e);
+      }
+    }
 
     const newSessionId = `session-${Date.now()}`;
     const newRootSession: ChatSession = {
@@ -256,43 +264,15 @@ export default function App() {
       isPinned: false,
       mode: "general",
     };
-
-    if (isGuestUser) {
-      // Guests don't persist sessions when returning/reloading
-      return [newRootSession];
-    } else {
-      // Logged-in users: retrieve past history but prepend a fresh new session if they have any messages
-      const cached = localStorage.getItem("nexa_sessions");
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached) as ChatSession[];
-          if (parsed && parsed.length > 0) {
-            const hasMessages = parsed.some((s) => s.messages && s.messages.length > 0);
-            if (hasMessages) {
-              return [newRootSession, ...parsed];
-            }
-            return parsed;
-          }
-        } catch (e) {
-          console.error("Failed to parse cached sessions", e);
-        }
-      }
-      return [newRootSession];
-    }
+    return [newRootSession];
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    const cachedUser = localStorage.getItem("nexa_user");
-    const parsedUser = cachedUser ? JSON.parse(cachedUser) : null;
-    const isGuestUser = !parsedUser || parsedUser.isGuest === true || parsedUser.email === "guest@nexa.ai";
-
-    if (isGuestUser) {
-      // Guests always use the single fresh session we initialized
-      return sessions.length > 0 ? sessions[0].id : "";
-    } else {
-      // Logged-in users start on the first session (either the newly prepended fresh one or the sole empty one)
-      return sessions.length > 0 ? sessions[0].id : "";
+    const cachedActiveId = localStorage.getItem("nexa_active_session_id");
+    if (cachedActiveId && sessions.some((s) => s.id === cachedActiveId)) {
+      return cachedActiveId;
     }
+    return sessions.length > 0 ? sessions[0].id : "";
   });
 
   // Controls Chat thread inputs
@@ -379,6 +359,32 @@ export default function App() {
     localStorage.setItem("nexa_sessions", JSON.stringify(sessions));
     localStorage.setItem("nexa_active_session_id", activeSessionId);
   }, [sessions, activeSessionId]);
+
+  // Cloud backend synchronization when sessions update
+  useEffect(() => {
+    if (user && !user.isGuest && user.email) {
+      const syncWithCloud = async () => {
+        try {
+          await fetch("/api/auth/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: user.email,
+              chats: sessions
+            })
+          });
+        } catch (e) {
+          console.error("[Nexa Client] Sync to cloud failed:", e);
+        }
+      };
+
+      const delayTimer = setTimeout(() => {
+        syncWithCloud();
+      }, 1000);
+
+      return () => clearTimeout(delayTimer);
+    }
+  }, [sessions, user]);
 
   useEffect(() => {
     localStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
@@ -606,13 +612,15 @@ export default function App() {
   };
 
   // Auth merge transition successes
-  const handleAuthSuccess = (authenticatedUser: UserProfile) => {
-    // Guest chats Bookmarks and Histories are completely PRESERVED under new login state
+  const handleAuthSuccess = (authenticatedUser: UserProfile, cloudChats?: ChatSession[]) => {
     setUser({
       ...authenticatedUser,
       isGuest: false,
     });
-    alert("Authentication complete! Stored guest chat logs and bookmark settings successfully linked.");
+    if (cloudChats && cloudChats.length > 0) {
+      setSessions(cloudChats);
+      setActiveSessionId(cloudChats[0].id);
+    }
   };
 
   // Diagnostic panel actions
@@ -1420,6 +1428,7 @@ export default function App() {
                   onReact={handleMessageReaction}
                   isLoading={isLoading}
                   onCompleteQuiz={handleCompleteQuiz}
+                  userName={user.fullName}
                 />
               </div>
             )}

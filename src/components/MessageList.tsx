@@ -20,12 +20,12 @@ import {
   Link,
   Bot,
   User,
-  Volume2,
-  VolumeX,
   Smile,
   MoreVertical,
   ThumbsUp,
   ThumbsDown,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { Message, GroundingSource, NexaEngineId } from "../types";
 import { EngineBadge } from "./EngineBadge";
@@ -44,18 +44,28 @@ interface MessageListProps {
   onReact?: (msgId: string, reaction: string | null) => void;
   isLoading?: boolean;
   onCompleteQuiz?: (score: number, total: number) => void;
+  userName?: string;
 }
 
-export function MessageList({ messages, activeEngine, onAction, onEditPrompt, onReact, isLoading, onCompleteQuiz }: MessageListProps) {
+export function MessageList({
+  messages,
+  activeEngine,
+  onAction,
+  onEditPrompt,
+  onReact,
+  isLoading,
+  onCompleteQuiz,
+  userName,
+}: MessageListProps) {
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editPromptValue, setEditPromptValue] = useState("");
   const [showTranslatorId, setShowTranslatorId] = useState<string | null>(null);
-  const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
   const [showReactionPickerId, setShowReactionPickerId] = useState<string | null>(null);
   const [showThumbsDownReasonsId, setShowThumbsDownReasonsId] = useState<string | null>(null);
   const [showMoreActionsId, setShowMoreActionsId] = useState<string | null>(null);
   const [feedbackToastId, setFeedbackToastId] = useState<string | null>(null);
+  const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
 
   // Auto-clear feedback toast after 3 seconds
   useEffect(() => {
@@ -67,7 +77,7 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
     }
   }, [feedbackToastId]);
 
-  // Stop active speech on list change or unmounting
+  // Cancel active speech on list change or unmounting
   useEffect(() => {
     return () => {
       if (typeof window !== "undefined" && window.speechSynthesis) {
@@ -88,19 +98,20 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
       return;
     }
 
-    // Stop copy, clear existing utterances
+    // Cancel currently speaking/queued utterances
     window.speechSynthesis.cancel();
 
-    // Advanced markdown/text cleaner for highly natural speech
+    // Clean text of markdown characters, blocks etc for flawless natural reading
     const cleanSpeechText = content
       .replace(/\*\*|__/g, "") // Bold
       .replace(/\*|_/g, "") // Italic
-      .replace(/`{1,3}[\s\S]*?`{1,3}/g, "[Code excerpt omitted]") // Code segments
+      .replace(/`{3}[\s\S]*?`{3}/g, "[Code snippet omitted]") // Multi-line code
+      .replace(/`[^`]+`/g, "") // Single-line code
       .replace(/#+\s+/g, "") // Headers
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1") // Links URL removal
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1") // Links
       .replace(/>\s+/g, "") // Blockquotes
-      .replace(/[-*+]\s+/g, "") // Bullet list symbols
-      .replace(/\s+/g, " ") // Normalize multiple spaces
+      .replace(/[-*+]\s+/g, "") // List points
+      .replace(/\s+/g, " ") // Extra whitespace
       .trim();
 
     if (!cleanSpeechText) return;
@@ -177,11 +188,11 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                   ? { type: "spring", stiffness: 100, damping: 15, mass: 0.9 }
                   : { duration: 0.25, ease: "easeOut" }
               }
-              className={`flex flex-col gap-2 p-5 md:p-6 rounded-3xl border transition-all duration-300 relative w-full max-w-[88%] md:max-w-[78%] shadow-xs ${
+              className={
                 isModel
-                  ? "bg-slate-50/45 dark:bg-[#11192e]/40 border-slate-100 dark:border-slate-800/60 self-start"
-                  : "bg-white dark:bg-[#0c1222] border-[#C96A3D]/10 dark:border-slate-800 self-end"
-              }`}
+                  ? "flex flex-col gap-2 py-5 border-b border-slate-100/50 dark:border-slate-800/30 transition-all duration-300 relative w-full last:border-b-0 self-start text-left"
+                  : "flex flex-col gap-2 p-5 md:p-6 transition-all duration-300 relative w-full max-w-[88%] md:max-w-[78%] self-end text-left my-1"
+              }
               id={`m-card-${msg.id}`}
             >
             {/* Header: Role Title + Engine badges */}
@@ -205,7 +216,7 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                 )}
                 <div>
                   <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight">
-                    {isModel ? "Nexa Intelligence" : "User Account"}
+                    {isModel ? "Nexa Intelligence" : (userName || "User Account")}
                   </h5>
                   <div className="flex items-center gap-1 mt-0.5 text-[9px] text-slate-400 font-semibold font-mono">
                     <Clock className="w-3 h-3 shrink-0" />
@@ -215,19 +226,7 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
               </div>
 
               {/* Engine Badge Routing + Dedicated Copy Button + User Edit Actions */}
-              <div className="flex items-center gap-2">
-                {!isModel && !isEditing && (
-                  <button
-                    onClick={() => handleStartEdit(msg)}
-                    className="p-1.5 px-3 text-[10px] font-bold text-slate-500 hover:text-[#C96A3D] dark:text-slate-400 hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/15 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer border border-slate-150 dark:border-slate-800"
-                    title="Edit original prompt message"
-                    id={`nexa-edit-header-${msg.id}`}
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                    <span>Edit</span>
-                  </button>
-                )}
-              </div>
+              <div className="flex items-center gap-2" />
             </div>
 
             {/* Prompt editing container with enhanced controls */}
@@ -342,30 +341,23 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                 <div className="flex items-center gap-4">
                   <button
                     onClick={() => handleCopy(msg.id, msg.content)}
-                    className="flex items-center gap-1.5 hover:text-[#C96A3D] cursor-pointer"
+                    className="flex items-center hover:text-[#C96A3D] cursor-pointer"
                     title="Copy to Clipboard"
                   >
                     {copyingId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copyingId === msg.id ? "Copied" : "Copy"}</span>
                   </button>
 
                   <button
                     onClick={() => handleToggleSpeech(msg.id, msg.content)}
-                    className={`flex items-center gap-1.5 hover:text-[#C96A3D] cursor-pointer transition-colors ${
-                      activeSpeechId === msg.id ? "text-[#C96A3D] font-extrabold" : ""
+                    className={`flex items-center hover:text-[#C96A3D] cursor-pointer transition-all ${
+                      activeSpeechId === msg.id ? "text-[#C96A3D]" : ""
                     }`}
-                    title={activeSpeechId === msg.id ? "Stop reading response" : "Read response aloud"}
+                    title={activeSpeechId === msg.id ? "Stop voice playback" : "Read response aloud"}
                   >
                     {activeSpeechId === msg.id ? (
-                      <>
-                        <VolumeX className="w-3.5 h-3.5 text-[#C96A3D] animate-pulse" />
-                        <span>Stop</span>
-                      </>
+                      <VolumeX className="w-3.5 h-3.5 text-[#C96A3D] animate-pulse" />
                     ) : (
-                      <>
-                        <Volume2 className="w-3.5 h-3.5" />
-                        <span>Read Aloud</span>
-                      </>
+                      <Volume2 className="w-3.5 h-3.5" />
                     )}
                   </button>
 
@@ -378,10 +370,10 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                       }
                       setShowThumbsDownReasonsId(null);
                     }}
-                    className={`flex items-center justify-center p-2 rounded-xl border border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-emerald-500/5 hover:border-emerald-500/20 cursor-pointer transition-all duration-200 ${
+                    className={`flex items-center justify-center p-1.5 hover:text-emerald-500 cursor-pointer transition-all duration-200 ${
                       msg.reaction === "👍"
-                        ? "text-emerald-500 border-emerald-500/25 bg-emerald-500/10!"
-                        : "text-slate-400"
+                        ? "text-emerald-500 scale-110"
+                        : "text-slate-400 hover:scale-105"
                     }`}
                     title="Correct / Helpful response"
                     id={`thumbs-up-btn-${msg.id}`}
@@ -395,10 +387,10 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                       onClick={() => {
                         setShowThumbsDownReasonsId(showThumbsDownReasonsId === msg.id ? null : msg.id);
                       }}
-                      className={`flex items-center justify-center p-2 rounded-xl border border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-rose-500/5 hover:border-rose-500/20 cursor-pointer transition-all duration-200 ${
+                      className={`flex items-center justify-center p-1.5 hover:text-rose-500 cursor-pointer transition-all duration-200 ${
                         msg.reaction && msg.reaction.startsWith("👎")
-                          ? "text-rose-500 border-rose-500/25 bg-rose-500/10!"
-                          : "text-slate-400"
+                          ? "text-rose-500 scale-110"
+                          : "text-slate-400 hover:scale-105"
                       }`}
                       title="Incorrect / Unhelpful response"
                       id={`thumbs-down-btn-${msg.id}`}
@@ -510,20 +502,6 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                             <button
                               type="button"
                               onClick={() => {
-                                handleToggleSpeech(msg.id, msg.content);
-                                setShowMoreActionsId(null);
-                              }}
-                              className={`flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl cursor-pointer text-left font-medium transition-colors ${
-                                activeSpeechId === msg.id ? "text-[#C96A3D]" : "text-slate-600 dark:text-slate-300 hover:text-[#C96A3D]"
-                              }`}
-                            >
-                              {activeSpeechId === msg.id ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                              <span>{activeSpeechId === msg.id ? "Stop Speak" : "Read Aloud"}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
                                 setShowTranslatorId(showTranslatorId === msg.id ? null : msg.id);
                                 setShowMoreActionsId(null);
                               }}
@@ -556,29 +534,28 @@ export function MessageList({ messages, activeEngine, onAction, onEditPrompt, on
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => handleCopy(msg.id, msg.content)}
-                      className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                      className="flex items-center hover:text-[#C96A3D] cursor-pointer"
                       title="Copy to Clipboard"
                     >
                       {copyingId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                      <span>{copyingId === msg.id ? "Copied" : "Copy"}</span>
                     </button>
 
                     <button
                       onClick={() => onAction("share", msg.id)}
-                      className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                      className="flex items-center hover:text-[#C96A3D] cursor-pointer"
+                      title="Share message"
                     >
                       <Share2 className="w-3.5 h-3.5" />
-                      <span>Share</span>
                     </button>
                   </div>
 
                   <div className="flex items-center gap-3.5 mt-2 sm:mt-0">
                     <button
                       onClick={() => handleStartEdit(msg)}
-                      className="flex items-center gap-1 hover:text-[#C96A3D] cursor-pointer"
+                      className="flex items-center hover:text-[#C96A3D] cursor-pointer"
+                      title="Edit Prompt"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit Prompt</span>
                     </button>
                   </div>
                 </>

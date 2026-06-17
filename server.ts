@@ -5,6 +5,7 @@
 
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
@@ -142,6 +143,139 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+  // --- PERSISTENT USER CHAT DATABASE SETUP ---
+  const DB_PATH = path.join(process.cwd(), "users_db.json");
+
+  const readDB = () => {
+    try {
+      if (fs.existsSync(DB_PATH)) {
+        const fileContent = fs.readFileSync(DB_PATH, "utf8");
+        return JSON.parse(fileContent);
+      }
+    } catch (e) {
+      console.error("Failed to read user database:", e);
+    }
+    return {};
+  };
+
+  const writeDB = (data: any) => {
+    try {
+      fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
+    } catch (e) {
+      console.error("Failed to write to user database:", e);
+    }
+  };
+
+  // Login or register user with cloud-sync capability
+  app.post("/api/auth/login", (req, res) => {
+    try {
+      const { email, password, fullName, currentChats } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ success: false, error: "Email and password are required." });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const db = readDB();
+
+      // If user does not exist, create profile (first login)
+      if (!db[normalizedEmail]) {
+        console.info(`[Nexa Server] Registering first-time login for user: ${normalizedEmail}`);
+        
+        // Save current device chats if any exist, ensuring they persist
+        const initialChats = Array.isArray(currentChats) && currentChats.length > 0 
+          ? currentChats 
+          : [];
+
+        db[normalizedEmail] = {
+          email: normalizedEmail,
+          fullName: fullName?.trim() || email.split("@")[0],
+          password: password,
+          chats: initialChats,
+          createdAt: new Date().toISOString()
+        };
+
+        writeDB(db);
+
+        return res.status(200).json({
+          success: true,
+          message: "Registration successful! Welcome to Nexa.",
+          user: {
+            email: normalizedEmail,
+            fullName: db[normalizedEmail].fullName,
+            isGuest: false,
+            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${db[normalizedEmail].fullName}`,
+            preferences: {
+              primaryLanguage: "English",
+              rememberPersonalization: true,
+              personalizationContext: ""
+            }
+          },
+          chats: initialChats
+        });
+      }
+
+      // User exists - verify password
+      const userRecord = db[normalizedEmail];
+      if (userRecord.password !== password) {
+        return res.status(401).json({ success: false, error: "Incorrect password for this email account. Please check your credentials." });
+      }
+
+      console.info(`[Nexa Server] Authenticated user: ${normalizedEmail}`);
+      
+      const responseUser = {
+        email: normalizedEmail,
+        fullName: userRecord.fullName || normalizedEmail.split("@")[0],
+        isGuest: false,
+        avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${userRecord.fullName || normalizedEmail}`,
+        preferences: {
+          primaryLanguage: "English",
+          rememberPersonalization: true,
+          personalizationContext: ""
+        }
+      };
+
+      return res.status(200).json({
+        success: true,
+        message: "Successfully synchronized with Cloud!",
+        user: responseUser,
+        chats: userRecord.chats || []
+      });
+
+    } catch (error: any) {
+      console.error("Authentication error:", error);
+      return res.status(500).json({ success: false, error: error.message || "Authentication error." });
+    }
+  });
+
+  // Client-to-Server syncing of chat sessions
+  app.post("/api/auth/sync", (req, res) => {
+    try {
+      const { email, chats } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ success: false, error: "Email is required for synchronization." });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const db = readDB();
+
+      if (!db[normalizedEmail]) {
+        return res.status(404).json({ success: false, error: "User profile not found in cloud." });
+      }
+
+      db[normalizedEmail].chats = Array.isArray(chats) ? chats : [];
+      writeDB(db);
+
+      console.info(`[Nexa Server] Synced ${db[normalizedEmail].chats.length} chats for: ${normalizedEmail}`);
+      return res.status(200).json({ success: true });
+
+    } catch (error: any) {
+      console.error("Sync error:", error);
+      return res.status(500).json({ success: false, error: error.message || "Failed to sync." });
+    }
+  });
+
   // Nexa Core Smart Chat API Gateway
   app.post("/api/chat", async (req, res) => {
     try {
@@ -234,9 +368,10 @@ async function startServer() {
         }
       });
 
-      // Select Gemini model
-      // gemini-3.5-flash is extremely powerful and fully supports grounding, thinkingLevel, and schema
-      const modelName = "gemini-3.5-flash";
+      // Select Gemini model based on message complexity to balance absolute response speed and quality
+      // Short messages use 'gemini-3.1-flash-lite' for near-instant responses. Long messages use 'gemini-3.5-flash'.
+      const isShortQuery = userPrompt.length < 150;
+      const modelName = isShortQuery ? "gemini-3.1-flash-lite" : "gemini-3.5-flash";
 
       // ----------------------------------------------------
       // CASE A: QUIZ GENERATOR MODE (Structured JSON Output)

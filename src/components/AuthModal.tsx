@@ -11,7 +11,7 @@ import { UserProfile } from "../types";
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (user: UserProfile) => void;
+  onSuccess: (user: UserProfile, cloudChats?: any[]) => void;
 }
 
 export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
@@ -28,30 +28,56 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
   if (!isOpen) return null;
 
-  const handleEmailSubmit = (e: React.FormEvent) => {
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) {
       setErrorFlag("Please input a valid email address.");
       return;
     }
+    if (!password) {
+      setErrorFlag("Please enter your password.");
+      return;
+    }
     setLoading(true);
     setErrorFlag("");
 
-    setTimeout(() => {
-      setLoading(false);
-      onSuccess({
-        email: email,
-        fullName: fullName || email.split("@")[0],
-        isGuest: false,
-        avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${fullName || email.split("@")[0]}`,
-        preferences: {
-          primaryLanguage: "English",
-          rememberPersonalization: true,
-          personalizationContext: "",
-        },
+    // Grab current guest chats to upload in case of first-time user registration
+    let currentChats: any[] = [];
+    try {
+      const cached = localStorage.getItem("nexa_sessions");
+      if (cached) {
+        currentChats = JSON.parse(cached);
+      }
+    } catch (_) {}
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password,
+          fullName: fullName || undefined,
+          currentChats
+        })
       });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        setErrorFlag(data.error || "Authentication failed. Please verify your credentials.");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(false);
+      onSuccess(data.user, data.chats);
       onClose();
-    }, 1200);
+    } catch (err: any) {
+      console.error("Auth submit fetch error:", err);
+      setErrorFlag("Connection to Nexa Auth Server could not be established. Please retry.");
+      setLoading(false);
+    }
   };
 
   const handleSendOTP = (e: React.FormEvent) => {

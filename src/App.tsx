@@ -743,6 +743,15 @@ export default function App() {
     );
 
     try {
+      const otherSessionsPayload = sessions
+        .filter((s) => s.id !== activeSessionId && s.messages && s.messages.length > 0)
+        .map((s) => ({
+          id: s.id,
+          title: s.title,
+          mode: s.mode,
+          messages: s.messages.slice(-3).map((m) => ({ role: m.role, content: m.content })),
+        }));
+
       const payload = {
         messages: feedMessages,
         mode: activeMode,
@@ -752,6 +761,7 @@ export default function App() {
         quizDifficulty: quizDifficulty,
         personalizationContext: settings.personalizationNotes,
         turboMode: settings.turboMode !== false,
+        otherSessions: otherSessionsPayload,
       };
 
       const response = await fetch("/api/chat", {
@@ -909,6 +919,15 @@ export default function App() {
     const feedMessages = updatedMsgs.slice(0, idx + 1).slice(-12);
 
     try {
+      const otherSessionsPayload = sessions
+        .filter((s) => s.id !== activeSessionId && s.messages && s.messages.length > 0)
+        .map((s) => ({
+          id: s.id,
+          title: s.title,
+          mode: s.mode,
+          messages: s.messages.slice(-3).map((m) => ({ role: m.role, content: m.content })),
+        }));
+
       const payload = {
         messages: feedMessages,
         mode: activeMode,
@@ -918,6 +937,7 @@ export default function App() {
         quizDifficulty: quizDifficulty,
         personalizationContext: settings.personalizationNotes,
         turboMode: settings.turboMode !== false,
+        otherSessions: otherSessionsPayload,
       };
 
       const response = await fetch("/api/chat", {
@@ -1172,6 +1192,15 @@ export default function App() {
       // Build previous messages stream context list (limited to last 12 messages)
       const feedMessages = [...activeSession.messages, newUserMsg].slice(-12);
 
+      const otherSessionsPayload = sessions
+        .filter((s) => s.id !== activeSessionId && s.messages && s.messages.length > 0)
+        .map((s) => ({
+          id: s.id,
+          title: s.title,
+          mode: s.mode,
+          messages: s.messages.slice(-3).map((m) => ({ role: m.role, content: m.content })),
+        }));
+
       // Call Express Fullstack proxy
       const payload = {
         messages: feedMessages,
@@ -1182,6 +1211,7 @@ export default function App() {
         quizDifficulty: quizDifficulty,
         personalizationContext: settings.personalizationNotes,
         turboMode: settings.turboMode !== false,
+        otherSessions: otherSessionsPayload,
       };
 
       const response = await fetch("/api/chat", {
@@ -1383,11 +1413,11 @@ export default function App() {
         </AnimatePresence>
 
         {/* 3. Main Stage Content */}
-        <main className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-[#0e1628] overflow-y-auto relative p-6">
+        <main className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-[#0e1628] overflow-hidden relative p-3 sm:p-6 pb-0 sm:pb-0">
           
           {/* Diagnostic Monitor Panel (Sliding overlay or toggle inline grid) */}
           {showAdmin && settings.isAdminVerified ? (
-            <div className="w-full max-w-4xl mx-auto mb-6">
+            <div className="w-full max-w-4xl mx-auto mb-4 shrink-0">
               <AdminDashboard
                 metrics={adminMetrics}
                 onRefresh={handleRefreshMetrics}
@@ -1402,10 +1432,10 @@ export default function App() {
           ) : null}
 
           {/* Chat thread feed section */}
-          <div className="flex-1 flex flex-col max-w-4xl w-full mx-auto">
+          <div className="flex-1 flex flex-col max-w-4xl w-full mx-auto overflow-hidden">
             {activeSession.messages.length === 0 ? (
               // Empty Thread Page (Curated Hero + Bentley Highlights + FAQs)
-              <div className="space-y-12 py-10 text-center animate-fadeIn" id="nexa-hero-landing-page">
+              <div className="flex-1 overflow-y-auto space-y-12 py-10 text-center animate-fadeIn scrollbar-thin" id="nexa-hero-landing-page">
                 {/* Greeting */}
                 <div className="space-y-4 flex flex-col items-center justify-center">
                   <h1 
@@ -1450,12 +1480,10 @@ export default function App() {
                   />
                 )}
 
-
-
               </div>
             ) : (
               // Message Logs list feeds
-              <div className="flex-1 pb-16">
+              <div className="flex-1 overflow-y-auto pb-4 pr-1 scrollbar-thin">
                 <MessageList
                   messages={activeSession.messages}
                   activeEngine={activeSession.selectedEngineId || "core"}
@@ -1466,15 +1494,14 @@ export default function App() {
                   onCompleteQuiz={handleCompleteQuiz}
                   userName={user.fullName}
                 />
+                {/* Scroll bottom node spacer */}
+                <div ref={messageEndRef} />
               </div>
             )}
-
-            {/* Scroll bottom node spacer */}
-            <div ref={messageEndRef} />
           </div>
 
           {/* Dynamic Active input Dock Control Bars anchored */}
-          <div className="sticky bottom-0 inset-x-0 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0" id="nexa-dock">
+          <div className="bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0" id="nexa-dock">
             
             {/* Thumbs Up Feedback Toast Slide-in from Right */}
             <AnimatePresence>

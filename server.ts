@@ -287,7 +287,8 @@ async function startServer() {
         quizTopic = "",
         quizDifficulty = "medium",
         personalizationContext = "",
-        turboMode = true
+        turboMode = true,
+        otherSessions = []
       } = req.body;
 
       if (!messages || messages.length === 0) {
@@ -310,6 +311,18 @@ async function startServer() {
 
       if (personalizationContext) {
         systemInstruction += `\nRemember this user persona/instructions: ${personalizationContext}`;
+      }
+
+      // Add related past chats link detector
+      if (otherSessions && otherSessions.length > 0) {
+        let pastChatsSummary = "\n\nCRITICAL CONTEXT - USER'S OTHER PAST CHAT SESSIONS:\n";
+        pastChatsSummary += "You have visibility of the user's other past sessions. If the user's current query or message matches or relates directly/indirectly to the topic/context of any of these past sessions, you MUST gently tell the user in a natural, organic way (e.g. at the beginning or end of your answer) that you found a related past session about that topic, naming the past session's title, and explaining how it relates to this current message. Mentioning references connects the conversation horizontally. If not related, answer the user normally without referencing past sessions.\n";
+        otherSessions.slice(0, 10).forEach((s: any) => {
+          const lastMsgs = Array.isArray(s.messages) ? s.messages.slice(-2).map((m: any) => `[${m.role}]: ${m.content}`).join(" | ").substring(0, 300) : "";
+          pastChatsSummary += `- Session ID: "${s.id}" | Session Title: "${s.title}" | Mode: "${s.mode}" | Recent Messages Preview: "${lastMsgs}"\n`;
+        });
+        pastChatsSummary += "Only mention past sessions if the current message matches or relates to a past topic. Be highly natural, supportive and human-centric.\n";
+        systemInstruction += pastChatsSummary;
       }
 
       // Configure tools - enable Google Search grounding for real-time mode, Deep Research, or Fact Checker

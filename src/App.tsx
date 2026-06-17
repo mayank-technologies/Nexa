@@ -390,6 +390,42 @@ export default function App() {
     localStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
   }, [adminMetrics]);
 
+  // Startup initialization: On opening the website, always ensure a new empty chat is active for the user
+  useEffect(() => {
+    let currentSessions = sessions;
+    const cached = localStorage.getItem("nexa_sessions");
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as ChatSession[];
+        if (parsed && parsed.length > 0) {
+          currentSessions = parsed;
+        }
+      } catch (e) {
+        console.error("Failed to parse sessions on startup", e);
+      }
+    }
+
+    const emptySession = currentSessions.find((s) => !s.messages || s.messages.length === 0);
+    if (emptySession) {
+      setActiveSessionId(emptySession.id);
+      setActiveMode(emptySession.mode || "general");
+    } else {
+      const newId = `session-${Date.now()}`;
+      const newChat: ChatSession = {
+        id: newId,
+        title: "Core Assistant Chat",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+        isPinned: false,
+        mode: "general",
+      };
+      setSessions([newChat, ...currentSessions]);
+      setActiveSessionId(newId);
+      setActiveMode("general");
+    }
+  }, []);
+
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const lastMessage = activeSession?.messages[activeSession?.messages?.length - 1];
   const lastMessageContent = lastMessage?.content;

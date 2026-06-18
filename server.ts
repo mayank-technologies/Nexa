@@ -169,7 +169,7 @@ async function startServer() {
   // Login or register user with cloud-sync capability
   app.post("/api/auth/login", (req, res) => {
     try {
-      const { email, password, fullName, currentChats } = req.body;
+      const { email, password, fullName, currentChats, isSignUp, isGoogleAuth } = req.body;
 
       if (!email || !password) {
         return res.status(400).json({ success: false, error: "Email and password are required." });
@@ -178,8 +178,18 @@ async function startServer() {
       const normalizedEmail = email.toLowerCase().trim();
       const db = readDB();
 
+      const userExists = !!db[normalizedEmail];
+
+      // If user exists and client wants to do a manual Sign Up registration, throw error
+      if (userExists && isSignUp) {
+        return res.status(400).json({
+          success: false,
+          error: "An account with this email address already exists. Please select Sign In instead."
+        });
+      }
+
       // If user does not exist, create profile (first login)
-      if (!db[normalizedEmail]) {
+      if (!userExists) {
         console.info(`[Nexa Server] Registering first-time login for user: ${normalizedEmail}`);
         
         // Save current device chats if any exist, ensuring they persist
@@ -199,7 +209,7 @@ async function startServer() {
 
         return res.status(200).json({
           success: true,
-          message: "Registration successful! Welcome to Nexa.",
+          message: isGoogleAuth ? "Google account registered! Welcome to Nexa." : "Registration successful! Welcome to Nexa.",
           user: {
             email: normalizedEmail,
             fullName: db[normalizedEmail].fullName,
@@ -215,13 +225,15 @@ async function startServer() {
         });
       }
 
-      // User exists - verify password
+      // User exists
       const userRecord = db[normalizedEmail];
-      if (userRecord.password !== password) {
+
+      // Verifying password (or bypass if using Google Auth)
+      if (!isGoogleAuth && userRecord.password !== password) {
         return res.status(401).json({ success: false, error: "Incorrect password for this email account. Please check your credentials." });
       }
 
-      console.info(`[Nexa Server] Authenticated user: ${normalizedEmail}`);
+      console.info(`[Nexa Server] Authenticated user: ${normalizedEmail}${isGoogleAuth ? ' (via Google Link)' : ''}`);
       
       const responseUser = {
         email: normalizedEmail,

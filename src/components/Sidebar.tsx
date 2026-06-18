@@ -62,6 +62,7 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
 
@@ -132,25 +133,51 @@ export function Sidebar({
           Start New {activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}
         </button>
 
-        {/* Quick Search */}
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search recent conversations..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full text-xs py-2.5 pl-9 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 focus:bg-white dark:focus:bg-slate-900 outline-none text-[#14213D] dark:text-white transition-all duration-300 ease-in-out focus:border-[#C96A3D] focus:ring-2 focus:ring-[#C96A3D]/20"
-          />
-          <Search className="absolute left-3 top-3 text-slate-400 w-3.5 h-3.5" />
-          {searchQuery && (
+        {/* Quick Search Button / Input */}
+        {!isSearchOpen ? (
+          <button
+            onClick={() => setIsSearchOpen(true)}
+            className="w-full flex items-center justify-between text-xs py-2.5 px-3.5 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40 text-slate-400 hover:text-[#C96A3D] hover:border-slate-300 dark:hover:border-slate-700/80 dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900/60 transition-all cursor-pointer shadow-3xs"
+            title="Search Recent Conversations"
+          >
+            <div className="flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-slate-400" />
+              <span>Search recent chats...</span>
+            </div>
+          </button>
+        ) : (
+          <div className="relative flex items-center gap-2 animate-fade-in-down">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                autoFocus
+                placeholder="Search conversations..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full text-xs py-2.5 pl-9 pr-12 rounded-xl border border-[#C96A3D] dark:border-[#C96A3D] bg-white dark:bg-slate-900 outline-none text-[#14213D] dark:text-white transition-all focus:ring-2 focus:ring-[#C96A3D]/20 font-medium"
+              />
+              <Search className="absolute left-3 top-3 text-[#C96A3D] w-3.5 h-3.5" />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-[10px] tracking-wide"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
             <button
-              onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 font-mono text-[10px]"
+              onClick={() => {
+                setIsSearchOpen(false);
+                setSearchQuery("");
+              }}
+              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-950/40 bg-slate-55 dark:bg-slate-900 transition-colors cursor-pointer"
+              title="Close Search"
             >
-              Clear
+              <X className="w-4 h-4" />
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Primary Scrollable Workspace Section */}

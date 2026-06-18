@@ -188,7 +188,15 @@ async function startServer() {
         });
       }
 
-      // If user does not exist, create profile (first login)
+      // If user does not exist and they are trying to do a standard Login (not sign up, not Google Auth SSO)
+      if (!userExists && !isSignUp && !isGoogleAuth) {
+        return res.status(400).json({
+          success: false,
+          error: "This account does not exist. Please click the 'Create Account' tab above to sign up first."
+        });
+      }
+
+      // If user does not exist (and they are signing up or using Google SSO which auto-signs-up), create profile
       if (!userExists) {
         console.info(`[Nexa Server] Registering first-time login for user: ${normalizedEmail}`);
         

@@ -447,22 +447,24 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             {/* Email Login/Register Form */}
             {method === "email" && (
               <form onSubmit={handleEmailSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
-                    {isSignUp ? "Full Name *" : "Full Name (Optional)"}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required={isSignUp}
-                      placeholder={isSignUp ? "Enter your name e.g. Mayank" : "e.g. Bitto Maurya"}
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
-                    />
-                    <Chrome className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
+                {isSignUp && (
+                  <div>
+                    <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
+                      Full Name *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required={isSignUp}
+                        placeholder="Enter your name e.g. Mayank"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
+                      />
+                      <Chrome className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div>
                   <label className="block text-[#14213D] dark:text-slate-300 text-xs font-bold uppercase tracking-widest mb-1.5">

@@ -117,6 +117,7 @@ export default function App() {
   const [speechSupported, setSpeechSupported] = useState(true);
   const recognitionRef = useRef<any>(null);
   const startingPromptRef = useRef("");
+  const lastWriteEmailRef = useRef<string>("");
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -242,7 +243,19 @@ export default function App() {
   });
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    const cached = localStorage.getItem("nexa_sessions");
+    let email = "guest@nexa.ai";
+    try {
+      const cachedUser = localStorage.getItem("nexa_user");
+      if (cachedUser) {
+        email = JSON.parse(cachedUser).email || "guest@nexa.ai";
+      }
+    } catch (e) {}
+
+    let cached = localStorage.getItem(`nexa_sessions_${email}`);
+    if (!cached && email === "guest@nexa.ai") {
+      cached = localStorage.getItem("nexa_sessions");
+    }
+
     if (cached) {
       try {
         const parsed = JSON.parse(cached) as ChatSession[];
@@ -268,7 +281,19 @@ export default function App() {
   });
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    const cachedActiveId = localStorage.getItem("nexa_active_session_id");
+    let email = "guest@nexa.ai";
+    try {
+      const cachedUser = localStorage.getItem("nexa_user");
+      if (cachedUser) {
+        email = JSON.parse(cachedUser).email || "guest@nexa.ai";
+      }
+    } catch (e) {}
+
+    let cachedActiveId = localStorage.getItem(`nexa_active_session_id_${email}`);
+    if (!cachedActiveId && email === "guest@nexa.ai") {
+      cachedActiveId = localStorage.getItem("nexa_active_session_id");
+    }
+
     if (cachedActiveId && sessions.some((s) => s.id === cachedActiveId)) {
       return cachedActiveId;
     }
@@ -356,9 +381,16 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem("nexa_sessions", JSON.stringify(sessions));
-    localStorage.setItem("nexa_active_session_id", activeSessionId);
-  }, [sessions, activeSessionId]);
+    if (user && user.email) {
+      // Avoid writing stale state of previous user to a newly switched user
+      if (lastWriteEmailRef.current !== user.email) {
+        lastWriteEmailRef.current = user.email;
+        return;
+      }
+      localStorage.setItem(`nexa_sessions_${user.email}`, JSON.stringify(sessions));
+      localStorage.setItem(`nexa_active_session_id_${user.email}`, activeSessionId);
+    }
+  }, [sessions, activeSessionId, user]);
 
   // Cloud backend synchronization when sessions update
   useEffect(() => {
@@ -393,7 +425,11 @@ export default function App() {
   // Startup initialization: On opening the website, always ensure a new empty chat is active for the user
   useEffect(() => {
     let currentSessions = sessions;
-    const cached = localStorage.getItem("nexa_sessions");
+    const email = user?.email || "guest@nexa.ai";
+    let cached = localStorage.getItem(`nexa_sessions_${email}`);
+    if (!cached && email === "guest@nexa.ai") {
+      cached = localStorage.getItem("nexa_sessions");
+    }
     if (cached) {
       try {
         const parsed = JSON.parse(cached) as ChatSession[];
@@ -562,6 +598,52 @@ export default function App() {
         personalizationContext: "",
       },
     });
+
+    // Restore guest sessions if any exist in user-specific or general cache
+    let cached = localStorage.getItem("nexa_sessions_guest@nexa.ai");
+    if (!cached) {
+      cached = localStorage.getItem("nexa_sessions");
+    }
+
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as ChatSession[];
+        if (parsed && parsed.length > 0) {
+          setSessions(parsed);
+          const cachedActiveId = localStorage.getItem("nexa_active_session_id_guest@nexa.ai") || localStorage.getItem("nexa_active_session_id");
+          if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
+            setActiveSessionId(cachedActiveId);
+            const activeSessionObj = parsed.find((s) => s.id === cachedActiveId);
+            if (activeSessionObj && activeSessionObj.mode) {
+              setActiveMode(activeSessionObj.mode);
+            }
+          } else {
+            setActiveSessionId(parsed[0].id);
+            if (parsed[0].mode) {
+              setActiveMode(parsed[0].mode);
+            }
+          }
+          return;
+        }
+      } catch (e) {
+        console.error("Failed to restore guest chats on logout", e);
+      }
+    }
+
+    // Default to clean board
+    const newSessionId = `session-${Date.now()}`;
+    const newRootSession: ChatSession = {
+      id: newSessionId,
+      title: "Start an Intelligent Chat",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+      isPinned: false,
+      mode: "general",
+    };
+    setSessions([newRootSession]);
+    setActiveSessionId(newSessionId);
+    setActiveMode("general");
   };
 
   // Chat Session management controls
@@ -656,6 +738,52 @@ export default function App() {
     if (cloudChats && cloudChats.length > 0) {
       setSessions(cloudChats);
       setActiveSessionId(cloudChats[0].id);
+      if (cloudChats[0].mode) {
+        setActiveMode(cloudChats[0].mode);
+      }
+    } else {
+      // Try to load any previously stored chats for this logged-in email from local storage
+      const userEmail = authenticatedUser.email;
+      const cached = localStorage.getItem(`nexa_sessions_${userEmail}`);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as ChatSession[];
+          if (parsed && parsed.length > 0) {
+            setSessions(parsed);
+            const cachedActiveId = localStorage.getItem(`nexa_active_session_id_${userEmail}`);
+            if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
+              setActiveSessionId(cachedActiveId);
+              const activeSessionObj = parsed.find((s) => s.id === cachedActiveId);
+              if (activeSessionObj && activeSessionObj.mode) {
+                setActiveMode(activeSessionObj.mode);
+              }
+            } else {
+              setActiveSessionId(parsed[0].id);
+              if (parsed[0].mode) {
+                setActiveMode(parsed[0].mode);
+              }
+            }
+            return;
+          }
+        } catch (e) {
+          console.error("Failed to restore chats on login key", e);
+        }
+      }
+
+      // Clear sessions back to a clean state if the newly logged in / signed up user has no saved cloud sessions
+      const newSessionId = `session-${Date.now()}`;
+      const newRootSession: ChatSession = {
+        id: newSessionId,
+        title: "Start an Intelligent Chat",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+        isPinned: false,
+        mode: "general",
+      };
+      setSessions([newRootSession]);
+      setActiveSessionId(newSessionId);
+      setActiveMode("general");
     }
   };
 

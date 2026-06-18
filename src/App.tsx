@@ -1304,7 +1304,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 dark:bg-[#0c1222] transition-colors duration-300 overflow-hidden text-slate-700 dark:text-slate-200">
+    <div className="flex flex-col h-screen h-[100dvh] bg-slate-50 dark:bg-[#0c1222] transition-colors duration-300 overflow-hidden text-slate-700 dark:text-slate-200">
       
       {/* 1. Header Navbar */}
       <Navbar
@@ -1501,7 +1501,7 @@ export default function App() {
           </div>
 
           {/* Dynamic Active input Dock Control Bars anchored */}
-          <div className="bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0" id="nexa-dock">
+          <div className="relative z-40 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0" id="nexa-dock">
             
             {/* Thumbs Up Feedback Toast Slide-in from Right */}
             <AnimatePresence>

@@ -26,6 +26,7 @@ import {
   ThumbsDown,
   Volume2,
   VolumeX,
+  Trash2,
 } from "lucide-react";
 import { Message, GroundingSource, NexaEngineId } from "../types";
 import { EngineBadge } from "./EngineBadge";
@@ -37,7 +38,7 @@ interface MessageListProps {
   messages: Message[];
   activeEngine: string;
   onAction: (
-    action: "copy" | "share" | "bookmark" | "regenerate" | "translate" | "export",
+    action: "copy" | "share" | "bookmark" | "regenerate" | "translate" | "export" | "delete",
     msgId: string
   ) => void;
   onEditPrompt: (msgId: string, newContent: string) => void;
@@ -180,14 +181,13 @@ export function MessageList({
           return (
             <motion.div
               key={msg.id}
-              initial={isModel ? { opacity: 0, y: 22, scale: 0.98 } : { opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 25, scale: 0.99 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.98 }}
-              transition={
-                isModel
-                  ? { type: "spring", stiffness: 100, damping: 15, mass: 0.9 }
-                  : { duration: 0.25, ease: "easeOut" }
-              }
+              exit={{ opacity: 0, y: -12, scale: 0.99 }}
+              transition={{
+                duration: 0.45,
+                ease: [0.16, 1, 0.3, 1] // Apple/Linear-style sleek easeOutQuint transition
+              }}
               className={
                 isModel
                   ? "flex flex-col gap-2 py-5 border-b border-slate-100/50 dark:border-slate-800/30 transition-all duration-300 relative w-full last:border-b-0 self-start text-left"
@@ -547,6 +547,20 @@ export function MessageList({
                               <RefreshCw className="w-3.5 h-3.5" />
                               <span>Regenerate</span>
                             </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (confirm("Kyu aap is message ko remove karna chahte hain?")) {
+                                  onAction("delete", msg.id);
+                                }
+                                setShowMoreActionsId(null);
+                              }}
+                              className="flex items-center gap-2 px-2.5 py-1.5 w-full hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-xl text-rose-600 dark:text-rose-450 hover:text-rose-700 dark:hover:text-rose-400 cursor-pointer text-left font-medium transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                              <span>Remove</span>
+                            </button>
                           </motion.div>
                         </>
                       )}
@@ -592,6 +606,19 @@ export function MessageList({
                   >
                     <Edit2 className="w-3 h-3" />
                     <span>Edit</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (confirm("Kya aap is prompt ko remove karna chahte hain?")) {
+                        onAction("delete", msg.id);
+                      }
+                    }}
+                    className="flex items-center gap-1 hover:text-rose-500 text-slate-400 cursor-pointer transition-colors px-2 py-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/20 font-bold"
+                    title="Remove Message"
+                  >
+                    <Trash2 className="w-3 h-3 text-rose-500/80" />
+                    <span>Remove</span>
                   </button>
                 </div>
               )

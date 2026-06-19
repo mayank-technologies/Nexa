@@ -995,6 +995,19 @@ export default function App() {
       // Form submit will take this content
     } else if (action === "regenerate") {
       handleRegenerateMessage(msgId);
+    } else if (action === "delete") {
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id === activeSessionId) {
+            return {
+              ...s,
+              messages: s.messages.filter((m) => m.id !== msgId),
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return s;
+        })
+      );
     }
   };
 

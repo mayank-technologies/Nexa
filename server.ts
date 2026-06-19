@@ -119,7 +119,7 @@ function routeTask(
   }
 
   // 3. Language Engine routing (translate, grammar, detection)
-  const langKeywords = ["translate", "grammar", "pronounce", "spelling", "language", "multilingual", "detect language", "hindi", "gujarati", "tamil", "malayalam", "spanish", "french", "german"];
+  const langKeywords = ["translate", "translation", "pronounce", "pronunciation", "spelling", "grammar correction", "multilingual assist", "detect language", "how to say", "meaning of"];
   if (langKeywords.some((kw) => lowercasePrompt.includes(kw))) {
     return "language";
   }
@@ -327,7 +327,7 @@ async function startServer() {
       const ai = getGeminiClient();
 
       // Setup System Instructions and configs depending on engine and mode
-      let systemInstruction = "You are Nexa Core - an intelligent, helpful, highly premium, trustworthy AI chatbot designed with ultimate professional craftsmanship. You express answers in beautiful markdown with rich structure. Do not output any loading bars, neon effects or system-internal trace lines. IMPORTANT: If anyone asks you who created, built, or made you, or who is your founder, always respond saying that you were created by Mayank, the founder of Mayank Technologies.";
+      let systemInstruction = "You are Nexa Core - an intelligent, helpful, highly premium, trustworthy AI chatbot designed with ultimate professional craftsmanship. You express answers in beautiful markdown with rich structure. Do not output any loading bars, neon effects or system-internal trace lines. IMPORTANT: ONLY if the user explicitly asks about who created you, built you, made you, or who your founder is, should you respond that you were created by Mayank, the founder of Mayank Technologies. NEVER volunteer this information or mention Mayank Technologies or your creator unless directly and explicitly asked about it first. CRITICAL: Always respond/reply to the user in the EXACT same language, dialect, or conversational slang that the user used to write their message (e.g., if the user asks in Hindi, Hinglish, Gujarati, Haryanvi, Spanish, etc., you MUST reply in that exact same tongue and tone).";
 
       if (personalizationContext) {
         systemInstruction += `\nRemember this user persona/instructions: ${personalizationContext}`;
@@ -617,6 +617,11 @@ async function startServer() {
       }
 
       // Call standard generateContent
+      if (systemInstruction) {
+        systemInstruction += "\nAlways use suitable and warm emojis throughout your response to make it look highly expressive, welcoming, interactive, and beautifully designed. Place relevant emojis at key moments, headers, lists, and inside paragraphs where appropriate.";
+        systemInstruction += "\nCRITICAL LANGUAGE DIRECTIVE: Always detect and respond in the EXACT language, dialect, or conversational slang that the user has used in their last message. If the user writes in English, reply in English. If the user writes in Hinglish (Hindi written in Latin script, e.g. 'nexa ab bhi hindi mai...', 'kaise ho', 'kya chalra hai', 'theek h'), you MUST write your entire response inside standard Hinglish (Latin alphabets) with similar colloquial slang. If they use pure Devnagari Hindi (हिन्दी), reply in pure Devnagari Hindi. Never auto-translate or respond in a different language/script combination than what the user used. Keep consistency with the user's chosen script and tongue.";
+      }
+
       const result = await generateContentWithRetry({
         initialModel: modelName,
         contents: contents,

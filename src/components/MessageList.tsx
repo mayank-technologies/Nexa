@@ -27,6 +27,8 @@ import {
   Volume2,
   VolumeX,
   Trash2,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { Message, GroundingSource, NexaEngineId } from "../types";
 import { EngineBadge } from "./EngineBadge";
@@ -46,6 +48,8 @@ interface MessageListProps {
   isLoading?: boolean;
   onCompleteQuiz?: (score: number, total: number) => void;
   userName?: string;
+  isFocusMode?: boolean;
+  onToggleFocusMode?: () => void;
 }
 
 export function MessageList({
@@ -57,6 +61,8 @@ export function MessageList({
   isLoading,
   onCompleteQuiz,
   userName,
+  isFocusMode,
+  onToggleFocusMode,
 }: MessageListProps) {
   const [copyingId, setCopyingId] = useState<string | null>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
@@ -173,6 +179,33 @@ export function MessageList({
 
   return (
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto py-4 select-text" id="nexa-message-list">
+      {onToggleFocusMode && (
+        <div className="sticky top-0 z-50 flex justify-between items-center bg-white/80 dark:bg-[#0e1628]/85 backdrop-blur-md rounded-2xl p-3 border border-slate-200/50 dark:border-slate-800/40 shadow-xs mb-2 transition-all">
+          <div className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-full ${isFocusMode ? 'bg-[#C96A3D] animate-pulse shadow-[0_0_8px_#C96A3D]' : 'bg-slate-400 dark:bg-slate-500'}`} />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-305">
+              {isFocusMode ? "Focus Mode: Distraction-Free View" : "Focus Mode"}
+            </span>
+          </div>
+          <button
+            onClick={onToggleFocusMode}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-250/60 dark:border-slate-800 shadow-xs cursor-pointer active:scale-95 transition-all"
+          >
+            {isFocusMode ? (
+              <>
+                <Minimize2 className="w-3.5 h-3.5 text-[#C96A3D]" />
+                <span>Exit Focus</span>
+              </>
+            ) : (
+              <>
+                <Maximize2 className="w-3.5 h-3.5 text-slate-500" />
+                <span>Enter Focus</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
       <AnimatePresence initial={false}>
         {messages.map((msg) => {
           const isModel = msg.role === "assistant";

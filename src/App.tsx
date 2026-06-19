@@ -308,6 +308,7 @@ export default function App() {
   const [writingStyle, setWritingStyle] = useState<"formal" | "casual" | "academic" | "professional">("casual");
   const [quizTopic, setQuizTopic] = useState("");
   const [quizDifficulty, setQuizDifficulty] = useState<"easy" | "medium" | "hard">("medium");
+  const [isFocusMode, setIsFocusMode] = useState(false);
 
   // Admin Dashboard Monitoring States (Live Metrics)
   const [adminMetrics, setAdminMetrics] = useState<AdminMetrics>(() => {
@@ -1484,7 +1485,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* 2. Side Panel Desktop (Stable always visible on larger viewports) */}
-        <div className="hidden md:flex md:w-80 h-full flex-col border-r border-slate-100 dark:border-slate-800 shrink-0 select-none overflow-hidden bg-white dark:bg-[#0c1222]">
+        <div className={`hidden md:flex md:w-80 h-full flex-col border-r border-slate-100 dark:border-slate-800 shrink-0 select-none overflow-hidden bg-white dark:bg-[#0c1222] ${isFocusMode ? "md:!hidden" : ""}`}>
           <Sidebar
             sessions={sessions}
             activeSessionId={activeSessionId}
@@ -1634,6 +1635,8 @@ export default function App() {
                   isLoading={isLoading}
                   onCompleteQuiz={handleCompleteQuiz}
                   userName={user.fullName}
+                  isFocusMode={isFocusMode}
+                  onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
                 />
                 {/* Scroll bottom node spacer */}
                 <div ref={messageEndRef} />
@@ -1642,7 +1645,7 @@ export default function App() {
           </div>
 
           {/* Dynamic Active input Dock Control Bars anchored */}
-          <div className="relative z-40 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0" id="nexa-dock">
+          <div className={`relative z-40 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0 ${isFocusMode ? "hidden" : ""}`} id="nexa-dock">
             
             {/* Thumbs Up Feedback Toast Slide-in from Right */}
             <AnimatePresence>

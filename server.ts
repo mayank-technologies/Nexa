@@ -333,15 +333,14 @@ async function startServer() {
         systemInstruction += `\nRemember this user persona/instructions: ${personalizationContext}`;
       }
 
-      // Add related past chats link detector
+      // Add related past chats link detector (highly optimized for minimal token overhead and fast speeds)
       if (otherSessions && otherSessions.length > 0) {
         let pastChatsSummary = "\n\nCRITICAL CONTEXT - USER'S OTHER PAST CHAT SESSIONS:\n";
-        pastChatsSummary += "You have visibility of the user's other past sessions. If the user's current query or message matches or relates directly/indirectly to the topic/context of any of these past sessions, you MUST gently tell the user in a natural, organic way (e.g. at the beginning or end of your answer) that you found a related past session about that topic, naming the past session's title, and explaining how it relates to this current message. Mentioning references connects the conversation horizontally. If not related, answer the user normally without referencing past sessions.\n";
-        otherSessions.slice(0, 10).forEach((s: any) => {
-          const lastMsgs = Array.isArray(s.messages) ? s.messages.slice(-2).map((m: any) => `[${m.role}]: ${m.content}`).join(" | ").substring(0, 300) : "";
-          pastChatsSummary += `- Session ID: "${s.id}" | Session Title: "${s.title}" | Mode: "${s.mode}" | Recent Messages Preview: "${lastMsgs}"\n`;
+        pastChatsSummary += "You have visibility of user's other past sessions. Gently mention relative connections organically.\n";
+        otherSessions.slice(0, 3).forEach((s: any) => {
+          const lastMsgs = Array.isArray(s.messages) ? s.messages.slice(-1).map((m: any) => `[${m.role}]: ${m.content}`).join(" | ").substring(0, 80) : "";
+          pastChatsSummary += `- Session ID: "${s.id}" | Title: "${s.title}" | Mode: "${s.mode}" | Preview: "${lastMsgs}"\n`;
         });
-        pastChatsSummary += "Only mention past sessions if the current message matches or relates to a past topic. Be highly natural, supportive and human-centric.\n";
         systemInstruction += pastChatsSummary;
       }
 
@@ -401,10 +400,10 @@ async function startServer() {
         }
       });
 
-      // Select Gemini model based on message complexity to balance absolute response speed and quality
-      // Short messages use 'gemini-3.1-flash-lite' for near-instant responses. Long messages use 'gemini-3.5-flash'.
-      const isShortQuery = userPrompt.length < 150;
-      const modelName = isShortQuery ? "gemini-3.1-flash-lite" : "gemini-3.5-flash";
+      // Choose speed-optimized model: gemini-3.1-flash-lite resolves under 1 second for standard chats
+      const modelName = (mode === "research" || mode === "factcheck" || mode === "quiz")
+        ? "gemini-3.5-flash"
+        : "gemini-3.1-flash-lite";
 
       // ----------------------------------------------------
       // CASE A: QUIZ GENERATOR MODE (Structured JSON Output)

@@ -251,8 +251,10 @@ export default async function handler(req: Request) {
       }
     });
 
-    // Select Gemini model
-    const modelName = "gemini-3.5-flash";
+    // Select speed-optimized Gemini model: gemini-3.1-flash-lite for instant chats
+    const modelName = (mode === "research" || mode === "factcheck" || mode === "quiz")
+      ? "gemini-3.5-flash"
+      : "gemini-3.1-flash-lite";
 
     // ----------------------------------------------------
     // CASE A: QUIZ GENERATOR MODE (Structured JSON Output)

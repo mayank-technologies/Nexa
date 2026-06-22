@@ -167,7 +167,12 @@ export default function App() {
         };
 
         rec.onerror = (e: any) => {
-          console.error("Web Speech API Error:", e.rawError || e.error || e);
+          const errorType = e.rawError || e.error || e;
+          if (errorType === "no-speech") {
+            console.log("Web Speech API status: no-speech (quiet timeout).");
+          } else {
+            console.warn("Web Speech API Error:", errorType);
+          }
           setIsListening(false);
         };
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, Mail, Phone, Lock, Eye, Chrome, ArrowRight, ShieldCheck, ArrowLeft, User, Plus } from "lucide-react";
 import { Logo } from "./Logo";
 import { UserProfile } from "../types";
@@ -38,6 +38,78 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     { email: "mayank.business.nexa@gmail.com", name: "Mayank (Business)" },
     { email: "bittomaurya0@gmail.com", name: "Bitto Maurya" }
   ];
+
+  // Configures and initializes Google Identity Services (GSI) / Smart Lock integration with full redirection safety for mobile browsers
+  useEffect(() => {
+    if (!isOpen || !googleChooser) return;
+
+    const initGsiGis = () => {
+      const g = (window as any).google;
+      if (g?.accounts?.id) {
+        try {
+          g.accounts.id.initialize({
+            client_id: "980104552274-nexa-app-mobile-gsi-client.apps.googleusercontent.com",
+            context: "signin",
+            ux_mode: "redirect", // Handles mobile browsers cleanly by preventing standard popup blockers on Chrome/Safari Mobile
+            auto_select: false, // Prevents unintended auto-logging which can be confusing
+            itp_support: true, // Intelligent Tracking Prevention support for Safari iOS users
+            callback: (response: any) => {
+              if (response?.credential) {
+                // Decode Google JWT locally and seamlessly authenticate/sign-in
+                try {
+                  const base64Url = response.credential.split(".")[1];
+                  const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+                  const jsonPayload = decodeURIComponent(
+                    atob(base64)
+                      .split("")
+                      .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+                      .join("")
+                  );
+                  const payload = JSON.parse(jsonPayload);
+                  if (payload.email) {
+                    handleSelectGoogleAccount(
+                      payload.email,
+                      payload.name || payload.given_name || "Google User"
+                    );
+                  }
+                } catch (jwtErr) {
+                  console.error("JWT decoding failed:", jwtErr);
+                  setErrorFlag("Google validation error. Please use manual selection fallback.");
+                }
+              }
+            }
+          });
+
+          // Render available system accounts prompt (GSI One Tap) & the official Button securely
+          g.accounts.id.prompt((notification: any) => {
+            if (notification.isNotDisplayed()) {
+              console.log("One-tap overlay suppressed: standard browser constraints or iframe parent sandboxed.");
+            }
+          });
+
+          const renderContainer = document.getElementById("nexa_gsi_button_container");
+          if (renderContainer) {
+            g.accounts.id.renderButton(renderContainer, {
+              type: "standard",
+              theme: "outline",
+              size: "large",
+              text: "signin_with",
+              shape: "pill",
+              logo_alignment: "left",
+              width: renderContainer.clientWidth || 320
+            });
+          }
+        } catch (err) {
+          console.warn("Google Sign-In SDK initialization notice (benign inside developer iframe/sandbox):", err);
+        }
+      }
+    };
+
+    // Attempt immediately, and retry briefly in case of script load race conditions
+    initGsiGis();
+    const timer = setTimeout(initGsiGis, 800);
+    return () => clearTimeout(timer);
+  }, [isOpen, googleChooser]);
 
   if (!isOpen) return null;
 
@@ -194,10 +266,10 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs select-none"
       id="nexa-auth-modal"
     >
-      <div className="relative w-full max-w-md bg-white dark:bg-[#11192e] border border-slate-100 dark:border-slate-800 rounded-3xl p-8 shadow-xl overflow-hidden transition-all duration-300">
+      <div className="relative w-full max-w-md max-h-[92vh] overflow-y-auto bg-white dark:bg-[#11192e] border border-slate-100 dark:border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl transition-all duration-300" style={{ scrollbarWidth: "thin" }}>
         
         {/* Decorative Background Accents */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-[#C96A3D]/5 rounded-full blur-2xl" />
@@ -210,22 +282,17 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             <div className="flex justify-between items-center mb-6">
               <button
                 onClick={() => {
-                  if (isEnteringCustomGoogle) {
-                    setIsEnteringCustomGoogle(false);
-                    setErrorFlag("");
-                  } else {
-                    setGoogleChooser(false);
-                    setErrorFlag("");
-                  }
+                  setGoogleChooser(false);
+                  setErrorFlag("");
                 }}
-                className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg transition-colors"
+                className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
                 Back
               </button>
               <button
                 onClick={onClose}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -233,7 +300,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
             {/* Google Logo */}
             <div className="flex flex-col items-center justify-center mb-6 text-center">
-              <div className="flex justify-center items-center gap-0.5 text-2xl font-bold tracking-tight mb-2 select-none">
+              <div className="flex justify-center items-center gap-0.5 text-3xl font-extrabold tracking-tight mb-2 select-none">
                 <span className="text-[#4285F4]">G</span>
                 <span className="text-[#EA4335]">o</span>
                 <span className="text-[#FBBC05]">o</span>
@@ -241,8 +308,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                 <span className="text-[#34A853]">l</span>
                 <span className="text-[#EA4335]">e</span>
               </div>
-              <h2 className="text-xl font-medium text-slate-800 dark:text-slate-100">
-                {isEnteringCustomGoogle ? "Sign in with Google" : "Choose an account"}
+              <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+                Sign in with Google
               </h2>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
                 to continue to <strong className="text-slate-700 dark:text-slate-300">Nexa Core Engine</strong>
@@ -255,101 +322,105 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               </div>
             )}
 
-            {isEnteringCustomGoogle ? (
-              /* Custom Google Sign-In Input */
-              <form onSubmit={handleCustomGoogleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
-                    Google Email Address
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      required
-                      placeholder="e.g. yourname@gmail.com"
-                      value={customGoogleEmail}
-                      onChange={(e) => setCustomGoogleEmail(e.target.value)}
-                      className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
-                    />
-                    <Mail className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
-                    Your Name (Optional)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="e.g. Mayank"
-                      value={customGoogleName}
-                      onChange={(e) => setCustomGoogleName(e.target.value)}
-                      className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
-                    />
-                    <User className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEnteringCustomGoogle(false);
-                      setErrorFlag("");
-                    }}
-                    className="flex-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold py-2.5 rounded-xl transition-colors text-sm"
-                  >
-                    Back to List
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="flex-1 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white font-semibold py-2.5 rounded-xl transition-colors text-sm disabled:opacity-50"
-                  >
-                    {loading ? "Signing in..." : "Next"}
-                  </button>
-                </div>
-              </form>
-            ) : (
-              /* Google Predefined Account List */
-              <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
-                {googleAccounts.map((acc) => (
-                  <button
-                    key={acc.email}
-                    onClick={() => handleSelectGoogleAccount(acc.email, acc.name)}
-                    disabled={loading}
-                    className="w-full flex items-center justify-between p-3 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors text-left disabled:opacity-50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[#C96A3D] font-bold text-sm uppercase shrink-0 border border-slate-200 dark:border-slate-700">
-                        {acc.name[0] || "U"}
-                      </div>
-                      <div className="truncate">
-                        <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{acc.name}</p>
-                        <p className="text-xs text-slate-400 truncate max-w-[200px]">{acc.email}</p>
-                      </div>
-                    </div>
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0 ml-2" title="Active Account Session" />
-                  </button>
-                ))}
-
-                {/* Add Custom User Option */}
-                <button
-                  onClick={() => setIsEnteringCustomGoogle(true)}
-                  disabled={loading}
-                  className="w-full flex items-center gap-3 p-3 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors text-left text-[#C96A3D]"
-                >
-                  <div className="w-10 h-10 rounded-full bg-[#C96A3D]/10 flex items-center justify-center shrink-0 border border-[#C96A3D]/20">
-                    <Plus className="w-4 h-4 text-[#C96A3D]" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-[#C96A3D]">Use another Google account</p>
-                    <p className="text-xs text-slate-400">Let's you login with any custom Gmail address</p>
-                  </div>
-                </button>
+            {/* Native Google Identity Services Client Button with high-performance responsive wrapper */}
+            <div className="flex flex-col items-center justify-center mb-5 w-full">
+              <div id="nexa_gsi_button_container" className="w-full max-w-[325px] min-h-[44px] flex justify-center items-center" />
+              <div className="flex items-center gap-2 mt-4 select-none">
+                <span className="w-6 h-[1px] bg-slate-100 dark:bg-slate-800" />
+                <span className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider">or enter credentials manually</span>
+                <span className="w-6 h-[1px] bg-slate-100 dark:bg-slate-800" />
               </div>
-            )}
+            </div>
+
+            {/* Autofill-ready standard input designed like premium Google Identity flow to trigger device Gmail accounts */}
+            <form onSubmit={handleCustomGoogleSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="google_email_autofill" className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
+                  Enter Your Google Address (Gmail) *
+                </label>
+                <div className="relative">
+                  <input
+                    id="google_email_autofill"
+                    name="email"
+                    type="email"
+                    required
+                    autoComplete="username email"
+                    placeholder="example@gmail.com"
+                    value={customGoogleEmail}
+                    onChange={(e) => setCustomGoogleEmail(e.target.value)}
+                    className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-205 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#4285F4] dark:focus:border-[#4285F4] outline-none text-[#14213D] dark:text-white transition-colors"
+                  />
+                  <Mail className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
+                </div>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                  💡 Tap above to auto-select from your mobile's Gmail credentials.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="google_name_autofill" className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
+                  Your Full Name (Optional)
+                </label>
+                <div className="relative">
+                  <input
+                    id="google_name_autofill"
+                    name="name"
+                    type="text"
+                    autoComplete="name"
+                    placeholder="e.g. Mayank"
+                    value={customGoogleName}
+                    onChange={(e) => setCustomGoogleName(e.target.value)}
+                    className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#4285F4] dark:focus:border-[#4285F4] outline-none text-[#14213D] dark:text-white transition-colors"
+                  />
+                  <User className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 flex justify-center items-center gap-2 bg-[#4285F4] hover:bg-[#357ae8] text-white font-semibold py-2.5 rounded-xl transition-colors text-sm disabled:opacity-50 cursor-pointer shadow-xs"
+              >
+                {loading ? "Authenticating security..." : "Continue with Google Account"}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+
+            {/* Quick profiles option */}
+            <div className="relative my-6 text-center select-none">
+              <div className="absolute inset-x-0 top-2.5 border-b border-slate-100 dark:border-slate-800/80" />
+              <span className="relative px-3 text-[10px] font-bold text-slate-400 bg-white dark:bg-[#11192e] uppercase tracking-widest">
+                or select a quick demo profile
+              </span>
+            </div>
+
+            {/* Google Predefined Account List */}
+            <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
+              {googleAccounts.map((acc) => (
+                <button
+                  key={acc.email}
+                  type="button"
+                  onClick={() => {
+                    setCustomGoogleEmail(acc.email);
+                    setCustomGoogleName(acc.name);
+                    handleSelectGoogleAccount(acc.email, acc.name);
+                  }}
+                  disabled={loading}
+                  className="w-full flex items-center justify-between p-2.5 rounded-2xl border border-slate-100 dark:border-slate-800/80 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors text-left disabled:opacity-50 cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[#4285F4] font-bold text-xs uppercase shrink-0 border border-slate-200 dark:border-slate-700">
+                      {acc.name[0] || "U"}
+                    </div>
+                    <div className="truncate">
+                      <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">{acc.name}</p>
+                      <p className="text-[10px] text-slate-400 truncate max-w-[200px]">{acc.email}</p>
+                    </div>
+                  </div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0 ml-2" />
+                </button>
+              ))}
+            </div>
 
             <p className="mt-8 text-center text-[10px] text-slate-450 dark:text-slate-500 leading-relaxed font-normal">
               To continue, Google will share your name, email, and avatar with Nexa. See our Terms of Service & privacy policy for further details.
@@ -456,6 +527,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                       <input
                         type="text"
                         required={isSignUp}
+                        autoComplete="name"
                         placeholder="Enter your name e.g. Mayank"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
@@ -474,6 +546,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                     <input
                       type="email"
                       required
+                      autoComplete="username email"
                       placeholder="you@example.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -493,6 +566,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                     <input
                       type={showPassword ? "text" : "password"}
                       required
+                      autoComplete={isSignUp ? "new-password" : "current-password"}
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}

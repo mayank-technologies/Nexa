@@ -595,6 +595,188 @@ This email was sent because you joined the Nexa Premium Waitlist.
     }
   };
 
+  const sendLeaveWaitlistEmail = async (recipientEmail: string): Promise<boolean> => {
+    const subject = "You've Left the Nexa Premium Waitlist";
+    const from = process.env.SMTP_FROM || "Nexa Team <no-reply@nexa.app>";
+
+    const plainText = `Hi,
+
+You've successfully removed yourself from the Nexa Premium Waitlist.
+
+You will no longer receive Premium launch updates or early access emails.
+
+If you change your mind, you can join the waitlist again anytime from the Nexa website.
+
+Thank you for trying Nexa.
+
+— The Nexa Team`;
+
+    const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>You've Left the Nexa Premium Waitlist</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8fafc;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrapper {
+      background-color: #f8fafc;
+      width: 100%;
+      padding: 40px 10px;
+    }
+    .container {
+      max-width: 580px;
+      margin: 0 auto;
+      background-color: #ffffff;
+      border-radius: 24px;
+      border: 1px solid #e2e8f0;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    .header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      padding: 40px 30px;
+      text-align: center;
+      border-bottom: 4px solid #64748b;
+    }
+    .logo-container {
+      margin-bottom: 15px;
+    }
+    .logo-text {
+      color: #ffffff;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.05em;
+    }
+    .logo-dot {
+      color: #64748b;
+    }
+    .badge {
+      display: inline-block;
+      background-color: rgba(100, 116, 139, 0.15);
+      border: 1px solid rgba(100, 116, 139, 0.3);
+      color: #64748b;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 6px 16px;
+      border-radius: 100px;
+      margin-top: 5px;
+    }
+    .content {
+      padding: 40px 35px;
+      color: #334155;
+      line-height: 1.6;
+    }
+    .greeting {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-top: 0;
+      margin-bottom: 15px;
+    }
+    .lead-text {
+      font-size: 15px;
+      color: #475569;
+      margin-bottom: 20px;
+    }
+    .footer {
+      background-color: #f1f5f9;
+      padding: 30px;
+      text-align: center;
+      border-top: 1px solid #e2e8f0;
+    }
+    .footer-text {
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.5;
+      margin: 0;
+    }
+    .copyright {
+      margin-top: 10px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="container">
+      <div class="header">
+        <div class="logo-container">
+          <span class="logo-text">Nexa<span class="logo-dot">.</span></span>
+        </div>
+        <div class="badge">Waitlist Removed</div>
+      </div>
+      <div class="content">
+        <p class="greeting">Hi,</p>
+        <p class="lead-text">You've successfully removed yourself from the Nexa Premium Waitlist.</p>
+        <p class="lead-text">You will no longer receive Premium launch updates or early access emails.</p>
+        <p class="lead-text">If you change your mind, you can join the waitlist again anytime from the Nexa website.</p>
+        
+        <p style="margin-top: 25px; margin-bottom: 0; font-size: 14px; font-weight: 700; color: #0f172a;">Thank you for trying Nexa.</p>
+        <p style="margin-top: 5px; margin-bottom: 0; font-size: 14px; font-weight: 700; color: #C96A3D;">— The Nexa Team</p>
+      </div>
+      <div class="footer">
+        <p class="footer-text">This email was sent because you joined the Nexa Premium Waitlist.</p>
+        <p class="footer-text copyright">© Nexa. All rights reserved.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = process.env.SMTP_PORT;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+
+    if (!smtpUser || !smtpPass) {
+      console.info(`[Nexa Email Simulator] --------------------------------------------------`);
+      console.info(`[Nexa Email Simulator] SIMULATED EMAIL DELIVERED TO: ${recipientEmail}`);
+      console.info(`[Nexa Email Simulator] SUBJECT: ${subject}`);
+      console.info(`[Nexa Email Simulator] FROM: ${from}`);
+      console.info(`[Nexa Email Simulator] Plaintext fallback preview:\n${plainText}`);
+      console.info(`[Nexa Email Simulator] --------------------------------------------------`);
+      console.info(`[Nexa Email Simulator] Real SMTP host is not configured (SMTP_USER/SMTP_PASS are empty).`);
+      console.info(`[Nexa Email Simulator] Configure credentials in .env or secrets to send actual emails.`);
+      console.info(`[Nexa Email Simulator] --------------------------------------------------`);
+      return true;
+    }
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost || "smtp.gmail.com",
+        port: parseInt(smtpPort || "587"),
+        secure: smtpPort === "465",
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
+
+      const info = await transporter.sendMail({
+        from: from,
+        to: recipientEmail,
+        subject: subject,
+        text: plainText,
+        html: htmlContent,
+      });
+
+      console.info(`[Nexa Email] Leave waitlist confirmation email sent successfully to ${recipientEmail}. Message ID: ${info.messageId}`);
+      return true;
+    } catch (error: any) {
+      console.error(`[Nexa Email ERROR] Failed to deliver leave waitlist email to ${recipientEmail}:`, error);
+      return false;
+    }
+  };
+
   // Premium Waitlist Post endpoint
   app.post("/api/premium/waitlist", (req, res) => {
     try {
@@ -652,6 +834,72 @@ This email was sent because you joined the Nexa Premium Waitlist.
       });
     }
   });
+
+  // Check waitlist status endpoint
+  app.get("/api/premium/waitlist/check", (req, res) => {
+    try {
+      const { email } = req.query;
+      if (!email) {
+        return res.status(400).json({ success: false, error: "Email is required to check waitlist." });
+      }
+      const normalizedEmail = String(email).toLowerCase().trim();
+      const waitlist = readWaitlistDB();
+      const exists = waitlist.some((item: any) => item.email.toLowerCase().trim() === normalizedEmail);
+      return res.status(200).json({ success: true, registered: exists });
+    } catch (error: any) {
+      console.error("Check waitlist error:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Leave waitlist endpoint
+  app.post("/api/premium/waitlist/leave", (req, res) => {
+    try {
+      const { email } = req.body;
+
+      if (!email) {
+        return res.status(400).json({ success: false, error: "Email is required to leave the waitlist." });
+      }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const waitlist = readWaitlistDB();
+
+      // Filter out matching record
+      const initialLength = waitlist.length;
+      const filteredWaitlist = waitlist.filter(
+        (item: any) => item.email.toLowerCase().trim() !== normalizedEmail
+      );
+
+      if (filteredWaitlist.length === initialLength) {
+        return res.status(200).json({
+          success: false,
+          error: "This email was not found on the Nexa Premium waitlist."
+        });
+      }
+
+      writeWaitlistDB(filteredWaitlist);
+
+      console.info(`[Nexa Server] User left Premium waitlist: ${normalizedEmail}`);
+
+      // Send confirmation email
+      sendLeaveWaitlistEmail(normalizedEmail).catch((err) => {
+        console.error(`[Nexa Server] Error sending leave confirmation email to ${normalizedEmail}:`, err);
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "You've successfully left the Nexa Premium Waitlist."
+      });
+
+    } catch (error: any) {
+      console.error("Leave waitlist error:", error);
+      return res.status(500).json({
+        success: false,
+        error: error.message || "Failed to remove you from the waitlist. Please try again."
+      });
+    }
+  });
+
 
   // Nexa Core Smart Chat API Gateway
   app.post("/api/chat", async (req, res) => {

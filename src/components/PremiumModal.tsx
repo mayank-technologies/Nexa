@@ -44,21 +44,49 @@ interface PremiumModalProps {
 export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProps) {
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [waitlistStatus, setWaitlistStatus] = useState<"idle" | "joined" | "already_registered" | "error">("idle");
+  const [waitlistStatus, setWaitlistStatus] = useState<"idle" | "joined" | "already_registered" | "error" | "left_success">("idle");
+  const [showConfirmLeave, setShowConfirmLeave] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const modalRef = useRef<HTMLDivElement>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
 
-  // Load waitlist status from localStorage if they already signed up in this browser session
+  // Load waitlist status from localStorage and check with the server
   useEffect(() => {
     if (user?.email) {
       setEmail(user.email);
     }
-    const savedStatus = localStorage.getItem("nexa_premium_waitlist_joined");
-    if (savedStatus === "true") {
-      setWaitlistStatus("joined");
+    
+    const checkWaitlistStatus = async () => {
+      // Optimistic check first
+      const savedStatus = localStorage.getItem("nexa_premium_waitlist_joined");
+      if (savedStatus === "true") {
+        setWaitlistStatus("joined");
+      }
+      
+      if (user?.email) {
+        try {
+          const res = await fetch(`/api/premium/waitlist/check?email=${encodeURIComponent(user.email)}`);
+          const data = await res.json();
+          if (data.success) {
+            if (data.registered) {
+              setWaitlistStatus("joined");
+              localStorage.setItem("nexa_premium_waitlist_joined", "true");
+            } else if (savedStatus === "true") {
+              // Server says not registered, so sync local state back
+              setWaitlistStatus("idle");
+              localStorage.removeItem("nexa_premium_waitlist_joined");
+            }
+          }
+        } catch (e) {
+          console.error("Error checking waitlist status:", e);
+        }
+      }
+    };
+
+    if (isOpen) {
+      checkWaitlistStatus();
     }
-  }, [user]);
+  }, [user, isOpen]);
 
   // Handle ESC key for accessibility
   useEffect(() => {
@@ -78,6 +106,48 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  const handleLeaveWaitlist = async () => {
+    setIsSubmitting(true);
+    setErrorMessage("");
+
+    try {
+      const response = await fetch("/api/premium/waitlist/leave", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setWaitlistStatus("left_success");
+        localStorage.removeItem("nexa_premium_waitlist_joined");
+        setShowConfirmLeave(false);
+
+        // Automatically switch back to idle form after 3.5 seconds
+        setTimeout(() => {
+          setWaitlistStatus("idle");
+        }, 3500);
+      } else {
+        setErrorMessage(data.error || "Something went wrong. Please try again.");
+        setWaitlistStatus("error");
+        setShowConfirmLeave(false);
+      }
+    } catch (err: any) {
+      console.error("Leave waitlist error:", err);
+      setErrorMessage("Network error. Please check your connection and try again.");
+      setWaitlistStatus("error");
+      setShowConfirmLeave(false);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -400,23 +470,45 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                     <CheckCircle className="w-6 h-6" />
                   </div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    {waitlistStatus === "already_registered"
-                      ? "✅ You're already on the list!"
-                      : "🎉 You're officially on the waitlist!"}
+                    ✅ You're currently on the Nexa Premium Waitlist.
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
-                    {waitlistStatus === "already_registered"
-                      ? "Your email address is already registered on the Nexa Premium waitlist. We will keep you updated on progress!"
-                      : "Thank you for joining! We'll notify you as soon as Premium launches. Get ready to experience the next frontier of AI."}
+                    Your email address <strong className="text-[#C96A3D]">{email}</strong> is registered. We will notify you as soon as Nexa Premium is ready!
                   </p>
-                  <div className="pt-2">
+                  
+                  <div className="pt-2 flex flex-col gap-2.5">
                     <button
-                      disabled
-                      className="w-full py-2.5 px-4 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-xs uppercase tracking-widest border border-emerald-500/20 transition-all cursor-not-allowed select-none"
+                      onClick={onClose}
+                      className="w-full py-2.5 px-4 rounded-xl bg-[#C96A3D] hover:bg-[#b0582d] text-white font-bold text-xs uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm active:scale-98"
                     >
-                      ✅ You're on the Waitlist
+                      <span>✨</span> Stay on Waitlist
+                    </button>
+
+                    <button
+                      onClick={() => setShowConfirmLeave(true)}
+                      className="w-full py-2.5 px-4 rounded-xl border border-rose-200 dark:border-rose-900/35 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 dark:text-rose-450 font-bold text-xs uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-98"
+                    >
+                      <span>🗑</span> Leave Waitlist
                     </button>
                   </div>
+                </motion.div>
+              ) : waitlistStatus === "left_success" ? (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  key="left_success"
+                  className="space-y-4 py-4"
+                >
+                  <div className="w-12 h-12 rounded-full bg-[#C96A3D]/10 text-[#C96A3D] border border-[#C96A3D]/25 flex items-center justify-center mx-auto mb-2">
+                    <span className="text-xl">🗑</span>
+                  </div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    You've successfully left the Nexa Premium Waitlist.
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
+                    You can join again anytime.
+                  </p>
                 </motion.div>
               ) : (
                 <motion.div
@@ -470,6 +562,53 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </form>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Confirmation Dialog Overlay */}
+            <AnimatePresence>
+              {showConfirmLeave && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-40 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 rounded-3xl"
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, y: 10 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.95, y: 10 }}
+                    className="w-full max-w-sm bg-white dark:bg-[#0f172a] border border-slate-200 dark:border-slate-800 p-6 rounded-2xl shadow-xl text-center"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-rose-500/10 text-rose-500 border border-rose-500/20 flex items-center justify-center mx-auto mb-4">
+                      <X className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white mb-2">
+                      Leave Nexa Premium Waitlist?
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-6">
+                      Are you sure you want to leave the Nexa Premium Waitlist?
+                      <br />
+                      <br />
+                      You won't receive launch updates or early access notifications unless you join again.
+                    </p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowConfirmLeave(false)}
+                        className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-650 dark:text-slate-350 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleLeaveWaitlist}
+                        disabled={isSubmitting}
+                        className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex justify-center items-center gap-1.5 shadow-sm disabled:opacity-50"
+                      >
+                        {isSubmitting ? "Leaving..." : "Leave Waitlist"}
+                      </button>
+                    </div>
+                  </motion.div>
                 </motion.div>
               )}
             </AnimatePresence>

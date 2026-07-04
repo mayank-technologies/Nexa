@@ -61,6 +61,7 @@ import { StudyModeCenter } from "./components/StudyModeCenter";
 import { WritingAssistantCenter } from "./components/WritingAssistantCenter";
 import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
+import { PremiumModal } from "./components/PremiumModal";
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -81,6 +82,8 @@ export default function App() {
   const [isShaking, setIsShaking] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [showPremium, setShowPremium] = useState(false);
+  const [premiumSource, setPremiumSource] = useState<"header" | "sidebar" | "unknown">("unknown");
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
@@ -1464,6 +1467,10 @@ export default function App() {
         onLogout={handleLogout}
         showAdmin={showAdmin}
         onToggleAdmin={() => setShowAdmin(!showAdmin)}
+        onOpenPremium={() => {
+          setShowPremium(true);
+          setPremiumSource("header");
+        }}
         onLogoClick={() => {
           const emptySession = sessions.find(
             (s) => s.messages.length === 0 && s.mode === "general"
@@ -1509,6 +1516,10 @@ export default function App() {
             onOpenSettings={() => setShowSettings(true)}
             onLogout={handleLogout}
             isMobileOpen={false}
+            onOpenPremium={() => {
+              setShowPremium(true);
+              setPremiumSource("sidebar");
+            }}
           />
         </div>
 
@@ -1553,6 +1564,10 @@ export default function App() {
                   onLogout={handleLogout}
                   isMobileOpen={true}
                   onCloseMobile={() => setIsMobileSidebarOpen(false)}
+                  onOpenPremium={() => {
+                    setShowPremium(true);
+                    setPremiumSource("sidebar");
+                  }}
                 />
               </motion.div>
             </>
@@ -2012,6 +2027,14 @@ export default function App() {
             console.error(e);
           }
         }}
+      />
+
+      {/* Premium Waitlist Modal */}
+      <PremiumModal
+        isOpen={showPremium}
+        onClose={() => setShowPremium(false)}
+        user={user}
+        source={premiumSource}
       />
 
       {/* Camera Capture Modal */}

@@ -17,6 +17,7 @@ interface NavbarProps {
   onLogout: () => void;
   showAdmin: boolean;
   onToggleAdmin: () => void;
+  onOpenPremium: () => void;
   onLogoClick?: () => void;
   onLogoDoubleClick?: () => void;
   onToggleSidebar?: () => void;
@@ -32,6 +33,7 @@ export function Navbar({
   onLogout,
   showAdmin,
   onToggleAdmin,
+  onOpenPremium,
   onLogoClick,
   onLogoDoubleClick,
   onToggleSidebar,
@@ -108,6 +110,22 @@ export function Navbar({
             <Settings className="w-4 h-4 shrink-0" />
           </button>
         )}
+
+        {/* Upgrade to Premium Trigger Pill */}
+        <button
+          onClick={onOpenPremium}
+          className="relative overflow-hidden flex items-center gap-1.5 bg-gradient-to-r from-[#C96A3D] via-[#e25714] to-[#f47c36] hover:brightness-110 text-white font-extrabold py-2 px-3 sm:px-4 rounded-full text-[10.5px] sm:text-xs shadow-md hover:shadow-lg transition-all cursor-pointer hover:scale-105 active:scale-98 select-none shrink-0 animate-premium-glow"
+          title="Upgrade to Nexa Premium Waitlist"
+          id="navbar-premium-upgrade-btn"
+        >
+          {/* Inner sliding shine animation */}
+          <div className="animate-premium-shine" />
+          
+          <span className="relative z-10 flex items-center gap-1">
+            <span className="text-amber-300">✨</span>
+            <span className="tracking-tight">Upgrade to Premium</span>
+          </span>
+        </button>
 
         {/* Profile Card / Login Trigger */}
         {user.isGuest && (

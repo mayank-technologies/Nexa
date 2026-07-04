@@ -42,6 +42,7 @@ interface SidebarProps {
   onLogout?: () => void;
   isMobileOpen?: boolean;
   onCloseMobile?: () => void;
+  onOpenPremium?: () => void;
 }
 
 export function Sidebar({
@@ -60,6 +61,7 @@ export function Sidebar({
   onLogout,
   isMobileOpen,
   onCloseMobile,
+  onOpenPremium,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -292,6 +294,39 @@ export function Sidebar({
           </div>
         </div>
 
+      </div>
+
+      {/* Upgrade to Premium Sidebar Banner */}
+      <div className="px-4 pb-3 pt-1 shrink-0" id="sidebar-premium-upgrade-container">
+        <button
+          onClick={() => {
+            onOpenPremium?.();
+            onCloseMobile?.();
+          }}
+          className="relative overflow-hidden w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-[#C96A3D] via-[#e25714] to-[#f47c36] text-white rounded-2xl shadow-md cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg active:scale-98 select-none animate-premium-glow"
+          title="Upgrade to Nexa Premium"
+        >
+          {/* Inner sliding shine animation */}
+          <div className="animate-premium-shine" />
+          
+          <div className="relative z-10 flex items-center gap-2.5 text-left">
+            <div className="p-1.5 bg-white/15 rounded-xl border border-white/20 select-none shrink-0">
+              <span className="text-sm">✨</span>
+            </div>
+            <div>
+              <p className="text-[11.5px] font-black tracking-tight leading-none text-white">
+                Nexa Premium
+              </p>
+              <p className="text-[9.5px] font-semibold text-amber-200 mt-0.5 leading-none">
+                Unlock next-gen AI tools
+              </p>
+            </div>
+          </div>
+          
+          <div className="relative z-10 shrink-0 select-none text-[10px] font-extrabold bg-white/15 border border-white/20 rounded-lg px-2 py-1 uppercase tracking-wider">
+            Join
+          </div>
+        </button>
       </div>
 
       {/* Guest Mode Conversion Panel Warning footer */}

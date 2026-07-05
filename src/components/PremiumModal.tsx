@@ -562,6 +562,15 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </form>
+
+                  <div className="mt-4 p-3 rounded-xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
+                    <p className="font-semibold text-slate-700 dark:text-slate-350 flex items-center gap-1">
+                      <span>📧</span> Real Email Delivery Notice:
+                    </p>
+                    <p className="leading-normal">
+                      Nexa delivers real Gmail messages only if you configure a 16-character Google <strong className="text-[#C96A3D]">App Password</strong> under <strong>SMTP_PASS</strong> in your <strong>Secrets</strong> settings. Your regular Gmail account password will be blocked by Google security.
+                    </p>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

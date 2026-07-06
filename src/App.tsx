@@ -217,27 +217,36 @@ export default function App() {
 
   // Core App states load persistent or set default
   const [user, setUser] = useState<UserProfile>(() => {
-    const cached = localStorage.getItem("nexa_user");
-    return cached
-      ? JSON.parse(cached)
-      : {
-          email: "guest@nexa.ai",
-          fullName: "Guest User",
-          isGuest: true,
-          avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
-          preferences: {
-            primaryLanguage: "English",
-            rememberPersonalization: true,
-            personalizationContext: "",
-          },
-        };
+    try {
+      const cached = localStorage.getItem("nexa_user");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      console.error("Failed to parse cached nexa_user", e);
+    }
+    return {
+      email: "guest@nexa.ai",
+      fullName: "Guest User",
+      isGuest: true,
+      avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
+      preferences: {
+        primaryLanguage: "English",
+        rememberPersonalization: true,
+        personalizationContext: "",
+      },
+    };
   });
 
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const cached = localStorage.getItem("nexa_settings");
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      return { isAdminVerified: false, ...parsed };
+    try {
+      const cached = localStorage.getItem("nexa_settings");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return { isAdminVerified: false, ...parsed };
+      }
+    } catch (e) {
+      console.error("Failed to parse cached nexa_settings", e);
     }
     return {
       theme: "light",
@@ -320,49 +329,54 @@ export default function App() {
 
   // Admin Dashboard Monitoring States (Live Metrics)
   const [adminMetrics, setAdminMetrics] = useState<AdminMetrics>(() => {
-    const cached = localStorage.getItem("nexa_admin_metrics");
-    return cached
-      ? JSON.parse(cached)
-      : {
-          activeUsersCount: 147,
-          totalChatsCount: sessions.length,
-          totalQueriesToday: 4209,
-          averageResponseTimeMs: 1150,
-          engineRoutingStats: {
-            core: 1845,
-            reasoning: 932,
-            vision: 410,
-            language: 680,
-            learning: 342,
-          },
-          serverLoadPct: 34,
-          memoryUsageMb: 114,
-          feedbackSubmissions: [
-            {
-              id: "feed-1",
-              userEmail: "prof.chemistry@edu.in",
-              rating: 5,
-              comment: "The Nexa Learning Engine simplified nuclear stoichiometry perfectly using ELI10 analogies! Outstanding design.",
-              timestamp: "2026-06-08T07:11:30Z",
-            },
-            {
-              id: "feed-2",
-              userEmail: "saas.founder@startup.io",
-              rating: 5,
-              comment: "Fact checker metrics confidence & reliability dials are incredibly professional.",
-              timestamp: "2026-06-08T08:22:15Z",
-            },
-          ],
-          recentErrors: [
-            {
-              id: "err-201a",
-              message: "Gemini rate quota threshold limit close warning",
-              engine: "Nexa Core Engine",
-              timestamp: "2026-06-08T06:14:02Z",
-              severity: "low" as const,
-            },
-          ],
-        };
+    try {
+      const cached = localStorage.getItem("nexa_admin_metrics");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (e) {
+      console.error("Failed to parse cached nexa_admin_metrics", e);
+    }
+    return {
+      activeUsersCount: 147,
+      totalChatsCount: sessions.length,
+      totalQueriesToday: 4209,
+      averageResponseTimeMs: 1150,
+      engineRoutingStats: {
+        core: 1845,
+        reasoning: 932,
+        vision: 410,
+        language: 680,
+        learning: 342,
+      },
+      serverLoadPct: 34,
+      memoryUsageMb: 114,
+      feedbackSubmissions: [
+        {
+          id: "feed-1",
+          userEmail: "prof.chemistry@edu.in",
+          rating: 5,
+          comment: "The Nexa Learning Engine simplified nuclear stoichiometry perfectly using ELI10 analogies! Outstanding design.",
+          timestamp: "2026-06-08T07:11:30Z",
+        },
+        {
+          id: "feed-2",
+          userEmail: "saas.founder@startup.io",
+          rating: 5,
+          comment: "Fact checker metrics confidence & reliability dials are incredibly professional.",
+          timestamp: "2026-06-08T08:22:15Z",
+        },
+      ],
+      recentErrors: [
+        {
+          id: "err-201a",
+          message: "Gemini rate quota threshold limit close warning",
+          engine: "Nexa Core Engine",
+          timestamp: "2026-06-08T06:14:02Z",
+          severity: "low" as const,
+        },
+      ],
+    };
   });
 
 

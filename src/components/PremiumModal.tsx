@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { UserProfile } from "../types";
+import { safeStorage } from "../utils/storage";
 
 interface PremiumModalProps {
   isOpen: boolean;
@@ -58,7 +59,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
     
     const checkWaitlistStatus = async () => {
       // Optimistic check first
-      const savedStatus = localStorage.getItem("nexa_premium_waitlist_joined");
+      const savedStatus = safeStorage.getItem("nexa_premium_waitlist_joined");
       if (savedStatus === "true") {
         setWaitlistStatus("joined");
       }
@@ -70,11 +71,11 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           if (data.success) {
             if (data.registered) {
               setWaitlistStatus("joined");
-              localStorage.setItem("nexa_premium_waitlist_joined", "true");
+              safeStorage.setItem("nexa_premium_waitlist_joined", "true");
             } else if (savedStatus === "true") {
               // Server says not registered, so sync local state back
               setWaitlistStatus("idle");
-              localStorage.removeItem("nexa_premium_waitlist_joined");
+              safeStorage.removeItem("nexa_premium_waitlist_joined");
             }
           }
         } catch (e) {
@@ -126,7 +127,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
 
       if (data.success) {
         setWaitlistStatus("left_success");
-        localStorage.removeItem("nexa_premium_waitlist_joined");
+        safeStorage.removeItem("nexa_premium_waitlist_joined");
         setShowConfirmLeave(false);
 
         // Automatically switch back to idle form after 3.5 seconds
@@ -180,7 +181,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           setWaitlistStatus("already_registered");
         } else {
           setWaitlistStatus("joined");
-          localStorage.setItem("nexa_premium_waitlist_joined", "true");
+          safeStorage.setItem("nexa_premium_waitlist_joined", "true");
         }
       } else {
         setErrorMessage(data.error || "Something went wrong. Please try again.");

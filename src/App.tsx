@@ -62,6 +62,7 @@ import { WritingAssistantCenter } from "./components/WritingAssistantCenter";
 import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
+import { safeStorage } from "./utils/storage";
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -69,7 +70,7 @@ export default function App() {
 
   useEffect(() => {
     if (!showSplash) {
-      const tourCompleted = localStorage.getItem("nexa-tour-completed");
+      const tourCompleted = safeStorage.getItem("nexa-tour-completed");
       if (tourCompleted !== "true") {
         setShowOnboarding(true);
       }
@@ -96,7 +97,7 @@ export default function App() {
   // Secure hardware & assets permissions state
   const [permissions, setPermissions] = useState(() => {
     try {
-      const saved = localStorage.getItem("nexa-device-permissions");
+      const saved = safeStorage.getItem("nexa-device-permissions");
       if (saved) {
         return JSON.parse(saved);
       }
@@ -218,7 +219,7 @@ export default function App() {
   // Core App states load persistent or set default
   const [user, setUser] = useState<UserProfile>(() => {
     try {
-      const cached = localStorage.getItem("nexa_user");
+      const cached = safeStorage.getItem("nexa_user");
       if (cached) {
         return JSON.parse(cached);
       }
@@ -240,7 +241,7 @@ export default function App() {
 
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
-      const cached = localStorage.getItem("nexa_settings");
+      const cached = safeStorage.getItem("nexa_settings");
       if (cached) {
         const parsed = JSON.parse(cached);
         return { isAdminVerified: false, ...parsed };
@@ -262,15 +263,15 @@ export default function App() {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     let email = "guest@nexa.ai";
     try {
-      const cachedUser = localStorage.getItem("nexa_user");
+      const cachedUser = safeStorage.getItem("nexa_user");
       if (cachedUser) {
         email = JSON.parse(cachedUser).email || "guest@nexa.ai";
       }
     } catch (e) {}
 
-    let cached = localStorage.getItem(`nexa_sessions_${email}`);
+    let cached = safeStorage.getItem(`nexa_sessions_${email}`);
     if (!cached && email === "guest@nexa.ai") {
-      cached = localStorage.getItem("nexa_sessions");
+      cached = safeStorage.getItem("nexa_sessions");
     }
 
     if (cached) {
@@ -300,15 +301,15 @@ export default function App() {
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     let email = "guest@nexa.ai";
     try {
-      const cachedUser = localStorage.getItem("nexa_user");
+      const cachedUser = safeStorage.getItem("nexa_user");
       if (cachedUser) {
         email = JSON.parse(cachedUser).email || "guest@nexa.ai";
       }
     } catch (e) {}
 
-    let cachedActiveId = localStorage.getItem(`nexa_active_session_id_${email}`);
+    let cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${email}`);
     if (!cachedActiveId && email === "guest@nexa.ai") {
-      cachedActiveId = localStorage.getItem("nexa_active_session_id");
+      cachedActiveId = safeStorage.getItem("nexa_active_session_id");
     }
 
     if (cachedActiveId && sessions.some((s) => s.id === cachedActiveId)) {
@@ -330,7 +331,7 @@ export default function App() {
   // Admin Dashboard Monitoring States (Live Metrics)
   const [adminMetrics, setAdminMetrics] = useState<AdminMetrics>(() => {
     try {
-      const cached = localStorage.getItem("nexa_admin_metrics");
+      const cached = safeStorage.getItem("nexa_admin_metrics");
       if (cached) {
         return JSON.parse(cached);
       }
@@ -396,11 +397,11 @@ export default function App() {
 
   // Synchronize App States to Cache LocalStorage
   useEffect(() => {
-    localStorage.setItem("nexa_user", JSON.stringify(user));
+    safeStorage.setItem("nexa_user", JSON.stringify(user));
   }, [user]);
 
   useEffect(() => {
-    localStorage.setItem("nexa_settings", JSON.stringify(settings));
+    safeStorage.setItem("nexa_settings", JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
@@ -410,8 +411,8 @@ export default function App() {
         lastWriteEmailRef.current = user.email;
         return;
       }
-      localStorage.setItem(`nexa_sessions_${user.email}`, JSON.stringify(sessions));
-      localStorage.setItem(`nexa_active_session_id_${user.email}`, activeSessionId);
+      safeStorage.setItem(`nexa_sessions_${user.email}`, JSON.stringify(sessions));
+      safeStorage.setItem(`nexa_active_session_id_${user.email}`, activeSessionId);
     }
   }, [sessions, activeSessionId, user]);
 
@@ -442,16 +443,16 @@ export default function App() {
   }, [sessions, user]);
 
   useEffect(() => {
-    localStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
+    safeStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
   }, [adminMetrics]);
 
   // Startup initialization: On opening the website, always ensure a new empty chat is active for the user
   useEffect(() => {
     let currentSessions = sessions;
     const email = user?.email || "guest@nexa.ai";
-    let cached = localStorage.getItem(`nexa_sessions_${email}`);
+    let cached = safeStorage.getItem(`nexa_sessions_${email}`);
     if (!cached && email === "guest@nexa.ai") {
-      cached = localStorage.getItem("nexa_sessions");
+      cached = safeStorage.getItem("nexa_sessions");
     }
     if (cached) {
       try {
@@ -623,9 +624,9 @@ export default function App() {
     });
 
     // Restore guest sessions if any exist in user-specific or general cache
-    let cached = localStorage.getItem("nexa_sessions_guest@nexa.ai");
+    let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai");
     if (!cached) {
-      cached = localStorage.getItem("nexa_sessions");
+      cached = safeStorage.getItem("nexa_sessions");
     }
 
     if (cached) {
@@ -633,7 +634,7 @@ export default function App() {
         const parsed = JSON.parse(cached) as ChatSession[];
         if (parsed && parsed.length > 0) {
           setSessions(parsed);
-          const cachedActiveId = localStorage.getItem("nexa_active_session_id_guest@nexa.ai") || localStorage.getItem("nexa_active_session_id");
+          const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
           if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
             setActiveSessionId(cachedActiveId);
             const activeSessionObj = parsed.find((s) => s.id === cachedActiveId);
@@ -767,13 +768,13 @@ export default function App() {
     } else {
       // Try to load any previously stored chats for this logged-in email from local storage
       const userEmail = authenticatedUser.email;
-      const cached = localStorage.getItem(`nexa_sessions_${userEmail}`);
+      const cached = safeStorage.getItem(`nexa_sessions_${userEmail}`);
       if (cached) {
         try {
           const parsed = JSON.parse(cached) as ChatSession[];
           if (parsed && parsed.length > 0) {
             setSessions(parsed);
-            const cachedActiveId = localStorage.getItem(`nexa_active_session_id_${userEmail}`);
+            const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${userEmail}`);
             if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
               setActiveSessionId(cachedActiveId);
               const activeSessionObj = parsed.find((s) => s.id === cachedActiveId);
@@ -1263,11 +1264,7 @@ export default function App() {
 
   const handleGrantComplete = (grantedStates: typeof permissions) => {
     setPermissions(grantedStates);
-    try {
-      localStorage.setItem("nexa-device-permissions", JSON.stringify(grantedStates));
-    } catch (e) {
-      console.error(e);
-    }
+    safeStorage.setItem("nexa-device-permissions", JSON.stringify(grantedStates));
     setShowPermissionsModal(false);
 
     // Dynamic resolution metrics
@@ -2035,11 +2032,7 @@ export default function App() {
         permissions={permissions}
         onUpdatePermissions={(newPerms) => {
           setPermissions(newPerms);
-          try {
-            localStorage.setItem("nexa-device-permissions", JSON.stringify(newPerms));
-          } catch (e) {
-            console.error(e);
-          }
+          safeStorage.setItem("nexa-device-permissions", JSON.stringify(newPerms));
         }}
       />
 

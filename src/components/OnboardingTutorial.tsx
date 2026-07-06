@@ -5,6 +5,7 @@
 
 import { useEffect, useState, ReactNode } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { safeStorage } from "../utils/storage";
 import {
   Sparkles,
   ArrowRight,
@@ -179,7 +180,7 @@ export function OnboardingTutorial({
         "z-[60]"
       );
     });
-    localStorage.setItem("nexa-tour-completed", "true");
+    safeStorage.setItem("nexa-tour-completed", "true");
     onComplete();
   };
 

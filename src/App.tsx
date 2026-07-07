@@ -538,10 +538,12 @@ export default function App() {
   }, []);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
-  const lastMessage = activeSession?.messages[activeSession?.messages?.length - 1];
+  const lastMessage = activeSession && Array.isArray(activeSession.messages) && activeSession.messages.length > 0
+    ? activeSession.messages[activeSession.messages.length - 1]
+    : undefined;
   const lastMessageContent = lastMessage?.content;
   const lastMessageRole = lastMessage?.role;
-  const messageCount = activeSession?.messages?.length || 0;
+  const messageCount = activeSession && Array.isArray(activeSession.messages) ? activeSession.messages.length : 0;
 
   // Track if user is currently near the bottom using a ref updated by IntersectionObserver
   const isNearBottomRef = useRef<boolean>(true);

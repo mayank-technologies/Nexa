@@ -34,6 +34,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import { UserProfile } from "../types";
 import { safeStorage } from "../utils/storage";
+import { playUiSound } from "../utils/sounds";
 
 interface PremiumModalProps {
   isOpen: boolean;
@@ -179,18 +180,22 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
       if (data.success) {
         if (data.status === "already_registered") {
           setWaitlistStatus("already_registered");
+          playUiSound("success");
         } else {
           setWaitlistStatus("joined");
           safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+          playUiSound("waitlist_joined");
         }
       } else {
         setErrorMessage(data.error || "Something went wrong. Please try again.");
         setWaitlistStatus("error");
+        playUiSound("error");
       }
     } catch (err: any) {
       console.error("Waitlist error:", err);
       setErrorMessage("Network error. Please check your connection and try again.");
       setWaitlistStatus("error");
+      playUiSound("error");
     } finally {
       setIsSubmitting(false);
     }

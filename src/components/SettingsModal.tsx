@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useRef } from "react";
-import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy } from "lucide-react";
+import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy, Volume2 } from "lucide-react";
 import { AppSettings, UserProfile } from "../types";
+import { playUiSound } from "../utils/sounds";
 import { Logo } from "./Logo";
 import { AchievementsProfile } from "./AchievementsProfile";
 
@@ -70,6 +71,7 @@ export function SettingsModal({
       personalizationNotes: personalization,
     });
     setSaveSuccess(true);
+    playUiSound("success");
     setTimeout(() => setSaveSuccess(false), 2000);
   };
 
@@ -334,6 +336,27 @@ export function SettingsModal({
                   type="checkbox"
                   checked={settings.turboMode !== false}
                   onChange={(e) => onUpdateSettings({ turboMode: e.target.checked })}
+                  className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
+                />
+              </div>
+
+              {/* Sound Effects Active toggle */}
+              <div className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-xl">
+                <div className="flex items-center gap-2.5">
+                  <Volume2 className="w-4 h-4 text-[#C96A3D] shrink-0" />
+                  <div>
+                    <h5 className="text-xs font-semibold text-[#14213D] dark:text-slate-200">
+                      🔊 Sound Effects
+                    </h5>
+                    <p className="text-[10px] text-slate-400 font-normal">
+                      Subtle audio responses for modern, premium feedback.
+                    </p>
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={settings.soundEffectsActive !== false}
+                  onChange={(e) => onUpdateSettings({ soundEffectsActive: e.target.checked })}
                   className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
                 />
               </div>

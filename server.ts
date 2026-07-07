@@ -319,6 +319,137 @@ async function startServer() {
     }
   };
 
+  // --- FEEDBACK DATABASE SETUP ---
+  const FEEDBACK_DB_PATH = path.join(process.cwd(), "feedback_db.json");
+
+  const readFeedbackDB = (): any[] => {
+    try {
+      if (fs.existsSync(FEEDBACK_DB_PATH)) {
+        const fileContent = fs.readFileSync(FEEDBACK_DB_PATH, "utf8");
+        return JSON.parse(fileContent);
+      }
+    } catch (e) {
+      console.error("Failed to read feedback database:", e);
+    }
+    return [];
+  };
+
+  const writeFeedbackDB = (data: any[]) => {
+    try {
+      fs.writeFileSync(FEEDBACK_DB_PATH, JSON.stringify(data, null, 2), "utf8");
+    } catch (e) {
+      console.error("Failed to write to feedback database:", e);
+    }
+  };
+
+  // Get all feedback (Admin role)
+  app.get("/api/feedback", (req, res) => {
+    try {
+      const feedbackList = readFeedbackDB();
+      return res.status(200).json({ success: true, feedback: feedbackList });
+    } catch (error: any) {
+      console.error("[Nexa Server] Error getting feedback:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Submit new feedback
+  app.post("/api/feedback", (req, res) => {
+    try {
+      const {
+        email,
+        feedbackType,
+        message,
+        screenshot,
+        browser,
+        deviceType,
+        operatingSystem,
+        userEmail,
+        userName
+      } = req.body;
+
+      if (!feedbackType || !message) {
+        return res.status(400).json({ success: false, error: "Feedback type and message are required." });
+      }
+
+      const feedbackList = readFeedbackDB();
+      const newFeedback = {
+        id: "fb_" + Math.random().toString(36).substring(2, 11),
+        userEmail: userEmail || null,
+        userName: userName || null,
+        email: email || null,
+        feedbackType,
+        message,
+        screenshotUrl: screenshot || null,
+        browser: browser || "Unknown",
+        deviceType: deviceType || "Unknown",
+        operatingSystem: operatingSystem || "Unknown",
+        status: "pending",
+        timestamp: new Date().toISOString()
+      };
+
+      feedbackList.push(newFeedback);
+      writeFeedbackDB(feedbackList);
+
+      console.info(`[Nexa Server] Feedback recorded from: ${email || userEmail || "Anonymous"} (${feedbackType})`);
+
+      return res.status(200).json({
+        success: true,
+        feedback: newFeedback,
+        message: "🎉 Thank you for your feedback! It has been successfully received."
+      });
+    } catch (error: any) {
+      console.error("[Nexa Server] Error submitting feedback:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Update feedback status (reviewed, resolved, etc.)
+  app.put("/api/feedback/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      if (!status) {
+        return res.status(400).json({ success: false, error: "Status is required." });
+      }
+
+      const feedbackList = readFeedbackDB();
+      const index = feedbackList.findIndex((item: any) => item.id === id);
+
+      if (index === -1) {
+        return res.status(404).json({ success: false, error: "Feedback not found." });
+      }
+
+      feedbackList[index].status = status;
+      writeFeedbackDB(feedbackList);
+
+      return res.status(200).json({ success: true, feedback: feedbackList[index] });
+    } catch (error: any) {
+      console.error("[Nexa Server] Error updating feedback:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Delete feedback
+  app.delete("/api/feedback/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const feedbackList = readFeedbackDB();
+      const filtered = feedbackList.filter((item: any) => item.id !== id);
+
+      if (feedbackList.length === filtered.length) {
+        return res.status(404).json({ success: false, error: "Feedback not found." });
+      }
+
+      writeFeedbackDB(filtered);
+      return res.status(200).json({ success: true, message: "Feedback deleted successfully." });
+    } catch (error: any) {
+      console.error("[Nexa Server] Error deleting feedback:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Premium Waitlist Post endpoint
   app.post("/api/premium/waitlist", (req, res) => {
     try {

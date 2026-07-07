@@ -17,14 +17,11 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
-              if (id.includes('react')) {
+              if (id.includes('react') || id.includes('motion')) {
                 return 'vendor-core';
               }
               if (id.includes('lucide-react')) {
                 return 'vendor-icons';
-              }
-              if (id.includes('motion')) {
-                return 'vendor-animations';
               }
               return 'vendor'; // all other third party dependencies
             }

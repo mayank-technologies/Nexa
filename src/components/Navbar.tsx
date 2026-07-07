@@ -18,6 +18,7 @@ interface NavbarProps {
   showAdmin: boolean;
   onToggleAdmin: () => void;
   onOpenPremium: () => void;
+  onOpenFeedback?: () => void;
   onLogoClick?: () => void;
   onLogoDoubleClick?: () => void;
   onToggleSidebar?: () => void;
@@ -34,6 +35,7 @@ export function Navbar({
   showAdmin,
   onToggleAdmin,
   onOpenPremium,
+  onOpenFeedback,
   onLogoClick,
   onLogoDoubleClick,
   onToggleSidebar,
@@ -108,6 +110,19 @@ export function Navbar({
             title="Chat Configuration"
           >
             <Settings className="w-4 h-4 shrink-0" />
+          </button>
+        )}
+
+        {/* Quick Send Feedback Button */}
+        {onOpenFeedback && (
+          <button
+            onClick={onOpenFeedback}
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl border border-slate-150 dark:border-slate-800 text-slate-500 hover:text-indigo-500 hover:border-indigo-200 dark:hover:text-indigo-400 bg-white dark:bg-slate-900 shadow-3xs hover:shadow-2xs transition-all cursor-pointer text-xs font-bold"
+            title="Send Feedback"
+            id="navbar-feedback-btn"
+          >
+            <span>💬</span>
+            <span className="hidden md:inline">Feedback</span>
           </button>
         )}
 

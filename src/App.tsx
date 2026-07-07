@@ -62,7 +62,9 @@ import { WritingAssistantCenter } from "./components/WritingAssistantCenter";
 import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
+import { FeedbackModal } from "./components/FeedbackModal";
 import { safeStorage } from "./utils/storage";
+import { soundManager, playUiSound } from "./utils/sounds";
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -76,6 +78,7 @@ export default function App() {
       }
     }
   }, [showSplash]);
+
   const [activeMode, setActiveMode] = useState<ChatSession["mode"]>("general");
   const [showAdmin, setShowAdmin] = useState(false);
   const [showAdminUnlock, setShowAdminUnlock] = useState(false);
@@ -83,6 +86,7 @@ export default function App() {
   const [isShaking, setIsShaking] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
   const [premiumSource, setPremiumSource] = useState<"header" | "sidebar" | "unknown">("unknown");
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -244,7 +248,7 @@ export default function App() {
       const cached = safeStorage.getItem("nexa_settings");
       if (cached) {
         const parsed = JSON.parse(cached);
-        return { isAdminVerified: false, ...parsed };
+        return { isAdminVerified: false, soundEffectsActive: true, ...parsed };
       }
     } catch (e) {
       console.error("Failed to parse cached nexa_settings", e);
@@ -257,8 +261,33 @@ export default function App() {
       privacySaveHistory: true,
       turboMode: true,
       isAdminVerified: false,
+      soundEffectsActive: true,
     };
   });
+
+  useEffect(() => {
+    // Sync settings toggle with native sound manager
+    soundManager.enabled = settings.soundEffectsActive !== false;
+  }, [settings.soundEffectsActive]);
+
+  useEffect(() => {
+    // Warm up the sound manager after app loads to avoid any latency or delays
+    const warmUp = () => {
+      soundManager.init();
+      // Remove events after warming up
+      window.removeEventListener("click", warmUp);
+      window.removeEventListener("keydown", warmUp);
+      window.removeEventListener("touchstart", warmUp);
+    };
+    window.addEventListener("click", warmUp);
+    window.addEventListener("keydown", warmUp);
+    window.addEventListener("touchstart", warmUp);
+    return () => {
+      window.removeEventListener("click", warmUp);
+      window.removeEventListener("keydown", warmUp);
+      window.removeEventListener("touchstart", warmUp);
+    };
+  }, []);
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     let email = "guest@nexa.ai";
@@ -397,31 +426,38 @@ export default function App() {
 
   // Synchronize App States to Cache LocalStorage
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [user update] User state updated:", user?.email, "IsGuest:", user?.isGuest);
     safeStorage.setItem("nexa_user", JSON.stringify(user));
   }, [user]);
 
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [settings update] Settings state updated:", settings);
     safeStorage.setItem("nexa_settings", JSON.stringify(settings));
   }, [settings]);
 
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [persist trigger] Persisting sessions to storage. Sessions count:", sessions.length, "Active session ID:", activeSessionId, "For user:", user?.email);
     if (user && user.email) {
       // Avoid writing stale state of previous user to a newly switched user
       if (lastWriteEmailRef.current !== user.email) {
+        console.warn("[Nexa Restorations Debug] [persist bypassed] Stale write prevented: current user email", user.email, "differs from last write email", lastWriteEmailRef.current);
         lastWriteEmailRef.current = user.email;
         return;
       }
       safeStorage.setItem(`nexa_sessions_${user.email}`, JSON.stringify(sessions));
       safeStorage.setItem(`nexa_active_session_id_${user.email}`, activeSessionId);
+      console.log("[Nexa Restorations Debug] [persist success] Successfully saved sessions & active ID to storage.");
     }
   }, [sessions, activeSessionId, user]);
 
   // Cloud backend synchronization when sessions update
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [cloud sync check] checking if sync is allowed:", user?.email, "isGuest:", user?.isGuest);
     if (user && !user.isGuest && user.email) {
       const syncWithCloud = async () => {
         try {
-          await fetch("/api/auth/sync", {
+          console.log("[Nexa Restorations Debug] [cloud sync start] syncing", sessions.length, "chats with server...");
+          const response = await fetch("/api/auth/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -429,6 +465,7 @@ export default function App() {
               chats: sessions
             })
           });
+          console.log("[Nexa Restorations Debug] [cloud sync response] server status:", response.status);
         } catch (e) {
           console.error("[Nexa Client] Sync to cloud failed:", e);
         }
@@ -438,39 +475,53 @@ export default function App() {
         syncWithCloud();
       }, 1000);
 
-      return () => clearTimeout(delayTimer);
+      return () => {
+        console.log("[Nexa Restorations Debug] [cloud sync clear] clearing delay timer.");
+        clearTimeout(delayTimer);
+      };
     }
   }, [sessions, user]);
 
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [admin metrics update] Admin metrics updated.");
     safeStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
   }, [adminMetrics]);
 
   // Startup initialization: On opening the website, always ensure a new empty chat is active for the user
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [startup init] Component MOUNTED. Triggering initialization flow.");
     let currentSessions = sessions;
     const email = user?.email || "guest@nexa.ai";
+    console.log("[Nexa Restorations Debug] [startup init] Targeted email for restoration:", email);
     let cached = safeStorage.getItem(`nexa_sessions_${email}`);
     if (!cached && email === "guest@nexa.ai") {
+      console.log("[Nexa Restorations Debug] [startup init] Falling back to general 'nexa_sessions' cache.");
       cached = safeStorage.getItem("nexa_sessions");
     }
     if (cached) {
       try {
         const parsed = JSON.parse(cached) as ChatSession[];
         if (parsed && parsed.length > 0) {
+          console.log("[Nexa Restorations Debug] [startup init] Found cached sessions count:", parsed.length);
           currentSessions = parsed;
+        } else {
+          console.log("[Nexa Restorations Debug] [startup init] Cached sessions parsed to empty list.");
         }
       } catch (e) {
         console.error("Failed to parse sessions on startup", e);
       }
+    } else {
+      console.log("[Nexa Restorations Debug] [startup init] No cached sessions found for user/guest.");
     }
 
     const emptySession = currentSessions.find((s) => !s.messages || s.messages.length === 0);
     if (emptySession) {
+      console.log("[Nexa Restorations Debug] [startup init] Found existing empty session:", emptySession.id, "mode:", emptySession.mode);
       setActiveSessionId(emptySession.id);
       setActiveMode(emptySession.mode || "general");
     } else {
       const newId = `session-${Date.now()}`;
+      console.log("[Nexa Restorations Debug] [startup init] No empty session found. Building fresh empty session:", newId);
       const newChat: ChatSession = {
         id: newId,
         title: "Core Assistant Chat",
@@ -534,7 +585,9 @@ export default function App() {
 
   // Sync mode whenever active mode changes
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [sync mode change] activeMode changed to:", activeMode, "Current active session mode:", activeSession?.mode);
     if (activeSession && activeSession.mode !== activeMode) {
+      console.log("[Nexa Restorations Debug] [sync mode change] Overwriting session mode with:", activeMode);
       setSessions((prev) =>
         prev.map((s) => (s.id === activeSession.id ? { ...s, mode: activeMode } : s))
       );
@@ -543,10 +596,18 @@ export default function App() {
 
   // Triggered when opening a session to match sidebar toggle mode
   useEffect(() => {
+    console.log("[Nexa Restorations Debug] [match sidebar] activeSessionId changed to:", activeSessionId, "Target mode:", activeSession?.mode);
     if (activeSession) {
       setActiveMode(activeSession.mode);
     }
   }, [activeSessionId]);
+
+  // Play Premium Modal Open sound
+  useEffect(() => {
+    if (showPremium) {
+      playUiSound("premium_modal_open");
+    }
+  }, [showPremium]);
 
   // Setup handler functions
   const handleToggleTheme = () => {
@@ -597,6 +658,7 @@ export default function App() {
           description: badge.description,
           pointsAwarded: badge.pointsAwarded,
         });
+        playUiSound("notification_received");
       }
 
       return {
@@ -611,6 +673,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    playUiSound("logout");
     setUser({
       email: "guest@nexa.ai",
       fullName: "Guest User",
@@ -755,6 +818,7 @@ export default function App() {
 
   // Auth merge transition successes
   const handleAuthSuccess = (authenticatedUser: UserProfile, cloudChats?: ChatSession[]) => {
+    playUiSound("login_success");
     setUser({
       ...authenticatedUser,
       isGuest: false,
@@ -1009,6 +1073,7 @@ export default function App() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+      playUiSound("download_completed");
     } else if (action.startsWith("translate")) {
       // Split parameters: messageId::Language
       const [id, lang] = action.split("::");
@@ -1246,6 +1311,7 @@ export default function App() {
           size: formatBytes(file.size),
           dataUrl: re.target?.result as string,
         });
+        playUiSound("image_uploaded");
       };
       reader.readAsDataURL(file);
     } else {
@@ -1257,6 +1323,7 @@ export default function App() {
           size: formatBytes(file.size),
           textPreview: textStr.substring(0, 15000),
         });
+        playUiSound("file_uploaded");
       };
       reader.readAsText(file);
     }
@@ -1319,6 +1386,7 @@ export default function App() {
     const currentAttachment = customAttachment || attachment;
     setIsLoading(true);
     setInputPrompt("");
+    playUiSound("message_sent");
 
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -1383,6 +1451,12 @@ export default function App() {
 
       const data = await response.json();
 
+      if (data.content?.includes("![") || data.engineId === "vision") {
+        playUiSound("image_generated");
+      } else {
+        playUiSound("ai_response_start");
+      }
+
       const newAssistantMsg: Message = {
         id: `ast-${Date.now()}`,
         role: "assistant",
@@ -1434,6 +1508,7 @@ export default function App() {
 
     } catch (err: any) {
       console.error(err);
+      playUiSound("error");
       const errorMsg: Message = {
         id: `ast-${Date.now()}`,
         role: "assistant",
@@ -1482,6 +1557,7 @@ export default function App() {
           setShowPremium(true);
           setPremiumSource("header");
         }}
+        onOpenFeedback={() => setIsFeedbackOpen(true)}
         onLogoClick={() => {
           const emptySession = sessions.find(
             (s) => s.messages.length === 0 && s.mode === "general"
@@ -1531,6 +1607,7 @@ export default function App() {
               setShowPremium(true);
               setPremiumSource("sidebar");
             }}
+            onOpenFeedback={() => setIsFeedbackOpen(true)}
           />
         </div>
 
@@ -1579,6 +1656,7 @@ export default function App() {
                     setShowPremium(true);
                     setPremiumSource("sidebar");
                   }}
+                  onOpenFeedback={() => setIsFeedbackOpen(true)}
                 />
               </motion.div>
             </>
@@ -2193,6 +2271,13 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Modern Glassmorphic Feedback Modal */}
+      <FeedbackModal
+        isOpen={isFeedbackOpen}
+        onClose={() => setIsFeedbackOpen(false)}
+        user={user}
+      />
 
     </div>
   );

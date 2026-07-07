@@ -109,6 +109,7 @@ export interface AppSettings {
   privacySaveHistory: boolean;
   turboMode?: boolean;
   isAdminVerified?: boolean;
+  soundEffectsActive?: boolean;
 }
 
 export interface AdminMetrics {
@@ -140,3 +141,19 @@ export interface AdminMetrics {
     severity: "low" | "medium" | "high";
   }>;
 }
+
+export interface NexaFeedback {
+  id: string;
+  userEmail?: string | null;
+  userName?: string | null;
+  email: string | null;
+  feedbackType: "bug" | "feature" | "improvement" | "general" | "other" | string;
+  message: string;
+  screenshotUrl?: string | null;
+  browser?: string;
+  deviceType?: string;
+  operatingSystem?: string;
+  status: "pending" | "reviewed" | "resolved";
+  timestamp: string;
+}
+

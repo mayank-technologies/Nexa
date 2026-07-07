@@ -470,11 +470,11 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center mx-auto mb-2 animate-bounce">
                     <CheckCircle className="w-6 h-6" />
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    ✅ You're currently on the Nexa Premium Waitlist.
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white whitespace-pre-line">
+                    🎉 You're officially on the Nexa Premium waitlist!
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
-                    Your email address <strong className="text-[#C96A3D]">{email}</strong> is registered. We will notify you as soon as Nexa Premium is ready!
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto whitespace-pre-line">
+                    We'll notify you here in Nexa when Premium launches.
                   </p>
                   
                   <div className="pt-2 flex flex-col gap-2.5">
@@ -504,10 +504,10 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                   <div className="w-12 h-12 rounded-full bg-[#C96A3D]/10 text-[#C96A3D] border border-[#C96A3D]/25 flex items-center justify-center mx-auto mb-2">
                     <span className="text-xl">🗑</span>
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white whitespace-pre-line">
                     You've successfully left the Nexa Premium Waitlist.
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto whitespace-pre-line">
                     You can join again anytime.
                   </p>
                 </motion.div>
@@ -563,15 +563,6 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </form>
-
-                  <div className="mt-4 p-3 rounded-xl bg-slate-100/60 dark:bg-slate-900/60 border border-slate-200/40 dark:border-slate-800/40 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
-                    <p className="font-semibold text-slate-700 dark:text-slate-350 flex items-center gap-1">
-                      <span>📧</span> Real Email Delivery Notice:
-                    </p>
-                    <p className="leading-normal">
-                      Nexa delivers real Gmail messages only if you configure a 16-character Google <strong className="text-[#C96A3D]">App Password</strong> under <strong>SMTP_PASS</strong> in your <strong>Secrets</strong> settings. Your regular Gmail account password will be blocked by Google security.
-                    </p>
-                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

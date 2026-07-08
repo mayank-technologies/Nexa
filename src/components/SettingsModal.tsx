@@ -4,11 +4,13 @@
  */
 
 import React, { useState, useRef } from "react";
-import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy, Volume2 } from "lucide-react";
+import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy, Volume2, Database, Loader2, Wifi, WifiOff } from "lucide-react";
 import { AppSettings, UserProfile } from "../types";
 import { playUiSound } from "../utils/sounds";
 import { Logo } from "./Logo";
 import { AchievementsProfile } from "./AchievementsProfile";
+import { db } from "../firebase";
+import { collection, addDoc, getDoc } from "firebase/firestore";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -44,6 +46,50 @@ export function SettingsModal({
   const [personalization, setPersonalization] = useState(settings.personalizationNotes);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [testStatus, setTestStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [testError, setTestError] = useState<string | null>(null);
+  const [testDetails, setTestDetails] = useState<string | null>(null);
+
+  const runConnectionTest = async () => {
+    setTestStatus("loading");
+    setTestError(null);
+    setTestDetails(null);
+    try {
+      playUiSound("success");
+    } catch (_) {}
+    
+    try {
+      // 1. Create a document in a collection named "connection_test"
+      const testCollectionRef = collection(db, "connection_test");
+      const docRef = await addDoc(testCollectionRef, {
+        timestamp: new Date().toISOString(),
+        testedBy: user.email || "anonymous_test_user",
+        message: "Nexa Firebase connection verification"
+      });
+      
+      // 2. Read the same document
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setTestStatus("success");
+        setTestDetails(`Document Path: connection_test/${docSnap.id}\nTimestamp: ${data.timestamp}`);
+        try {
+          playUiSound("success");
+        } catch (_) {}
+      } else {
+        throw new Error("Document was created but could not be read back (not found).");
+      }
+    } catch (err: any) {
+      console.error("Firebase Connection Test failed:", err);
+      setTestStatus("error");
+      setTestError(err?.message || String(err));
+      try {
+        playUiSound("error");
+      } catch (_) {}
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -267,6 +313,64 @@ export function SettingsModal({
                 Email: <span className="font-mono text-slate-500 dark:text-slate-300">{user.email}</span>
                 {user.isGuest && <span className="ml-2 text-amber-500 font-bold">(Guest Mode)</span>}
               </div>
+            </div>
+
+            {/* Firebase Connection Test Block */}
+            <div className="space-y-4 p-5 bg-indigo-50/20 dark:bg-slate-900/40 border border-indigo-100 dark:border-slate-800 rounded-2xl">
+              <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#14213D] dark:text-slate-300">
+                <Database className="w-4 h-4 text-indigo-500" />
+                Firebase Connection Diagnostics
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-normal">
+                Verify Firestore document writes, reads, and connection reliability through live operations.
+              </p>
+
+              <button
+                type="button"
+                onClick={runConnectionTest}
+                disabled={testStatus === "loading"}
+                className="w-full flex justify-center items-center gap-2 py-2.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl transition-all cursor-pointer shadow-3xs"
+              >
+                {testStatus === "loading" ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Testing Connection...
+                  </>
+                ) : (
+                  <>
+                    <Wifi className="w-3.5 h-3.5" />
+                    Run Firebase Connection Test
+                  </>
+                )}
+              </button>
+
+              {testStatus === "success" && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 rounded-xl space-y-1.5 animate-fade-in">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle className="w-4 h-4 shrink-0" />
+                    ✅ Firebase Connected Successfully
+                  </div>
+                  {testDetails && (
+                    <pre className="text-[10px] font-mono text-slate-600 dark:text-slate-400 bg-white/50 dark:bg-slate-900/50 p-2 rounded-lg overflow-x-auto border border-slate-100 dark:border-slate-800 leading-normal">
+                      {testDetails}
+                    </pre>
+                  )}
+                </div>
+              )}
+
+              {testStatus === "error" && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-xl space-y-1.5 animate-fade-in">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
+                    <X className="w-4 h-4 shrink-0" />
+                    ❌ Firebase Connection Failed
+                  </div>
+                  {testError && (
+                    <div className="text-[10px] font-mono text-rose-700 dark:text-rose-400 bg-white/50 dark:bg-slate-900/50 p-2 rounded-lg overflow-x-auto border border-rose-100 dark:border-rose-950/40 leading-relaxed max-h-32">
+                      {testError}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
           </div>

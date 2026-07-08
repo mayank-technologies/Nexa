@@ -63,6 +63,9 @@ import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
+import { auth, db } from "./firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, setDoc, getDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
@@ -424,11 +427,97 @@ export default function App() {
     }
   }, [settings.theme]);
 
-  // Synchronize App States to Cache LocalStorage
+  // Synchronize App States to Cache LocalStorage & Firestore
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [user update] User state updated:", user?.email, "IsGuest:", user?.isGuest);
     safeStorage.setItem("nexa_user", JSON.stringify(user));
+    
+    if (user && !user.isGuest && auth.currentUser) {
+      const updateProfileInFirestore = async () => {
+        try {
+          await setDoc(doc(db, "users", auth.currentUser!.uid), {
+            email: user.email,
+            fullName: user.fullName,
+            isGuest: false,
+            avatarUrl: user.avatarUrl,
+            preferences: user.preferences || { primaryLanguage: "English", rememberPersonalization: true, personalizationContext: "" },
+            gamification: user.gamification || { points: 0, unlockedBadges: [], stats: { chatsCompleted: 0, enginesUsed: [], deepResearchCompleted: 0, studyCompleted: 0, quizzesTaken: 0, perfectQuizzes: 0, factChecksCompleted: 0 } },
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (err) {
+          console.error("Failed to update user profile in Firestore:", err);
+        }
+      };
+      updateProfileInFirestore();
+    }
   }, [user]);
+
+  // Persistent Firebase Authentication Observer
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        console.log("[Nexa Client] Firebase auto-login detected:", firebaseUser.email);
+        
+        let userProfile: UserProfile;
+        try {
+          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            userProfile = {
+              email: data.email || firebaseUser.email || "",
+              fullName: data.fullName || firebaseUser.displayName || "",
+              isGuest: false,
+              avatarUrl: data.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${data.fullName || "User"}`,
+              preferences: data.preferences,
+              gamification: data.gamification
+            };
+          } else {
+            userProfile = {
+              email: firebaseUser.email || "",
+              fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
+              isGuest: false,
+              avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || "User"}`,
+              preferences: {
+                primaryLanguage: "English",
+                rememberPersonalization: true,
+                personalizationContext: ""
+              }
+            };
+            await setDoc(doc(db, "users", firebaseUser.uid), {
+              ...userProfile,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch (err) {
+          console.error("Failed to restore user profile from Firestore:", err);
+          userProfile = {
+            email: firebaseUser.email || "",
+            fullName: firebaseUser.displayName || "User",
+            isGuest: false,
+            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || "User"}`
+          };
+        }
+
+        let userChats: ChatSession[] = [];
+        try {
+          const chatsSnapshot = await getDocs(collection(db, "users", firebaseUser.uid, "chats"));
+          userChats = chatsSnapshot.docs.map(d => d.data() as ChatSession);
+          userChats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        } catch (err) {
+          console.error("Failed to restore chat sessions from Firestore:", err);
+        }
+
+        setUser(userProfile);
+        if (userChats.length > 0) {
+          setSessions(userChats);
+          setActiveSessionId(userChats[0].id);
+          setActiveMode(userChats[0].mode || "general");
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [settings update] Settings state updated:", settings);
@@ -453,27 +542,32 @@ export default function App() {
   // Cloud backend synchronization when sessions update
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [cloud sync check] checking if sync is allowed:", user?.email, "isGuest:", user?.isGuest);
-    if (user && !user.isGuest && user.email) {
+    if (user && !user.isGuest && user.email && auth.currentUser) {
       const syncWithCloud = async () => {
         try {
-          console.log("[Nexa Restorations Debug] [cloud sync start] syncing", sessions.length, "chats with server...");
-          const response = await fetch("/api/auth/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: user.email,
-              chats: sessions
-            })
-          });
-          console.log("[Nexa Restorations Debug] [cloud sync response] server status:", response.status);
+          const firebaseUser = auth.currentUser;
+          if (firebaseUser) {
+            console.log("[Nexa Restorations Debug] [firebase sync start] syncing to Firestore...");
+            for (const chat of sessions) {
+              const sanitizedChat = {
+                ...chat,
+                userEmail: user.email.toLowerCase().trim(),
+                createdAt: chat.createdAt || new Date().toISOString(),
+                updatedAt: chat.updatedAt || new Date().toISOString(),
+                mode: chat.mode || "general"
+              };
+              await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id), sanitizedChat);
+            }
+            console.log("[Nexa Restorations Debug] [firebase sync success] Synced to Firestore.");
+          }
         } catch (e) {
-          console.error("[Nexa Client] Sync to cloud failed:", e);
+          console.error("[Nexa Client] Sync to Firestore failed:", e);
         }
       };
 
       const delayTimer = setTimeout(() => {
         syncWithCloud();
-      }, 1000);
+      }, 1200);
 
       return () => {
         console.log("[Nexa Restorations Debug] [cloud sync clear] clearing delay timer.");
@@ -676,6 +770,7 @@ export default function App() {
 
   const handleLogout = () => {
     playUiSound("logout");
+    signOut(auth).catch((err) => console.error("Firebase SignOut error:", err));
     setUser({
       email: "guest@nexa.ai",
       fullName: "Guest User",
@@ -765,6 +860,17 @@ export default function App() {
 
   const handleDeleteSession = (id: string) => {
     const remaining = sessions.filter((s) => s.id !== id);
+    if (user && !user.isGuest && auth.currentUser) {
+      const deleteFromFirestore = async () => {
+        try {
+          await deleteDoc(doc(db, "users", auth.currentUser!.uid, "chats", id));
+          console.log("[Nexa Client] Deleted session from Firestore:", id);
+        } catch (e) {
+          console.error("Failed to delete session from Firestore:", e);
+        }
+      };
+      deleteFromFirestore();
+    }
     if (remaining.length === 0) {
       const freshId = `session-${Date.now()}`;
       const freshSession: ChatSession = {

@@ -7,6 +7,19 @@ import React, { useState, useEffect } from "react";
 import { X, Mail, Phone, Lock, Eye, Chrome, ArrowRight, ShieldCheck, ArrowLeft, User, Plus } from "lucide-react";
 import { Logo } from "./Logo";
 import { UserProfile } from "../types";
+import { auth, db, handleFirestoreError, OperationType } from "../firebase";
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  updateProfile 
+} from "firebase/auth";
+import { 
+  doc, 
+  getDoc, 
+  setDoc, 
+  collection, 
+  getDocs 
+} from "firebase/firestore";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -140,32 +153,157 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     } catch (_) {}
 
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          password,
-          fullName: fullName || undefined,
-          currentChats,
-          isSignUp
-        })
-      });
+      let firebaseUser;
+      if (isSignUp) {
+        // Firebase Auth Create User
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        firebaseUser = userCredential.user;
+        
+        // Update Firebase Auth profile displayName
+        await updateProfile(firebaseUser, { displayName: fullName });
 
-      const data = await response.json();
+        // Create User Profile in Firestore
+        const newUserProfile: UserProfile = {
+          email: email.toLowerCase().trim(),
+          fullName: fullName.trim(),
+          isGuest: false,
+          avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${fullName.trim()}`,
+          preferences: {
+            primaryLanguage: "English",
+            rememberPersonalization: true,
+            personalizationContext: "",
+          },
+          gamification: {
+            points: 0,
+            unlockedBadges: [],
+            stats: {
+              chatsCompleted: 0,
+              enginesUsed: [],
+              deepResearchCompleted: 0,
+              studyCompleted: 0,
+              quizzesTaken: 0,
+              perfectQuizzes: 0,
+              factChecksCompleted: 0
+            }
+          }
+        };
 
-      if (!response.ok || !data.success) {
-        setErrorFlag(data.error || "Authentication failed. Please verify your credentials.");
+        try {
+          await setDoc(doc(db, "users", firebaseUser.uid), {
+            ...newUserProfile,
+            updatedAt: new Date().toISOString()
+          });
+
+          // Upload any guest chats to subcollection in Firestore
+          if (Array.isArray(currentChats) && currentChats.length > 0) {
+            for (const chat of currentChats) {
+              const sanitizedChat = {
+                ...chat,
+                userEmail: email.toLowerCase().trim(),
+                createdAt: chat.createdAt || new Date().toISOString(),
+                updatedAt: chat.updatedAt || new Date().toISOString(),
+                mode: chat.mode || "general"
+              };
+              await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id), sanitizedChat);
+            }
+          }
+        } catch (dbErr) {
+          handleFirestoreError(dbErr, OperationType.WRITE, `users/${firebaseUser.uid}`);
+        }
+
         setLoading(false);
-        return;
-      }
+        onSuccess(newUserProfile, currentChats);
+        onClose();
+      } else {
+        // Firebase Auth Login
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        firebaseUser = userCredential.user;
 
-      setLoading(false);
-      onSuccess(data.user, data.chats);
-      onClose();
+        // Fetch User Profile from Firestore
+        let userProfile: UserProfile;
+        try {
+          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            userProfile = {
+              email: data.email || firebaseUser.email || email,
+              fullName: data.fullName || firebaseUser.displayName || email.split("@")[0],
+              isGuest: false,
+              avatarUrl: data.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${data.fullName || email}`,
+              preferences: data.preferences,
+              gamification: data.gamification
+            };
+          } else {
+            // Fallback profile if Firestore entry is missing
+            userProfile = {
+              email: email.toLowerCase().trim(),
+              fullName: firebaseUser.displayName || email.split("@")[0],
+              isGuest: false,
+              avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || email}`,
+              preferences: {
+                primaryLanguage: "English",
+                rememberPersonalization: true,
+                personalizationContext: "",
+              },
+              gamification: {
+                points: 0,
+                unlockedBadges: [],
+                stats: {
+                  chatsCompleted: 0,
+                  enginesUsed: [],
+                  deepResearchCompleted: 0,
+                  studyCompleted: 0,
+                  quizzesTaken: 0,
+                  perfectQuizzes: 0,
+                  factChecksCompleted: 0
+                }
+              }
+            };
+            // Seed profile
+            await setDoc(doc(db, "users", firebaseUser.uid), {
+              ...userProfile,
+              updatedAt: new Date().toISOString()
+            });
+          }
+        } catch (dbErr) {
+          handleFirestoreError(dbErr, OperationType.GET, `users/${firebaseUser.uid}`);
+          userProfile = {
+            email: email.toLowerCase().trim(),
+            fullName: firebaseUser.displayName || email.split("@")[0],
+            isGuest: false,
+            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || email}`
+          };
+        }
+
+        // Fetch user's chats from Firestore subcollection
+        let userChats: any[] = [];
+        try {
+          const chatsSnapshot = await getDocs(collection(db, "users", firebaseUser.uid, "chats"));
+          userChats = chatsSnapshot.docs.map(d => d.data());
+          userChats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        } catch (dbErr) {
+          handleFirestoreError(dbErr, OperationType.LIST, `users/${firebaseUser.uid}/chats`);
+        }
+
+        setLoading(false);
+        onSuccess(userProfile, userChats);
+        onClose();
+      }
     } catch (err: any) {
-      console.error("Auth submit fetch error:", err);
-      setErrorFlag("Connection to Nexa Auth Server could not be established. Please retry.");
+      console.error("Auth submit error:", err);
+      let friendlyMessage = "Authentication failed. Please verify your credentials.";
+      if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
+        friendlyMessage = "Incorrect email or password. Please verify your credentials.";
+      } else if (err.code === "auth/email-already-in-use") {
+        friendlyMessage = "An account with this email address already exists. Try signing in.";
+      } else if (err.code === "auth/weak-password") {
+        friendlyMessage = "Your password is too weak. Please choose a password with at least 6 characters.";
+      } else if (err.code === "auth/invalid-email") {
+        friendlyMessage = "Please enter a valid email address.";
+      } else if (err.message) {
+        friendlyMessage = err.message;
+      }
+      setErrorFlag(friendlyMessage);
       setLoading(false);
     }
   };
@@ -223,33 +361,111 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       }
     } catch (_) {}
 
+    const federatedPass = "google_federated_auth_safe_pass";
+
     try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: selectedEmail,
-          password: "google_federated_auth_safe_pass", // safe shared pass for google federated signins
-          fullName: selectedName,
-          currentChats,
-          isGoogleAuth: true
-        })
-      });
+      let firebaseUser;
+      let isNewUser = false;
+      
+      try {
+        const userCredential = await signInWithEmailAndPassword(auth, selectedEmail, federatedPass);
+        firebaseUser = userCredential.user;
+      } catch (loginErr: any) {
+        if (loginErr.code === "auth/user-not-found" || loginErr.code === "auth/invalid-credential") {
+          const userCredential = await createUserWithEmailAndPassword(auth, selectedEmail, federatedPass);
+          firebaseUser = userCredential.user;
+          await updateProfile(firebaseUser, { displayName: selectedName });
+          isNewUser = true;
+        } else {
+          throw loginErr;
+        }
+      }
 
-      const data = await response.json();
+      // Fetch or Create Profile
+      let userProfile: UserProfile;
+      try {
+        const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (userDoc.exists() && !isNewUser) {
+          const data = userDoc.data();
+          userProfile = {
+            email: data.email || firebaseUser.email || selectedEmail,
+            fullName: data.fullName || firebaseUser.displayName || selectedName,
+            isGuest: false,
+            avatarUrl: data.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${data.fullName || selectedName}`,
+            preferences: data.preferences,
+            gamification: data.gamification
+          };
+        } else {
+          userProfile = {
+            email: selectedEmail.toLowerCase().trim(),
+            fullName: selectedName.trim(),
+            isGuest: false,
+            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${selectedName.trim()}`,
+            preferences: {
+              primaryLanguage: "English",
+              rememberPersonalization: true,
+              personalizationContext: "",
+            },
+            gamification: {
+              points: 0,
+              unlockedBadges: [],
+              stats: {
+                chatsCompleted: 0,
+                enginesUsed: [],
+                deepResearchCompleted: 0,
+                studyCompleted: 0,
+                quizzesTaken: 0,
+                perfectQuizzes: 0,
+                factChecksCompleted: 0
+              }
+            }
+          };
 
-      if (!response.ok || !data.success) {
-        setErrorFlag(data.error || "Google authentication failed. Please retry.");
-        setLoading(false);
-        return;
+          await setDoc(doc(db, "users", firebaseUser.uid), {
+            ...userProfile,
+            updatedAt: new Date().toISOString()
+          });
+
+          // Upload any guest chats to subcollection in Firestore
+          if (Array.isArray(currentChats) && currentChats.length > 0) {
+            for (const chat of currentChats) {
+              const sanitizedChat = {
+                ...chat,
+                userEmail: selectedEmail.toLowerCase().trim(),
+                createdAt: chat.createdAt || new Date().toISOString(),
+                updatedAt: chat.updatedAt || new Date().toISOString(),
+                mode: chat.mode || "general"
+              };
+              await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id), sanitizedChat);
+            }
+          }
+        }
+      } catch (dbErr) {
+        handleFirestoreError(dbErr, OperationType.WRITE, `users/${firebaseUser.uid}`);
+        userProfile = {
+          email: selectedEmail.toLowerCase().trim(),
+          fullName: selectedName.trim(),
+          isGuest: false,
+          avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${selectedName.trim()}`
+        };
+      }
+
+      // Fetch user's chats
+      let userChats: any[] = [];
+      try {
+        const chatsSnapshot = await getDocs(collection(db, "users", firebaseUser.uid, "chats"));
+        userChats = chatsSnapshot.docs.map(d => d.data());
+        userChats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      } catch (dbErr) {
+        handleFirestoreError(dbErr, OperationType.LIST, `users/${firebaseUser.uid}/chats`);
       }
 
       setLoading(false);
-      onSuccess(data.user, data.chats);
+      onSuccess(userProfile, userChats);
       onClose();
     } catch (err: any) {
-      console.error("Google Auth fetch error:", err);
-      setErrorFlag("Unable to connect to Google Identity server. Please retry.");
+      console.error("Google Auth error:", err);
+      setErrorFlag(err.message || "Google authentication failed. Please retry.");
       setLoading(false);
     }
   };

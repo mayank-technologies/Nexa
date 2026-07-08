@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Global Safety Net: Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE GLOBAL HELPERS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- USER PROFILE VALIDATION ---
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'fullName']) &&
+             data.email is string && data.email.size() <= 128 &&
+             data.fullName is string && data.fullName.size() <= 128;
+    }
+
+    // --- CHAT SESSION VALIDATION ---
+    function isValidChat(data) {
+      return data.keys().hasAll(['id', 'userEmail', 'title', 'createdAt', 'updatedAt', 'mode']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userEmail is string && data.userEmail.size() <= 128 &&
+             data.title is string && data.title.size() <= 200 &&
+             data.mode is string && (
+               data.mode == 'general' || 
+               data.mode == 'research' || 
+               data.mode == 'study' || 
+               data.mode == 'factcheck' || 
+               data.mode == 'writing' || 
+               data.mode == 'quiz'
+             );
+    }
+
+    // --- COLLECTION RULES ---
+
+    // Users Collection
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidUser(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasAny(['fullName', 'avatarUrl', 'preferences', 'gamification', 'updatedAt'])
+      );
+      allow delete: if false; // User accounts cannot be deleted directly from client SDK
+    }
+
+    // Connection Test Collection
+    match /connection_test/{documentId} {
+      allow read, write: if true;
+    }
+
+    // Chat Sessions subcollection
+    match /users/{userId}/chats/{chatId} {
+      allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidChat(incoming());
+      allow update: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidChat(incoming()) && (
+        incoming().diff(existing()).affectedKeys().hasAny(['title', 'updatedAt', 'messages', 'isPinned', 'mode', 'selectedEngineId'])
+      );
+      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
+    }
+  }
+}

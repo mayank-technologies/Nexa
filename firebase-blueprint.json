@@ -1,0 +1,85 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile data including preferences and gamification states.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "The user's registered email address"
+        },
+        "fullName": {
+          "type": "string",
+          "description": "The user's full name"
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "URL to the user's avatar image"
+        },
+        "preferences": {
+          "type": "object",
+          "description": "User custom settings and personalization context"
+        },
+        "gamification": {
+          "type": "object",
+          "description": "Achievements, points, and stats"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "fullName"]
+    },
+    "ChatSession": {
+      "title": "Chat Session",
+      "description": "A single chat thread session containing conversation messages.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userEmail": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "isPinned": {
+          "type": "boolean"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["general", "research", "study", "factcheck", "writing", "quiz"]
+        },
+        "selectedEngineId": {
+          "type": "string"
+        },
+        "messages": {
+          "type": "array",
+          "description": "The message objects inside this chat session"
+        }
+      },
+      "required": ["id", "userEmail", "title", "createdAt", "updatedAt", "mode"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "The collection of authenticated users."
+    },
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "ChatSession",
+      "description": "A subcollection of chat sessions associated with a specific user."
+    }
+  }
+}

@@ -87,21 +87,6 @@ export function Navbar({
       {/* Action Bars Row */}
       <div className="flex items-center gap-2 md:gap-3 shrink-0">
         
-        {/* Toggle Admin Dashboard */}
-        {settings.isAdminVerified && (
-          <button
-            onClick={onToggleAdmin}
-            className={`p-2.5 rounded-xl border text-slate-500 hover:text-indigo-400 bg-white dark:bg-slate-900 shadow-3xs cursor-pointer transition-all ${
-              showAdmin
-                ? "border-indigo-500/40 text-indigo-500 bg-indigo-500/5 dark:bg-indigo-950/20"
-                : "border-slate-150 dark:border-slate-800"
-            }`}
-            title="Nexa Admin Operations Monitor"
-          >
-            <Sliders className="w-4 h-4 shrink-0" />
-          </button>
-        )}
-
         {/* Upgrade to Premium Trigger Pill */}
         <button
           onClick={onOpenPremium}
@@ -117,17 +102,6 @@ export function Navbar({
             <span className="tracking-tight">Upgrade to Premium</span>
           </span>
         </button>
-
-        {/* Profile Card / Login Trigger */}
-        {user.isGuest && (
-          <button
-            onClick={onOpenAuth}
-            className="flex items-center gap-1.5 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:text-[#14213D] dark:hover:bg-[#C96A3D] dark:hover:text-white text-white font-bold py-2 px-3.5 rounded-xl text-xs shadow-md transition-all cursor-pointer hover:shadow-lg"
-          >
-            <LogIn className="w-3.5 h-3.5 shrink-0" />
-            <span>Login</span>
-          </button>
-        )}
 
       </div>
     </header>

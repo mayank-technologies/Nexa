@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef } from "react";
-import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy, Volume2, Database, Loader2, Wifi, WifiOff } from "lucide-react";
+import { X, Moon, Sun, Globe, EyeOff, Key, Trash2, Save, Sparkles, User, CheckCircle, Camera, Image, FileText, Mic, Shield, Trophy, Volume2, Database, Loader2, Wifi, WifiOff, Sliders, HelpCircle, LogOut } from "lucide-react";
 import { AppSettings, UserProfile } from "../types";
 import { playUiSound } from "../utils/sounds";
 import { Logo } from "./Logo";
@@ -27,6 +27,8 @@ interface SettingsModalProps {
     microphone: boolean;
   };
   onUpdatePermissions: (newPermissions: SettingsModalProps["permissions"]) => void;
+  onLogout?: () => void;
+  onOpenFeedback?: () => void;
 }
 
 export function SettingsModal({
@@ -39,6 +41,8 @@ export function SettingsModal({
   onClearChats,
   permissions,
   onUpdatePermissions,
+  onLogout,
+  onOpenFeedback,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<"preferences" | "achievements">("preferences");
   const [profileName, setProfileName] = useState(user.fullName);
@@ -192,396 +196,429 @@ export function SettingsModal({
         {activeTab === "preferences" ? (
           <>
             {/* Content body Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          
-          {/* Left panel: Profile & Theme */}
-          <div className="space-y-6">
-            
-            {/* Theme Toggle Section */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest">
-                Appearance System
-              </label>
-              <div className="flex bg-slate-50 dark:bg-slate-850 p-1.5 rounded-2xl border border-slate-100 dark:border-slate-800 gap-1 select-none">
-                <button
-                  onClick={() => onUpdateSettings({ theme: "light" })}
-                  className={`flex-1 flex justify-center items-center gap-2 py-2 text-sm font-semibold rounded-xl transition-all ${
-                    settings.theme === "light"
-                      ? "bg-white text-[#14213D] shadow-xs"
-                      : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                  }`}
-                >
-                  <Sun className="w-4 h-4" />
-                  Light Mode
-                </button>
-                <button
-                  onClick={() => onUpdateSettings({ theme: "dark" })}
-                  className={`flex-1 flex justify-center items-center gap-2 py-2 text-sm font-semibold rounded-xl transition-all ${
-                    settings.theme === "dark"
-                      ? "bg-slate-800 text-white shadow-xs"
-                      : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                  }`}
-                >
-                  <Moon className="w-4 h-4" />
-                  Dark Mode
-                </button>
-              </div>
-            </div>
-
-            {/* Language Selection */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest flex items-center gap-1">
-                <Globe className="w-4 h-4 text-slate-400" />
-                Default Chat Language
-              </label>
-              <select
-                value={settings.language}
-                onChange={(e) => onUpdateSettings({ language: e.target.value })}
-                className="w-full text-sm py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
-              >
-                {languagesList.map((lang) => (
-                  <option key={lang} value={lang}>
-                    {lang}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Profile Settings */}
-            <div className="space-y-4 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800/85 rounded-2xl">
-              <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
-                <User className="w-4 h-4" />
-                User Profile Information
-              </h4>
-
-              {/* Profile Avatar Selection Row */}
-              <div className="flex items-center gap-4 py-1" id="avatar-selector-section">
-                {avatarUrlState ? (
-                  <img
-                    src={avatarUrlState}
-                    alt={profileName}
-                    className="w-14 h-14 rounded-2xl object-cover border border-slate-250 dark:border-slate-800 shadow-sm"
-                  />
-                ) : (
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
-                    {profileName ? profileName[0].toUpperCase() : "U"}
-                  </div>
-                )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              
+              {/* Left Column: General & AI Settings */}
+              <div className="space-y-6">
                 
-                <div className="space-y-1.5 flex-1">
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400">Profile Image</label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="text-[10px] bg-slate-100 dark:bg-slate-800 hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] hover:text-white text-slate-700 dark:text-slate-300 font-bold py-1.5 px-3 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Upload Picture
-                    </button>
-                    {avatarUrlState && (
+                {/* General Section */}
+                <div className="space-y-4 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-2xl">
+                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                    <Sliders className="w-4 h-4" />
+                    General Settings
+                  </h4>
+                  
+                  {/* Theme Selector */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300">
+                      Appearance System
+                    </label>
+                    <div className="flex bg-slate-100/50 dark:bg-slate-850 p-1 rounded-xl border border-slate-200/50 dark:border-slate-800 gap-1 select-none">
                       <button
                         type="button"
-                        onClick={() => {
-                          setAvatarUrlState(undefined);
-                        }}
-                        className="text-[10px] bg-rose-50 dark:bg-rose-950/20 text-rose-500 hover:bg-rose-550 hover:text-white font-bold py-1.5 px-2.5 rounded-lg transition-all cursor-pointer"
+                        onClick={() => onUpdateSettings({ theme: "light" })}
+                        className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                          settings.theme === "light"
+                            ? "bg-white text-[#14213D] shadow-3xs"
+                            : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                        }`}
                       >
-                        Reset Picture
+                        <Sun className="w-3.5 h-3.5" />
+                        Light
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => onUpdateSettings({ theme: "dark" })}
+                        className={`flex-1 flex justify-center items-center gap-2 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                          settings.theme === "dark"
+                            ? "bg-slate-800 text-white shadow-3xs"
+                            : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                        }`}
+                      >
+                        <Moon className="w-3.5 h-3.5" />
+                        Dark
+                      </button>
+                    </div>
                   </div>
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept="image/*"
-                    onChange={handleFileChange}
-                    className="hidden"
-                  />
+
+                  {/* Language Selector */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300 flex items-center gap-1">
+                      <Globe className="w-3.5 h-3.5 text-slate-400" />
+                      Default Chat Language
+                    </label>
+                    <select
+                      value={settings.language}
+                      onChange={(e) => onUpdateSettings({ language: e.target.value })}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
+                    >
+                      {languagesList.map((lang) => (
+                        <option key={lang} value={lang}>
+                          {lang}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Sound Effects Toggle */}
+                  <div className="flex items-center justify-between p-2.5 bg-white/50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-850 rounded-xl">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className="w-3.5 h-3.5 text-[#C96A3D] shrink-0" />
+                      <h5 className="text-xs font-semibold text-[#14213D] dark:text-slate-200">
+                        🔊 Sound Effects
+                      </h5>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.soundEffectsActive !== false}
+                      onChange={(e) => onUpdateSettings({ soundEffectsActive: e.target.checked })}
+                      className="w-4 h-4 accent-[#C96A3D] cursor-pointer rounded"
+                    />
+                  </div>
+
+                  {/* Thread History & Turbo Toggles */}
+                  <div className="space-y-2 pt-1.5 border-t border-slate-150 dark:border-slate-800/60">
+                    <div className="flex items-center justify-between p-2.5 bg-white/50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-850 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <EyeOff className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="text-xs font-semibold text-[#14213D] dark:text-slate-200">Record Thread History</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.privacySaveHistory}
+                        onChange={(e) => onUpdateSettings({ privacySaveHistory: e.target.checked })}
+                        className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 bg-white/50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-850 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 text-[#C96A3D] shrink-0" />
+                        <span className="text-xs font-semibold text-[#14213D] dark:text-slate-200">Nexa Turbo Mode</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.turboMode !== false}
+                        onChange={(e) => onUpdateSettings({ turboMode: e.target.checked })}
+                        className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Device Privileges Sub-list */}
+                  <div className="space-y-2 pt-2 border-t border-slate-150 dark:border-slate-800/60">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Device Permissions</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePermissions({ ...permissions, camera: !permissions.camera })}
+                        className={`p-1.5 px-2.5 border rounded-lg flex items-center justify-between text-left transition-all cursor-pointer ${
+                          permissions.camera ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-bold" : "border-slate-100 dark:border-slate-850 bg-white dark:bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        <span className="text-[10px] truncate">Camera</span>
+                        <span className="text-[8px] font-bold uppercase">{permissions.camera ? "On" : "Off"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePermissions({ ...permissions, photos: !permissions.photos })}
+                        className={`p-1.5 px-2.5 border rounded-lg flex items-center justify-between text-left transition-all cursor-pointer ${
+                          permissions.photos ? "border-sky-500/20 bg-sky-500/5 text-sky-600 dark:text-sky-400 font-bold" : "border-slate-100 dark:border-slate-850 bg-white dark:bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        <span className="text-[10px] truncate">Photos</span>
+                        <span className="text-[8px] font-bold uppercase">{permissions.photos ? "On" : "Off"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePermissions({ ...permissions, document: !permissions.document })}
+                        className={`p-1.5 px-2.5 border rounded-lg flex items-center justify-between text-left transition-all cursor-pointer ${
+                          permissions.document ? "border-amber-500/20 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-bold" : "border-slate-100 dark:border-slate-850 bg-white dark:bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        <span className="text-[10px] truncate">Docs</span>
+                        <span className="text-[8px] font-bold uppercase">{permissions.document ? "On" : "Off"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdatePermissions({ ...permissions, microphone: !permissions.microphone })}
+                        className={`p-1.5 px-2.5 border rounded-lg flex items-center justify-between text-left transition-all cursor-pointer ${
+                          permissions.microphone ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D] font-bold" : "border-slate-100 dark:border-slate-850 bg-white dark:bg-slate-900 text-slate-400"
+                        }`}
+                      >
+                        <span className="text-[10px] truncate">Mic</span>
+                        <span className="text-[8px] font-bold uppercase">{permissions.microphone ? "On" : "Off"}</span>
+                      </button>
+                    </div>
+                  </div>
+
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <label className="block text-xs text-slate-500 font-medium">Display Name</label>
-                <input
-                  type="text"
-                  value={profileName}
-                  onChange={(e) => setProfileName(e.target.value)}
-                  className="w-full text-sm py-2 px-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white"
-                />
-              </div>
-              <div className="text-xs text-slate-400">
-                Email: <span className="font-mono text-slate-500 dark:text-slate-300">{user.email}</span>
-                {user.isGuest && <span className="ml-2 text-amber-500 font-bold">(Guest Mode)</span>}
-              </div>
-            </div>
+                {/* AI Section */}
+                <div className="space-y-4 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-2xl">
+                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#C96A3D]">
+                    <Sparkles className="w-4 h-4 animate-pulse" />
+                    AI Intelligence & Voice
+                  </h4>
 
-            {/* Firebase Connection Test Block */}
-            <div className="space-y-4 p-5 bg-indigo-50/20 dark:bg-slate-900/40 border border-indigo-100 dark:border-slate-800 rounded-2xl">
-              <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#14213D] dark:text-slate-300">
-                <Database className="w-4 h-4 text-indigo-500" />
-                Firebase Connection Diagnostics
-              </h4>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-normal">
-                Verify Firestore document writes, reads, and connection reliability through live operations.
-              </p>
-
-              <button
-                type="button"
-                onClick={runConnectionTest}
-                disabled={testStatus === "loading"}
-                className="w-full flex justify-center items-center gap-2 py-2.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl transition-all cursor-pointer shadow-3xs"
-              >
-                {testStatus === "loading" ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Testing Connection...
-                  </>
-                ) : (
-                  <>
-                    <Wifi className="w-3.5 h-3.5" />
-                    Run Firebase Connection Test
-                  </>
-                )}
-              </button>
-
-              {testStatus === "success" && (
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 rounded-xl space-y-1.5 animate-fade-in">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle className="w-4 h-4 shrink-0" />
-                    ✅ Firebase Connected Successfully
+                  {/* Default AI Mode */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300">
+                      Default AI Agent Mode
+                    </label>
+                    <select
+                      value={settings.defaultAiMode || "general"}
+                      onChange={(e) => onUpdateSettings({ defaultAiMode: e.target.value as any })}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
+                    >
+                      <option value="general">General AI Assistant</option>
+                      <option value="research">Deep Research Specialist</option>
+                      <option value="study">Study Guide & Tutor</option>
+                      <option value="factcheck">Nexa Fact Checker</option>
+                      <option value="writing">Creative Writing Expert</option>
+                      <option value="quiz">Interactive MCQ Quiz Arena</option>
+                    </select>
                   </div>
-                  {testDetails && (
-                    <pre className="text-[10px] font-mono text-slate-600 dark:text-slate-400 bg-white/50 dark:bg-slate-900/50 p-2 rounded-lg overflow-x-auto border border-slate-100 dark:border-slate-800 leading-normal">
-                      {testDetails}
-                    </pre>
-                  )}
+
+                  {/* Voice Settings Selection */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300 flex items-center gap-1">
+                      <Mic className="w-3.5 h-3.5 text-[#C96A3D]" />
+                      Voice Playback Settings
+                    </label>
+                    <select
+                      value={settings.voiceSetting || "optimal-google"}
+                      onChange={(e) => onUpdateSettings({ voiceSetting: e.target.value })}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
+                    >
+                      <option value="optimal-google">Optimal (Google US English)</option>
+                      <option value="alloy">Alloy (Warm & Balanced)</option>
+                      <option value="echo">Echo (Professional Male)</option>
+                      <option value="fable">Fable (Narrative & Expressive)</option>
+                      <option value="onyx">Onyx (Deep Baritone)</option>
+                      <option value="nova">Nova (Bright & Clear Female)</option>
+                      <option value="shimmer">Shimmer (Professional Female)</option>
+                    </select>
+                  </div>
+
+                  {/* Personalization Context Memory */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300">
+                        Personalization Memory Context
+                      </label>
+                      <span className="text-[9px] font-black uppercase text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-full select-none">
+                        Active
+                      </span>
+                    </div>
+                    <textarea
+                      value={personalization}
+                      onChange={(e) => setPersonalization(e.target.value)}
+                      placeholder="Tell Nexa who you are (e.g. 'I am a 10yo student learning coding.') or specify your preference styles."
+                      rows={3}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors placeholder:text-slate-400 leading-snug"
+                    />
+                  </div>
                 </div>
-              )}
 
-              {testStatus === "error" && (
-                <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-xl space-y-1.5 animate-fade-in">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400">
-                    <X className="w-4 h-4 shrink-0" />
-                    ❌ Firebase Connection Failed
-                  </div>
-                  {testError && (
-                    <div className="text-[10px] font-mono text-rose-700 dark:text-rose-400 bg-white/50 dark:bg-slate-900/50 p-2 rounded-lg overflow-x-auto border border-rose-100 dark:border-rose-950/40 leading-relaxed max-h-32">
-                      {testError}
+              </div>
+
+              {/* Right Column: Support & Account Settings */}
+              <div className="space-y-6">
+                
+                {/* Support Section */}
+                <div className="space-y-4 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-2xl">
+                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-400">
+                    <HelpCircle className="w-4 h-4" />
+                    Support
+                  </h4>
+
+                  {/* 💬 Send Feedback Action */}
+                  {onOpenFeedback && (
+                    <div className="space-y-2">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal leading-relaxed">
+                        Have suggestions or noticed a bug? Submit a report directly to the development team.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={onOpenFeedback}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-3xs cursor-pointer transition-all active:scale-98 hover:scale-[1.01]"
+                      >
+                        <span className="text-sm">💬</span>
+                        <span>Send Feedback</span>
+                      </button>
                     </div>
                   )}
-                </div>
-              )}
-            </div>
 
-          </div>
-
-          {/* Right panel: Personalization Context & Privacy */}
-          <div className="space-y-6">
-            
-            {/* Personalization Memory Context */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest flex items-center justify-between">
-                <span>Personalization Context</span>
-                <span className="text-[10px] text-indigo-500 font-bold bg-indigo-500/10 px-2 py-0.5 rounded-full">
-                  Memory Active
-                </span>
-              </label>
-              <textarea
-                value={personalization}
-                onChange={(e) => setPersonalization(e.target.value)}
-                placeholder="Teach Nexa who you are! e.g., 'I am a 10-year old student learning geometry.' or 'Explain coding using advanced type systems.'"
-                rows={4}
-                className="w-full text-sm py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors placeholder:text-slate-400 text-left font-normal"
-              />
-              <p className="text-[10px] text-slate-400 leading-relaxed font-normal">
-                This context is transparently combined with our Smart routing prompts as proprietary metadata memory, establishing a tailored response engine.
-              </p>
-            </div>
-
-            {/* Privacy Save History */}
-            <div className="space-y-3">
-              <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest">
-                Privacy Controls
-              </label>
-              <div className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-xl">
-                <div className="flex items-center gap-2.5">
-                  <EyeOff className="w-4 h-4 text-slate-400 shrink-0" />
-                  <div>
-                    <h5 className="text-xs font-semibold text-[#14213D] dark:text-slate-200">
-                      Record Thread History
+                  {/* Firebase diagnostics nested inside Support */}
+                  <div className="pt-3.5 border-t border-slate-150 dark:border-slate-800/60 space-y-3">
+                    <h5 className="text-[11px] font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-indigo-500" />
+                      Cloud Connection Diagnostics
                     </h5>
-                    <p className="text-[10px] text-slate-400 font-normal">
-                      Store local logs to cache recent chat context.
+                    <p className="text-[10px] text-slate-400 font-normal leading-snug">
+                      Verify Firestore document write/read permissions and cloud reliability live.
                     </p>
+
+                    <button
+                      type="button"
+                      onClick={runConnectionTest}
+                      disabled={testStatus === "loading"}
+                      className="w-full flex justify-center items-center gap-2 py-2 text-[11px] font-bold bg-white dark:bg-slate-900 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:text-indigo-600 dark:hover:text-indigo-400 text-slate-600 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-slate-800 transition-all cursor-pointer shadow-3xs"
+                    >
+                      {testStatus === "loading" ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                          Testing Connection...
+                        </>
+                      ) : (
+                        <>
+                          <Wifi className="w-3.5 h-3.5" />
+                          Test Cloud Connection
+                        </>
+                      )}
+                    </button>
+
+                    {testStatus === "success" && (
+                      <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-900/40 rounded-xl space-y-1 animate-fade-in">
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                          <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                          Connected Successfully
+                        </div>
+                        {testDetails && (
+                          <pre className="text-[8.5px] font-mono text-slate-500 dark:text-slate-400 bg-white/40 dark:bg-slate-900/40 p-2 rounded-lg overflow-x-auto border border-slate-100/50 dark:border-slate-850">
+                            {testDetails}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    {testStatus === "error" && (
+                      <div className="p-2.5 bg-rose-50 dark:bg-rose-950/20 border border-rose-200/50 dark:border-rose-900/40 rounded-xl space-y-1 animate-fade-in">
+                        <div className="flex items-center gap-1 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                          <X className="w-3.5 h-3.5 shrink-0" />
+                          Connection Failed
+                        </div>
+                        {testError && (
+                          <div className="text-[8.5px] font-mono text-rose-600 dark:text-rose-400 bg-white/40 dark:bg-slate-900/40 p-2 rounded-lg max-h-24 overflow-y-auto border border-rose-100/40">
+                            {testError}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <input
-                  type="checkbox"
-                  checked={settings.privacySaveHistory}
-                  onChange={(e) => onUpdateSettings({ privacySaveHistory: e.target.checked })}
-                  className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
-                />
-              </div>
 
-              {/* Nexa Turbo Mode */}
-              <div className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-xl">
-                <div className="flex items-center gap-2.5">
-                  <Sparkles className="w-4 h-4 text-[#C96A3D] shrink-0 animate-pulse" />
-                  <div>
-                    <h5 className="text-xs font-semibold text-[#14213D] dark:text-slate-200">
-                      Nexa Turbo Mode
+                {/* Account Section */}
+                <div className="space-y-4 p-5 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-2xl">
+                  <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
+                    <User className="w-4 h-4" />
+                    Account
+                  </h4>
+
+                  {/* Profile Avatar Selection Row */}
+                  <div className="flex items-center gap-4 py-1" id="avatar-selector-section">
+                    {avatarUrlState ? (
+                      <img
+                        src={avatarUrlState}
+                        alt={profileName}
+                        className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-800 shadow-3xs"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-base shadow-sm">
+                        {profileName ? profileName[0].toUpperCase() : "U"}
+                      </div>
+                    )}
+                    
+                    <div className="space-y-1 flex-1">
+                      <span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Profile Image</span>
+                      <div className="flex gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="text-[9.5px] bg-white dark:bg-slate-800 hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] hover:text-white text-slate-700 dark:text-slate-300 font-bold py-1 px-2.5 rounded-lg border border-slate-200/60 dark:border-slate-800 transition-colors cursor-pointer"
+                        >
+                          Upload File
+                        </button>
+                        {avatarUrlState && (
+                          <button
+                            type="button"
+                            onClick={() => setAvatarUrlState(undefined)}
+                            className="text-[9.5px] bg-rose-50 dark:bg-rose-950/20 text-rose-500 hover:bg-rose-550 hover:text-white font-bold py-1 px-2.5 rounded-lg border border-rose-100 dark:border-rose-900/20 transition-all cursor-pointer"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        accept="image/*"
+                        onChange={handleFileChange}
+                        className="hidden"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Name Input */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300">Display Name</label>
+                    <input
+                      type="text"
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-all font-semibold"
+                    />
+                  </div>
+
+                  {/* Email details */}
+                  <div className="p-2.5 bg-white/50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-850 rounded-xl flex flex-col gap-0.5 leading-snug">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Email Address</span>
+                    <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 truncate">{user.email || "Active User"}</span>
+                    {user.isGuest && (
+                      <span className="text-[9px] text-amber-500 font-extrabold uppercase mt-1">Guest Mode Session</span>
+                    )}
+                  </div>
+
+                  {/* 🚪 Logout Button */}
+                  {onLogout && !user.isGuest && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onLogout();
+                        onClose();
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 px-4 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white font-bold text-xs rounded-xl shadow-3xs cursor-pointer transition-all active:scale-98 hover:scale-[1.01]"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Logout Account</span>
+                    </button>
+                  )}
+
+                  {/* Danger Zone Purge Action */}
+                  <div className="pt-3.5 border-t border-slate-150 dark:border-slate-800/60 space-y-1.5">
+                    <h5 className="text-[10px] font-bold text-rose-500 uppercase tracking-widest flex items-center gap-1">
+                      Danger Zone
                     </h5>
-                    <p className="text-[10px] text-slate-400 font-normal">
-                      Enable ultra-low latency & 10x faster replies.
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm("Are you sure you want to delete all conversations permanently? This cannot be undone.")) {
+                          onClearChats();
+                        }
+                      }}
+                      className="w-full flex justify-center items-center gap-1.5 py-2 text-[10px] font-semibold text-rose-500 hover:text-white border border-rose-100 dark:border-rose-900/20 bg-rose-500/5 hover:bg-rose-500 dark:hover:bg-rose-600 rounded-lg transition-all cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Purge Local History
+                    </button>
                   </div>
+
                 </div>
-                <input
-                  type="checkbox"
-                  checked={settings.turboMode !== false}
-                  onChange={(e) => onUpdateSettings({ turboMode: e.target.checked })}
-                  className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
-                />
+
               </div>
 
-              {/* Sound Effects Active toggle */}
-              <div className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-900/30 border border-slate-100 dark:border-slate-800 rounded-xl">
-                <div className="flex items-center gap-2.5">
-                  <Volume2 className="w-4 h-4 text-[#C96A3D] shrink-0" />
-                  <div>
-                    <h5 className="text-xs font-semibold text-[#14213D] dark:text-slate-200">
-                      🔊 Sound Effects
-                    </h5>
-                    <p className="text-[10px] text-slate-400 font-normal">
-                      Subtle audio responses for modern, premium feedback.
-                    </p>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.soundEffectsActive !== false}
-                  onChange={(e) => onUpdateSettings({ soundEffectsActive: e.target.checked })}
-                  className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
-                />
-              </div>
             </div>
-
-            {/* Device & Storage Privileges */}
-            <div className="space-y-3">
-              <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest flex items-center gap-1">
-                <Shield className="w-4 h-4 text-[#C96A3D]" />
-                Device & File Privileges
-              </label>
-              
-              <div className="grid grid-cols-2 gap-2 text-left">
-                {/* Camera Toggle */}
-                <button
-                  type="button"
-                  onClick={() => onUpdatePermissions({ ...permissions, camera: !permissions.camera })}
-                  className={`p-2.5 px-3 border rounded-xl flex items-center justify-between gap-1.5 transition-all select-none cursor-pointer text-left ${
-                    permissions.camera 
-                      ? "border-emerald-250 bg-emerald-500/5 dark:bg-emerald-500/5 text-slate-800 dark:text-slate-200" 
-                      : "border-slate-100 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/10 text-slate-500 hover:border-slate-250"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <Camera className={`w-3.5 h-3.5 shrink-0 ${permissions.camera ? "text-emerald-500" : "text-slate-400"}`} />
-                    <span className="text-[10.5px] font-bold">Camera</span>
-                  </div>
-                  <span className={`text-[8px] font-bold uppercase shrink-0 px-1 rounded ${
-                    permissions.camera ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" : "bg-slate-100 dark:bg-slate-800 text-slate-400"
-                  }`}>
-                    {permissions.camera ? "Allowed" : "Blocked"}
-                  </span>
-                </button>
-
-                {/* Photos Toggle */}
-                <button
-                  type="button"
-                  onClick={() => onUpdatePermissions({ ...permissions, photos: !permissions.photos })}
-                  className={`p-2.5 px-3 border rounded-xl flex items-center justify-between gap-1.5 transition-all select-none cursor-pointer text-left ${
-                    permissions.photos 
-                      ? "border-sky-250 bg-sky-500/5 dark:bg-sky-500/5 text-slate-800 dark:text-slate-200" 
-                      : "border-slate-100 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/10 text-slate-500 hover:border-slate-250"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <Image className={`w-3.5 h-3.5 shrink-0 ${permissions.photos ? "text-sky-500" : "text-slate-400"}`} />
-                    <span className="text-[10.5px] font-bold">Photos</span>
-                  </div>
-                  <span className={`text-[8px] font-bold uppercase shrink-0 px-1 rounded ${
-                    permissions.photos ? "bg-sky-500/15 text-sky-600 dark:text-sky-400" : "bg-slate-100 dark:bg-slate-800 text-slate-400"
-                  }`}>
-                    {permissions.photos ? "Allowed" : "Blocked"}
-                  </span>
-                </button>
-
-                {/* Document Toggle */}
-                <button
-                  type="button"
-                  onClick={() => onUpdatePermissions({ ...permissions, document: !permissions.document })}
-                  className={`p-2.5 px-3 border rounded-xl flex items-center justify-between gap-1.5 transition-all select-none cursor-pointer text-left ${
-                    permissions.document 
-                      ? "border-amber-250 bg-amber-500/5 dark:bg-amber-500/5 text-slate-800 dark:text-slate-200" 
-                      : "border-slate-100 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/10 text-slate-500 hover:border-slate-250"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <FileText className={`w-3.5 h-3.5 shrink-0 ${permissions.document ? "text-amber-500" : "text-slate-400"}`} />
-                    <span className="text-[10.5px] font-bold">Documents</span>
-                  </div>
-                  <span className={`text-[8px] font-bold uppercase shrink-0 px-1 rounded ${
-                    permissions.document ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-slate-100 dark:bg-slate-800 text-slate-400"
-                  }`}>
-                    {permissions.document ? "Allowed" : "Blocked"}
-                  </span>
-                </button>
-
-                {/* Microphone Toggle */}
-                <button
-                  type="button"
-                  onClick={() => onUpdatePermissions({ ...permissions, microphone: !permissions.microphone })}
-                  className={`p-2.5 px-3 border rounded-xl flex items-center justify-between gap-1.5 transition-all select-none cursor-pointer text-left ${
-                    permissions.microphone 
-                      ? "border-[#C96A3D]/45 bg-[#C96A3D]/5 dark:bg-[#C96A3D]/5 text-slate-800 dark:text-slate-200" 
-                      : "border-slate-100 dark:border-slate-800/60 bg-slate-50/40 dark:bg-slate-900/10 text-slate-500 hover:border-slate-250"
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <Mic className={`w-3.5 h-3.5 shrink-0 ${permissions.microphone ? "text-[#C96A3D]" : "text-slate-400"}`} />
-                    <span className="text-[10.5px] font-bold">Microphone</span>
-                  </div>
-                  <span className={`text-[8px] font-bold uppercase shrink-0 px-1 rounded ${
-                    permissions.microphone ? "bg-[#C96A3D]/15 text-[#C96A3D]" : "bg-slate-100 dark:bg-slate-800 text-slate-400"
-                  }`}>
-                    {permissions.microphone ? "Allowed" : "Blocked"}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-
-            {/* Data Purge action */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-rose-500 uppercase tracking-widest">
-                Danger Zone
-              </label>
-              <button
-                onClick={() => {
-                  if (confirm("Are you sure you want to delete all conversations permanently? This cannot be undone.")) {
-                    onClearChats();
-                  }
-                }}
-                className="w-full flex justify-center items-center gap-2 py-2.5 text-xs font-semibold text-rose-500 hover:text-white border border-rose-200 dark:border-rose-900/50 hover:bg-rose-500 hover:border-rose-500 dark:hover:bg-rose-600 rounded-xl transition-all"
-              >
-                <Trash2 className="w-4 h-4" />
-                Purge All Local Conversations
-              </button>
-            </div>
-
-          </div>
-
-        </div>
 
             {/* Footer/Save Action */}
             <div className="flex justify-between items-center border-t border-slate-100 dark:border-slate-800 mt-8 pt-4">

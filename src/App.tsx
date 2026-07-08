@@ -265,6 +265,8 @@ export default function App() {
       turboMode: true,
       isAdminVerified: false,
       soundEffectsActive: true,
+      defaultAiMode: "general",
+      voiceSetting: "optimal-google",
     };
   });
 
@@ -2219,6 +2221,11 @@ export default function App() {
         onUpdatePermissions={(newPerms) => {
           setPermissions(newPerms);
           safeStorage.setItem("nexa-device-permissions", JSON.stringify(newPerms));
+        }}
+        onLogout={handleLogout}
+        onOpenFeedback={() => {
+          setShowSettings(false);
+          setIsFeedbackOpen(true);
         }}
       />
 

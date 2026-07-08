@@ -110,6 +110,8 @@ export interface AppSettings {
   turboMode?: boolean;
   isAdminVerified?: boolean;
   soundEffectsActive?: boolean;
+  defaultAiMode?: "general" | "research" | "study" | "factcheck" | "writing" | "quiz";
+  voiceSetting?: string;
 }
 
 export interface AdminMetrics {

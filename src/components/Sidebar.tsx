@@ -23,6 +23,9 @@ import {
   LogOut,
   Sliders,
   Settings,
+  CheckCircle,
+  PencilLine,
+  LogIn,
 } from "lucide-react";
 import { ChatSession, UserProfile } from "../types";
 
@@ -98,14 +101,6 @@ export function Sidebar({
       if (!a.isPinned && b.isPinned) return 1;
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
-
-  const modesMap = [
-    { id: "general", name: "Core General Chat", desc: "Everyday brainstorming & assistance.", icon: <HelpCircle className="w-4 h-4" /> },
-    { id: "research", name: "Deep Research Mode", desc: "Multi-source research detailed reports.", icon: <Search className="w-4 h-4" /> },
-    { id: "study", name: "Study Mode Arena", desc: "Homework assistant & note generator.", icon: <GraduationCap className="w-4 h-4" /> },
-    { id: "factcheck", name: "Fact Check Mode", desc: "Verify claims & information metrics.", icon: <BookmarkCheck className="w-4 h-4" /> },
-    { id: "writing", name: "Writing Assistant", desc: "Draft essays, application forms, articles.", icon: <PenTool className="w-4 h-4" /> },
-  ] as const;
 
   return (
     <aside
@@ -296,106 +291,89 @@ export function Sidebar({
           </div>
         </div>
 
-      </div>
-
-      {/* Upgrade to Premium Sidebar Banner */}
-      <div className="px-4 pb-2 pt-1 shrink-0" id="sidebar-premium-upgrade-container">
-        <button
-          onClick={() => {
-            onOpenPremium?.();
-            onCloseMobile?.();
-          }}
-          className="relative overflow-hidden w-full flex items-center justify-between p-3.5 bg-gradient-to-r from-[#C96A3D] via-[#e25714] to-[#f47c36] text-white rounded-2xl shadow-md cursor-pointer transition-all hover:scale-[1.02] hover:shadow-lg active:scale-98 select-none animate-premium-glow"
-          title="Upgrade to Nexa Premium"
-        >
-          {/* Inner sliding shine animation */}
-          <div className="animate-premium-shine" />
-          
-          <div className="relative z-10 flex items-center gap-2.5 text-left">
-            <div className="p-1.5 bg-white/15 rounded-xl border border-white/20 select-none shrink-0">
-              <span className="text-sm">✨</span>
-            </div>
-            <div>
-              <p className="text-[11.5px] font-black tracking-tight leading-none text-white">
-                Nexa Premium
-              </p>
-              <p className="text-[9.5px] font-semibold text-amber-200 mt-0.5 leading-none">
-                Unlock next-gen AI tools
-              </p>
-            </div>
+        {/* C: Other AI Tools Section */}
+        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            Other AI Tools
+          </h4>
+          <div className="grid grid-cols-1 gap-1">
+            {[
+              { id: "general", label: "Core General Chat", icon: <HelpCircle className="w-4 h-4 shrink-0 text-[#C96A3D]" /> },
+              { id: "research", label: "Deep Research Mode", icon: <Search className="w-4 h-4 shrink-0 text-rose-500" /> },
+              { id: "study", label: "Study Mode Arena", icon: <GraduationCap className="w-4 h-4 shrink-0 text-emerald-500" /> },
+              { id: "factcheck", label: "Fact Check Mode", icon: <CheckCircle className="w-4 h-4 shrink-0 text-indigo-500" /> },
+              { id: "writing", label: "Writing Assistant", icon: <PencilLine className="w-4 h-4 shrink-0 text-orange-500" /> },
+              { id: "quiz", label: "MCQ Quiz Arena", icon: <GraduationCap className="w-4 h-4 shrink-0 text-amber-500 animate-pulse" /> },
+            ].map((item) => {
+              const isActive = activeMode === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onChangeMode(item.id as any);
+                    onCloseMobile?.();
+                  }}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold select-none transition-all cursor-pointer ${
+                    isActive
+                      ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
+                      : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
+                  }`}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
           </div>
-          
-          <div className="relative z-10 shrink-0 select-none text-[10px] font-extrabold bg-white/15 border border-white/20 rounded-lg px-2 py-1 uppercase tracking-wider">
-            Join
-          </div>
-        </button>
-      </div>
+        </div>
 
-      {/* Send Feedback Sidebar Option */}
-      {onOpenFeedback && (
-        <div className="px-4 pb-2 pt-1 shrink-0" id="sidebar-feedback-action-container">
+        {/* D: Settings Section */}
+        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
+          <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            Preferences & Settings
+          </h4>
           <button
             onClick={() => {
-              onOpenFeedback();
+              onOpenSettings?.();
               onCloseMobile?.();
             }}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:bg-slate-100 dark:hover:bg-slate-850 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-200 transition-all font-semibold text-xs text-left cursor-pointer active:scale-98 shadow-3xs hover:shadow-2xs"
-            title="Send feedback directly to the team"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-transparent hover:border-slate-100 dark:hover:border-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 text-slate-500 hover:text-[#C96A3D] text-xs font-semibold select-none transition-all cursor-pointer"
           >
-            <div className="flex items-center gap-2">
-              <span className="text-indigo-500">💬</span>
-              <span>Send Feedback</span>
-            </div>
-            <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-extrabold uppercase tracking-widest bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded-md border border-indigo-100 dark:border-indigo-900/20">
-              NATIVE
-            </span>
+            <Settings className="w-4 h-4 shrink-0 text-slate-400 group-hover:text-[#C96A3D]" />
+            <span>Settings</span>
           </button>
         </div>
-      )}
 
-      {/* Settings Sidebar Option */}
-      {onOpenSettings && (
-        <div className="px-4 pb-3 pt-1 shrink-0" id="sidebar-settings-action-container">
-          <button
-            onClick={() => {
-              onOpenSettings();
-              onCloseMobile?.();
-            }}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-slate-200/60 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:bg-slate-100 dark:hover:bg-slate-850 hover:border-slate-300 dark:hover:border-slate-700 text-slate-700 dark:text-slate-200 transition-all font-semibold text-xs text-left cursor-pointer active:scale-98 shadow-3xs hover:shadow-2xs"
-            title="Configure model options, system prompts & voice settings"
-          >
-            <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-slate-550 dark:text-slate-400" />
-              <span>Settings</span>
-            </div>
-            <span className="text-[9px] text-slate-500 dark:text-slate-400 font-extrabold uppercase tracking-widest bg-slate-50 dark:bg-slate-900 px-1.5 py-0.5 rounded-md border border-slate-100 dark:border-slate-800/50">
-              PREFS
-            </span>
-          </button>
-        </div>
-      )}
+      </div>
 
-      {/* Guest Mode Conversion Panel Warning footer */}
+
+
+      {/* Guest Mode Sign-In / Account footer */}
       {user.isGuest ? (
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 text-xs shrink-0">
-          <div className="flex gap-2.5 items-start p-3 bg-indigo-500/5 rounded-2xl border border-indigo-500/10">
-            <AlertCircle className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5 animate-pulse" />
-            <div className="text-left space-y-1 session-guest-box">
-              <h5 className="font-bold text-slate-700 dark:text-slate-200">Sync Guest Threads</h5>
-              <p className="text-[10px] text-slate-400 leading-relaxed font-normal">
-                Authorize email or google to safely lock your bookmarks, preferences and histories.
+        <div className="p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <div className="w-9 h-9 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm">
+              G
+            </div>
+            <div className="text-left min-w-0 flex-1 leading-snug">
+              <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
+                Guest User
+              </h5>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate font-mono">
+                Sign in to sync logs
               </p>
-              <button
-                onClick={() => {
-                  onOpenAuth();
-                  onCloseMobile?.();
-                }}
-                className="text-[#C96A3D] hover:text-[#14213D] font-extrabold text-[10px] tracking-wide inline-block pt-1 cursor-pointer underline"
-              >
-                Authenticate Now &rarr;
-              </button>
             </div>
           </div>
+          <button
+            onClick={() => {
+              onOpenAuth();
+              onCloseMobile?.();
+            }}
+            className="flex items-center gap-1.5 py-2 px-3 bg-[#14213D] dark:bg-white hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] text-white dark:text-[#14213D] dark:hover:text-white text-[11px] font-bold rounded-xl shadow-3xs cursor-pointer transition-all active:scale-95"
+          >
+            <LogIn className="w-3.5 h-3.5 shrink-0" />
+            <span>Sign In</span>
+          </button>
         </div>
       ) : (
         /* Logged-In User Profile bottom footer */
@@ -416,27 +394,10 @@ export function Sidebar({
               <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
                 {user.fullName}
               </h5>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate font-mono">
-                {user.email || "Active User"}
+              <p className="text-[10px] text-[#C96A3D] dark:text-[#C96A3D] font-black truncate font-mono text-[9px] bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full inline-block mt-0.5 w-max">
+                {user.gamification?.points || 0} XP
               </p>
             </div>
-          </div>
-          
-          <div className="flex items-center gap-1 shrink-0">
-            {/* Logout button */}
-            {onLogout && (
-              <button
-                onClick={() => {
-                  onLogout();
-                  onCloseMobile?.();
-                }}
-                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 bg-white dark:bg-slate-900 hover:shadow-3xs transition-all cursor-pointer active:scale-95"
-                title="Logout"
-                id="sidebar-logout-btn"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
           </div>
         </div>
       )}

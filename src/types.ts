@@ -113,6 +113,10 @@ export interface AppSettings {
   soundEffectsActive?: boolean;
   defaultAiMode?: "general" | "research" | "study" | "factcheck" | "writing" | "quiz";
   voiceSetting?: string;
+  voiceAutoSend?: boolean;
+  voiceAutoPlay?: boolean;
+  voiceSpeed?: number;
+  voiceLanguage?: string;
 }
 
 export interface AdminMetrics {

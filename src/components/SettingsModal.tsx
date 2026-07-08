@@ -381,24 +381,129 @@ export function SettingsModal({
                   </div>
 
                   {/* Voice Settings Selection */}
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-[#14213D] dark:text-slate-300 flex items-center gap-1">
-                      <Mic className="w-3.5 h-3.5 text-[#C96A3D]" />
-                      Voice Playback Settings
-                    </label>
-                    <select
-                      value={settings.voiceSetting || "optimal-google"}
-                      onChange={(e) => onUpdateSettings({ voiceSetting: e.target.value })}
-                      className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
-                    >
-                      <option value="optimal-google">Optimal (Google US English)</option>
-                      <option value="alloy">Alloy (Warm & Balanced)</option>
-                      <option value="echo">Echo (Professional Male)</option>
-                      <option value="fable">Fable (Narrative & Expressive)</option>
-                      <option value="onyx">Onyx (Deep Baritone)</option>
-                      <option value="nova">Nova (Bright & Clear Female)</option>
-                      <option value="shimmer">Shimmer (Professional Female)</option>
-                    </select>
+                  <div className="space-y-4 p-4 border border-slate-100 dark:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/30 rounded-2xl">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800/40">
+                      <Mic className="w-4 h-4 text-[#C96A3D]" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#14213D] dark:text-slate-200">
+                        Voice Experience Settings
+                      </h4>
+                    </div>
+
+                    {/* Voice Selection */}
+                    <div className="space-y-1.5">
+                      <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                        Voice Selection
+                      </label>
+                      <select
+                        value={settings.voiceSetting || "optimal-google"}
+                        onChange={(e) => onUpdateSettings({ voiceSetting: e.target.value })}
+                        className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
+                      >
+                        <option value="optimal-google">Optimal (Google US English)</option>
+                        <option value="alloy">Alloy (Warm & Balanced)</option>
+                        <option value="echo">Echo (Professional Male)</option>
+                        <option value="fable">Fable (Narrative & Expressive)</option>
+                        <option value="onyx">Onyx (Deep Baritone)</option>
+                        <option value="nova">Nova (Bright & Clear Female)</option>
+                        <option value="shimmer">Shimmer (Professional Female)</option>
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Voice Language */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                          <Globe className="w-3 h-3 text-slate-400" />
+                          Language
+                        </label>
+                        <select
+                          value={settings.voiceLanguage || "en-US"}
+                          onChange={(e) => onUpdateSettings({ voiceLanguage: e.target.value })}
+                          className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
+                        >
+                          <option value="en-US">English (United States)</option>
+                          <option value="en-GB">English (Great Britain)</option>
+                          <option value="es-ES">Spanish (Spain)</option>
+                          <option value="fr-FR">French (France)</option>
+                          <option value="de-DE">German (Germany)</option>
+                          <option value="it-IT">Italian (Italy)</option>
+                          <option value="ja-JP">Japanese (Japan)</option>
+                          <option value="zh-CN">Chinese (Simplified)</option>
+                        </select>
+                      </div>
+
+                      {/* Voice Speed */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                          <Sliders className="w-3 h-3 text-slate-400" />
+                          Voice Speed
+                        </label>
+                        <select
+                          value={settings.voiceSpeed || 1.0}
+                          onChange={(e) => onUpdateSettings({ voiceSpeed: parseFloat(e.target.value) })}
+                          className="w-full text-xs py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors cursor-pointer font-semibold"
+                        >
+                          <option value="0.75">0.75x (Slower)</option>
+                          <option value="0.9">0.9x (Relaxed)</option>
+                          <option value="1.0">1.0x (Normal)</option>
+                          <option value="1.15">1.15x (Brisk)</option>
+                          <option value="1.3">1.3x (Fast)</option>
+                          <option value="1.5">1.5x (Super Fast)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5 pt-1">
+                      {/* Auto Send Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="block text-xs font-bold text-[#14213D] dark:text-slate-200">
+                            Auto Send Speech
+                          </label>
+                          <span className="text-[10px] text-slate-400">
+                            Submit chat immediately after silence
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSettings({ voiceAutoSend: settings.voiceAutoSend === false })}
+                          className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
+                            settings.voiceAutoSend !== false ? "bg-[#C96A3D]" : "bg-slate-200 dark:bg-slate-700"
+                          }`}
+                        >
+                          <div
+                            className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-200 ease-in-out ${
+                              settings.voiceAutoSend !== false ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Auto Play Replies Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <label className="block text-xs font-bold text-[#14213D] dark:text-slate-200">
+                            Auto Play Voice Replies
+                          </label>
+                          <span className="text-[10px] text-slate-400">
+                            AI replies will be read aloud automatically
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSettings({ voiceAutoPlay: settings.voiceAutoPlay === false })}
+                          className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer focus:outline-none ${
+                            settings.voiceAutoPlay !== false ? "bg-[#C96A3D]" : "bg-slate-200 dark:bg-slate-700"
+                          }`}
+                        >
+                          <div
+                            className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-200 ease-in-out ${
+                              settings.voiceAutoPlay !== false ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Personalization Context Memory */}

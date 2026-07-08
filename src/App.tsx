@@ -66,7 +66,7 @@ import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
 import { auth, db } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, setDoc, getDoc, collection, getDocs, deleteDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
@@ -135,12 +135,25 @@ export default function App() {
   const [pendingCameraTrigger, setPendingCameraTrigger] = useState(false);
   const [pendingMicrophoneTrigger, setPendingMicrophoneTrigger] = useState(false);
 
-  // Speech-to-Text Dictation State & Refs
+  // Modern AI Voice Mode States & Refs
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
+  const [voiceModeActive, setVoiceModeActive] = useState(false);
+  const [voiceState, setVoiceState] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
   const recognitionRef = useRef<any>(null);
   const startingPromptRef = useRef("");
   const lastWriteEmailRef = useRef<string>("");
+  const accumulatedTranscriptRef = useRef("");
+  const voiceModeActiveRef = useRef(false);
+  const voiceStateRef = useRef<"idle" | "listening" | "processing" | "speaking">("idle");
+
+  useEffect(() => {
+    voiceModeActiveRef.current = voiceModeActive;
+  }, [voiceModeActive]);
+
+  useEffect(() => {
+    voiceStateRef.current = voiceState;
+  }, [voiceState]);
 
   useEffect(() => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -148,6 +161,166 @@ export default function App() {
       setSpeechSupported(false);
     }
   }, []);
+
+  const startListeningSession = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    try {
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = settingsRef.current.voiceLanguage || "en-US";
+
+      rec.onstart = () => {
+        setVoiceState("listening");
+        setIsListening(true);
+      };
+
+      rec.onresult = (event: any) => {
+        let interimTranscript = "";
+        let finalTranscript = "";
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const transcriptSegment = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcriptSegment;
+          } else {
+            interimTranscript += transcriptSegment;
+          }
+        }
+
+        const currentText = (finalTranscript || interimTranscript).trim();
+        if (currentText) {
+          accumulatedTranscriptRef.current = currentText;
+          setInputPrompt(currentText);
+        }
+      };
+
+      rec.onerror = (e: any) => {
+        const errorType = e.rawError || e.error || e;
+        if (errorType !== "no-speech") {
+          console.warn("Nexa Voice Mode Speech API Error:", errorType);
+        }
+      };
+
+      rec.onend = () => {
+        if (voiceModeActiveRef.current) {
+          const textToSubmit = accumulatedTranscriptRef.current.trim();
+          if (textToSubmit) {
+            if (settingsRef.current.voiceAutoSend !== false) {
+              accumulatedTranscriptRef.current = "";
+              setVoiceState("processing");
+              setIsListening(false);
+              handleChatSubmit(textToSubmit);
+            } else {
+              setVoiceState("idle");
+              setVoiceModeActive(false);
+              setIsListening(false);
+            }
+          } else {
+            if (voiceStateRef.current === "listening" && voiceModeActiveRef.current) {
+              setTimeout(() => {
+                if (voiceStateRef.current === "listening" && voiceModeActiveRef.current) {
+                  try {
+                    rec.start();
+                  } catch (e) {}
+                }
+              }, 200);
+            }
+          }
+        } else {
+          setVoiceState("idle");
+          setIsListening(false);
+        }
+      };
+
+      recognitionRef.current = rec;
+      rec.start();
+    } catch (err) {
+      console.error("Failed to start voice session:", err);
+      setVoiceState("idle");
+      setVoiceModeActive(false);
+      setIsListening(false);
+    }
+  };
+
+  const speakUtterance = (text: string, onEndCallback?: () => void) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      if (onEndCallback) onEndCallback();
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    const cleanSpeechText = text
+      .replace(/\*\*|__/g, "")
+      .replace(/\*|_/g, "")
+      .replace(/`{3}[\s\S]*?`{3}/g, "[Code snippet omitted]")
+      .replace(/`[^`]+`/g, "")
+      .replace(/#+\s+/g, "")
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
+      .replace(/>\s+/g, "")
+      .replace(/[-*+]\s+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!cleanSpeechText) {
+      if (onEndCallback) onEndCallback();
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(cleanSpeechText);
+    utterance.rate = settingsRef.current.voiceSpeed || 1.0;
+    utterance.lang = settingsRef.current.voiceLanguage || "en-US";
+
+    const voices = window.speechSynthesis.getVoices();
+    let optimalVoice = null;
+    const vSet = settingsRef.current.voiceSetting || "optimal-google";
+
+    if (vSet === "alloy") {
+      optimalVoice = voices.find(v => v.name.toLowerCase().includes("alloy") || v.name.toLowerCase().includes("natural") || v.name.toLowerCase().includes("english"));
+    } else if (vSet === "echo") {
+      optimalVoice = voices.find(v => v.name.toLowerCase().includes("male") || v.name.toLowerCase().includes("david") || v.name.toLowerCase().includes("google"));
+    } else if (vSet === "fable") {
+      optimalVoice = voices.find(v => v.name.toLowerCase().includes("fable") || v.name.toLowerCase().includes("microsoft") || v.name.toLowerCase().includes("zira"));
+    } else if (vSet === "onyx") {
+      optimalVoice = voices.find(v => v.name.toLowerCase().includes("onyx") || v.name.toLowerCase().includes("baritone") || v.name.toLowerCase().includes("male"));
+    } else if (vSet === "nova") {
+      optimalVoice = voices.find(v => v.name.toLowerCase().includes("nova") || v.name.toLowerCase().includes("female") || v.name.toLowerCase().includes("hazel"));
+    } else if (vSet === "shimmer") {
+      optimalVoice = voices.find(v => v.name.toLowerCase().includes("shimmer") || v.name.toLowerCase().includes("female") || v.name.toLowerCase().includes("google"));
+    }
+
+    if (!optimalVoice) {
+      const preferredLang = (settingsRef.current.voiceLanguage || "en-US").toLowerCase().substring(0, 2);
+      optimalVoice = voices.find(
+        (v) =>
+          (v.lang.toLowerCase().startsWith(preferredLang) && v.name.toLowerCase().includes("natural")) ||
+          (v.lang.toLowerCase().startsWith(preferredLang) && v.name.toLowerCase().includes("google")) ||
+          v.lang.toLowerCase().startsWith(preferredLang)
+      ) || voices[0];
+    }
+
+    if (optimalVoice) {
+      utterance.voice = optimalVoice;
+    }
+
+    utterance.onend = () => {
+      if (onEndCallback) onEndCallback();
+    };
+
+    utterance.onerror = (err) => {
+      console.warn("TTS speak Error:", err);
+      if (onEndCallback) onEndCallback();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
 
   const toggleListening = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -161,54 +334,25 @@ export default function App() {
       return;
     }
 
-    if (isListening) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+    if (voiceModeActiveRef.current || voiceStateRef.current !== "idle") {
+      setVoiceModeActive(false);
+      setVoiceState("idle");
       setIsListening(false);
-    } else {
-      startingPromptRef.current = inputPrompt;
-      
-      try {
-        const rec = new SpeechRecognition();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.lang = "en-US";
-
-        rec.onstart = () => {
-          setIsListening(true);
-        };
-
-        rec.onresult = (event: any) => {
-          let finalTextOfSession = "";
-          for (let i = 0; i < event.results.length; ++i) {
-            finalTextOfSession += event.results[i][0].transcript;
-          }
-          
-          const space = startingPromptRef.current ? " " : "";
-          setInputPrompt(startingPromptRef.current + space + finalTextOfSession.trim());
-        };
-
-        rec.onerror = (e: any) => {
-          const errorType = e.rawError || e.error || e;
-          if (errorType === "no-speech") {
-            console.log("Web Speech API status: no-speech (quiet timeout).");
-          } else {
-            console.warn("Web Speech API Error:", errorType);
-          }
-          setIsListening(false);
-        };
-
-        rec.onend = () => {
-          setIsListening(false);
-        };
-
-        recognitionRef.current = rec;
-        rec.start();
-      } catch (err) {
-        console.error("Could not start speech recognition:", err);
-        setIsListening(false);
+      accumulatedTranscriptRef.current = "";
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
       }
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    } else {
+      setVoiceModeActive(true);
+      setVoiceState("listening");
+      setIsListening(true);
+      accumulatedTranscriptRef.current = "";
+      startListeningSession();
     }
   };
 
@@ -263,7 +407,15 @@ export default function App() {
       const cached = safeStorage.getItem("nexa_settings");
       if (cached) {
         const parsed = JSON.parse(cached);
-        return { isAdminVerified: false, soundEffectsActive: true, ...parsed };
+        return { 
+          isAdminVerified: false, 
+          soundEffectsActive: true, 
+          voiceAutoSend: true, 
+          voiceAutoPlay: true, 
+          voiceSpeed: 1.0, 
+          voiceLanguage: "en-US", 
+          ...parsed 
+        };
       }
     } catch (e) {
       console.error("Failed to parse cached nexa_settings", e);
@@ -279,8 +431,18 @@ export default function App() {
       soundEffectsActive: true,
       defaultAiMode: "general",
       voiceSetting: "optimal-google",
+      voiceAutoSend: true,
+      voiceAutoPlay: true,
+      voiceSpeed: 1.0,
+      voiceLanguage: "en-US",
     };
   });
+
+  const settingsRef = useRef(settings);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
 
   useEffect(() => {
     // Sync settings toggle with native sound manager
@@ -431,6 +593,55 @@ export default function App() {
   // References to auto-scroll messages
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
+  // Firestore real-time listener subscription references
+  const chatsUnsubscribeRef = useRef<(() => void) | null>(null);
+  const messagesUnsubscribeRef = useRef<(() => void) | null>(null);
+
+  const syncChatSummaryToFirestore = async (chat: ChatSession) => {
+    if (auth.currentUser && user && !user.isGuest) {
+      try {
+        const summary = {
+          id: chat.id,
+          title: chat.title,
+          createdAt: chat.createdAt,
+          updatedAt: chat.updatedAt,
+          isPinned: chat.isPinned || false,
+          pinOrder: chat.pinOrder || null,
+          mode: chat.mode || "general",
+          selectedEngineId: chat.selectedEngineId || null,
+          userEmail: user.email.toLowerCase().trim()
+        };
+        await setDoc(doc(db, "users", auth.currentUser.uid, "chats", chat.id), summary, { merge: true });
+        console.log("[Nexa Client] Synced chat summary to Firestore:", chat.id);
+      } catch (e) {
+        console.error("Failed to sync chat summary to Firestore:", e);
+      }
+    }
+  };
+
+  const syncMessageToFirestore = async (chatId: string, message: Message) => {
+    if (auth.currentUser && user && !user.isGuest) {
+      try {
+        await setDoc(doc(db, "users", auth.currentUser.uid, "chats", chatId, "messages", message.id), {
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          timestamp: message.timestamp,
+          reaction: message.reaction || null,
+          engineId: message.engineId || null,
+          sources: message.sources || null,
+          factCheck: message.factCheck || null,
+          researchReport: message.researchReport || null,
+          quiz: message.quiz || null,
+          attachment: message.attachment || null
+        });
+        console.log("[Nexa Client] Synced message to Firestore:", message.id);
+      } catch (e) {
+        console.error("Failed to sync message to Firestore:", e);
+      }
+    }
+  };
+
   // Apply Theme CSS triggers on mounted or update
   useEffect(() => {
     const root = document.documentElement;
@@ -469,6 +680,16 @@ export default function App() {
   // Persistent Firebase Authentication Observer
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Clean up previous listeners if any
+      if (chatsUnsubscribeRef.current) {
+        chatsUnsubscribeRef.current();
+        chatsUnsubscribeRef.current = null;
+      }
+      if (messagesUnsubscribeRef.current) {
+        messagesUnsubscribeRef.current();
+        messagesUnsubscribeRef.current = null;
+      }
+
       if (firebaseUser) {
         console.log("[Nexa Client] Firebase auto-login detected:", firebaseUser.email);
         
@@ -512,33 +733,156 @@ export default function App() {
           };
         }
 
-        let userChats: ChatSession[] = [];
-        try {
-          const chatsSnapshot = await getDocs(collection(db, "users", firebaseUser.uid, "chats"));
-          userChats = chatsSnapshot.docs.map(d => d.data() as ChatSession);
-          userChats.sort((a, b) => {
-            if (a.isPinned && !b.isPinned) return -1;
-            if (!a.isPinned && b.isPinned) return 1;
-            if (a.isPinned && b.isPinned) {
-              return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
-            }
-            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-          });
-        } catch (err) {
-          console.error("Failed to restore chat sessions from Firestore:", err);
-        }
-
         setUser(userProfile);
-        if (userChats.length > 0) {
-          setSessions(userChats);
-          setActiveSessionId(userChats[0].id);
-          setActiveMode(userChats[0].mode || "general");
-        }
+
+        // Subscribe to chats subcollection in real time (Shallow load summaries only)
+        chatsUnsubscribeRef.current = onSnapshot(
+          collection(db, "users", firebaseUser.uid, "chats"),
+          (snapshot) => {
+            if (snapshot.empty) {
+              console.log("[Nexa Client] User has no chats in Firestore. Seeding default...");
+              const defaultId = `session-${Date.now()}`;
+              const defaultChat = {
+                id: defaultId,
+                title: "Start an Intelligent Chat",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                isPinned: false,
+                pinOrder: null,
+                mode: "general",
+                selectedEngineId: null,
+                userEmail: firebaseUser.email || "",
+              };
+              setDoc(doc(db, "users", firebaseUser.uid, "chats", defaultId), defaultChat);
+              return;
+            }
+
+            const summaries = snapshot.docs.map((docEl) => {
+              const data = docEl.data();
+              return {
+                id: data.id,
+                title: data.title,
+                createdAt: data.createdAt,
+                updatedAt: data.updatedAt,
+                isPinned: data.isPinned || false,
+                pinOrder: data.pinOrder || null,
+                mode: data.mode || "general",
+                selectedEngineId: data.selectedEngineId || null,
+                messages: [], // Initially empty, populated by message subcollection listener
+              } as ChatSession;
+            });
+
+            // Sort chat summaries by pinned and updatedAt
+            summaries.sort((a, b) => {
+              if (a.isPinned && !b.isPinned) return -1;
+              if (!a.isPinned && b.isPinned) return 1;
+              if (a.isPinned && b.isPinned) {
+                return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+              }
+              return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+            });
+
+            // Merge with local state to preserve loaded messages
+            setSessions((prevSessions) => {
+              return summaries.map((summary) => {
+                const existing = prevSessions.find((s) => s.id === summary.id);
+                return {
+                  ...summary,
+                  messages: existing && existing.messages.length > 0 ? existing.messages : [],
+                };
+              });
+            });
+          },
+          (error) => {
+            console.error("Firestore chats subscription error:", error);
+          }
+        );
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (chatsUnsubscribeRef.current) {
+        chatsUnsubscribeRef.current();
+        chatsUnsubscribeRef.current = null;
+      }
+      if (messagesUnsubscribeRef.current) {
+        messagesUnsubscribeRef.current();
+        messagesUnsubscribeRef.current = null;
+      }
+    };
   }, []);
+
+  // Subscribe to the messages of the active session in real-time
+  useEffect(() => {
+    if (messagesUnsubscribeRef.current) {
+      messagesUnsubscribeRef.current();
+      messagesUnsubscribeRef.current = null;
+    }
+
+    if (user && !user.isGuest && auth.currentUser && activeSessionId) {
+      const userId = auth.currentUser.uid;
+      const messagesRef = collection(db, "users", userId, "chats", activeSessionId, "messages");
+      
+      console.log("[Nexa Client] Subscribing to messages for chat:", activeSessionId);
+      
+      messagesUnsubscribeRef.current = onSnapshot(
+        messagesRef,
+        (snapshot) => {
+          const fetchedMessages: Message[] = snapshot.docs.map((d) => {
+            const data = d.data();
+            return {
+              id: data.id,
+              role: data.role,
+              content: data.content,
+              timestamp: data.timestamp,
+              reaction: data.reaction || undefined,
+              engineId: data.engineId || undefined,
+              sources: data.sources || undefined,
+              factCheck: data.factCheck || undefined,
+              researchReport: data.researchReport || undefined,
+              quiz: data.quiz || undefined,
+              attachment: data.attachment || undefined,
+            } as Message;
+          });
+
+          // Chronological sorting of messages
+          fetchedMessages.sort((a, b) => {
+            const getNum = (id: string) => {
+              const match = id.match(/\d+/);
+              return match ? parseInt(match[0], 10) : 0;
+            };
+            return getNum(a.id) - getNum(b.id);
+          });
+
+          setSessions((prevSessions) =>
+            prevSessions.map((s) => {
+              if (s.id === activeSessionId) {
+                // Check if changes are genuine before triggering state update
+                if (JSON.stringify(s.messages) !== JSON.stringify(fetchedMessages)) {
+                  return {
+                    ...s,
+                    messages: fetchedMessages,
+                  };
+                }
+              }
+              return s;
+            })
+          );
+        },
+        (error) => {
+          console.error("Messages subscription error:", error);
+        }
+      );
+    }
+
+    return () => {
+      if (messagesUnsubscribeRef.current) {
+        messagesUnsubscribeRef.current();
+        messagesUnsubscribeRef.current = null;
+      }
+    };
+  }, [activeSessionId, user, auth.currentUser]);
 
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [settings update] Settings state updated:", settings);
@@ -559,43 +903,6 @@ export default function App() {
       console.log("[Nexa Restorations Debug] [persist success] Successfully saved sessions & active ID to storage.");
     }
   }, [sessions, activeSessionId, user]);
-
-  // Cloud backend synchronization when sessions update
-  useEffect(() => {
-    console.log("[Nexa Restorations Debug] [cloud sync check] checking if sync is allowed:", user?.email, "isGuest:", user?.isGuest);
-    if (user && !user.isGuest && user.email && auth.currentUser) {
-      const syncWithCloud = async () => {
-        try {
-          const firebaseUser = auth.currentUser;
-          if (firebaseUser) {
-            console.log("[Nexa Restorations Debug] [firebase sync start] syncing to Firestore...");
-            for (const chat of sessions) {
-              const sanitizedChat = {
-                ...chat,
-                userEmail: user.email.toLowerCase().trim(),
-                createdAt: chat.createdAt || new Date().toISOString(),
-                updatedAt: chat.updatedAt || new Date().toISOString(),
-                mode: chat.mode || "general"
-              };
-              await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id), sanitizedChat);
-            }
-            console.log("[Nexa Restorations Debug] [firebase sync success] Synced to Firestore.");
-          }
-        } catch (e) {
-          console.error("[Nexa Client] Sync to Firestore failed:", e);
-        }
-      };
-
-      const delayTimer = setTimeout(() => {
-        syncWithCloud();
-      }, 1200);
-
-      return () => {
-        console.log("[Nexa Restorations Debug] [cloud sync clear] clearing delay timer.");
-        clearTimeout(delayTimer);
-      };
-    }
-  }, [sessions, user]);
 
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [admin metrics update] Admin metrics updated.");
@@ -877,6 +1184,9 @@ export default function App() {
     setActiveSessionId(newId);
     setActiveMode(mode);
     setAttachment(null);
+
+    // Sync to Firestore
+    syncChatSummaryToFirestore(newChat);
   };
 
   const handleDeleteSession = (id: string) => {
@@ -906,6 +1216,7 @@ export default function App() {
       setSessions([freshSession]);
       setActiveSessionId(freshId);
       setActiveMode("general");
+      syncChatSummaryToFirestore(freshSession);
     } else {
       setSessions(remaining);
       if (activeSessionId === id) {
@@ -918,7 +1229,14 @@ export default function App() {
 
   const handleRenameSession = (id: string, newTitle: string) => {
     setSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, title: newTitle, updatedAt: new Date().toISOString() } : s))
+      prev.map((s) => {
+        if (s.id === id) {
+          const updated = { ...s, title: newTitle, updatedAt: new Date().toISOString() };
+          syncChatSummaryToFirestore(updated);
+          return updated;
+        }
+        return s;
+      })
     );
   };
 
@@ -942,12 +1260,14 @@ export default function App() {
       const updated = prev.map((s) => {
         if (s.id === id) {
           const newPinned = !s.isPinned;
-          return {
+          const updatedChat = {
             ...s,
             isPinned: newPinned,
             pinOrder: newPinned ? Date.now() : undefined,
             updatedAt: new Date().toISOString(),
           };
+          syncChatSummaryToFirestore(updatedChat);
+          return updatedChat;
         }
         return s;
       });
@@ -1162,6 +1482,12 @@ export default function App() {
               researchReport: data.researchReport || undefined,
               quiz: data.quiz || undefined,
             };
+            // Sync updated message and chat summary to Firestore
+            syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
+            syncChatSummaryToFirestore({
+              ...s,
+              updatedAt: new Date().toISOString()
+            });
             return {
               ...s,
               messages: updatedMsgs,
@@ -1195,6 +1521,12 @@ export default function App() {
               timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
               engineId: "core",
             };
+            // Sync error message and chat summary to Firestore
+            syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
+            syncChatSummaryToFirestore({
+              ...s,
+              updatedAt: new Date().toISOString()
+            });
             return {
               ...s,
               messages: updatedMsgs,
@@ -1257,6 +1589,13 @@ export default function App() {
           return s;
         })
       );
+      if (auth.currentUser && user && !user.isGuest) {
+        deleteDoc(doc(db, "users", auth.currentUser.uid, "chats", activeSessionId, "messages", msgId));
+        syncChatSummaryToFirestore({
+          ...activeSession,
+          updatedAt: new Date().toISOString()
+        });
+      }
     }
   };
 
@@ -1291,7 +1630,26 @@ export default function App() {
     };
 
     // Truncate any obsolete messages after the assistant response to maintain chronological integrity
+    const obsoleteMsgs = updatedMsgs.slice(idx + 1);
     updatedMsgs = [...updatedMsgs.slice(0, idx + 1), placeholderAssistantMsg];
+
+    // Sync edited user message and placeholder assistant message immediately to Firestore
+    syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
+    syncMessageToFirestore(activeSessionId, placeholderAssistantMsg);
+
+    if (auth.currentUser && user && !user.isGuest) {
+      const userId = auth.currentUser.uid;
+      // Delete obsolete trailing messages from Firestore
+      for (const ob of obsoleteMsgs) {
+        if (ob.id !== assistantId) {
+          try {
+            await deleteDoc(doc(db, "users", userId, "chats", activeSessionId, "messages", ob.id));
+          } catch (e) {
+            console.error("Failed to delete obsolete message from Firestore:", e);
+          }
+        }
+      }
+    }
 
     setSessions((prev) =>
       prev.map((s) => {
@@ -1354,6 +1712,12 @@ export default function App() {
                 researchReport: data.researchReport || undefined,
                 quiz: data.quiz || undefined,
               };
+              // Sync the completed assistant message to Firestore
+              syncMessageToFirestore(activeSessionId, currentMsgs[aIdx]);
+              syncChatSummaryToFirestore({
+                ...s,
+                updatedAt: new Date().toISOString()
+              });
             }
             return {
               ...s,
@@ -1389,6 +1753,12 @@ export default function App() {
                 timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                 engineId: "core",
               };
+              // Sync error message to Firestore
+              syncMessageToFirestore(activeSessionId, currentMsgs[aIdx]);
+              syncChatSummaryToFirestore({
+                ...s,
+                updatedAt: new Date().toISOString()
+              });
             }
             return {
               ...s,
@@ -1415,7 +1785,9 @@ export default function App() {
         if (s.id === activeSessionId) {
           const updatedMsgs = s.messages.map((m) => {
             if (m.id === msgId) {
-              return { ...m, reaction: reaction || undefined };
+              const updated = { ...m, reaction: reaction || undefined };
+              syncMessageToFirestore(activeSessionId, updated);
+              return updated;
             }
             return m;
           });
@@ -1543,6 +1915,10 @@ export default function App() {
     const promptToSend = customPrompt || inputPrompt;
     if (!promptToSend.trim() && !customAttachment) return;
 
+    if (voiceModeActiveRef.current) {
+      setVoiceState("processing");
+    }
+
     const currentAttachment = customAttachment || attachment;
     setIsLoading(true);
     setInputPrompt("");
@@ -1559,14 +1935,24 @@ export default function App() {
       attachment: currentAttachment ? { ...currentAttachment } : undefined,
     };
 
+    const titleRename = activeSession.messages.length === 0 ? promptToSend.substring(0, 36) + "..." : activeSession.title;
+    
+    // Save user message immediately to Firestore subcollection & update parent metadata
+    syncMessageToFirestore(activeSessionId, newUserMsg);
+    
+    const updatedParentChat: ChatSession = {
+      ...activeSession,
+      title: titleRename,
+      updatedAt: new Date().toISOString()
+    };
+    syncChatSummaryToFirestore(updatedParentChat);
+
     setSessions((prev) =>
       prev.map((s) => {
         if (s.id === activeSessionId) {
-          // If first message title, auto-rename title from user prompt
-          const title = s.messages.length === 0 ? promptToSend.substring(0, 36) + "..." : s.title;
           return {
             ...s,
-            title,
+            title: titleRename,
             messages: [...s.messages, newUserMsg],
             updatedAt: new Date().toISOString(),
           };
@@ -1629,6 +2015,15 @@ export default function App() {
         quiz: data.quiz || undefined,
       };
 
+      // Sync AI response message to Firestore & update parent metadata
+      syncMessageToFirestore(activeSessionId, newAssistantMsg);
+      
+      const finalParentChat: ChatSession = {
+        ...updatedParentChat,
+        updatedAt: new Date().toISOString()
+      };
+      syncChatSummaryToFirestore(finalParentChat);
+
       // Update Chat with Assistant's parsed answers
       setSessions((prev) =>
         prev.map((s) => {
@@ -1642,6 +2037,21 @@ export default function App() {
           return s;
         })
       );
+
+      // Play voice reply if voiceModeActive is active or settings voiceAutoPlay is enabled
+      if (voiceModeActiveRef.current) {
+        setVoiceState("speaking");
+        speakUtterance(newAssistantMsg.content, () => {
+          if (voiceModeActiveRef.current) {
+            setVoiceState("listening");
+            startListeningSession();
+          } else {
+            setVoiceState("idle");
+          }
+        });
+      } else if (settingsRef.current.voiceAutoPlay !== false) {
+        speakUtterance(newAssistantMsg.content);
+      }
 
       // Track routing updates inside Admin Metric streams
       const routeId = data.engineId || "core";
@@ -1677,6 +2087,14 @@ export default function App() {
         engineId: "core",
       };
 
+      // Sync error response to Firestore & update parent
+      syncMessageToFirestore(activeSessionId, errorMsg);
+      const finalParentChatError: ChatSession = {
+        ...updatedParentChat,
+        updatedAt: new Date().toISOString()
+      };
+      syncChatSummaryToFirestore(finalParentChatError);
+
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id === activeSessionId) {
@@ -1689,6 +2107,18 @@ export default function App() {
           return s;
         })
       );
+
+      if (voiceModeActiveRef.current) {
+        setVoiceState("speaking");
+        speakUtterance("Sorry, I encountered a connection error. Please try speaking again.", () => {
+          if (voiceModeActiveRef.current) {
+            setVoiceState("listening");
+            startListeningSession();
+          } else {
+            setVoiceState("idle");
+          }
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -2197,16 +2627,103 @@ export default function App() {
 
               {speechSupported && (
                 <button
+                  id="nexa-voice-button"
                   type="button"
                   onClick={toggleListening}
-                  className={`p-2 rounded-xl transition-all cursor-pointer flex items-center justify-center shrink-0 ${
-                    isListening
-                      ? "bg-rose-500/15 text-rose-500 hover:bg-rose-500/25 animate-pulse border border-rose-500/20"
+                  className={`relative p-2.5 rounded-xl transition-all flex items-center justify-center shrink-0 w-11 h-11 outline-none cursor-pointer group active:scale-95 ${
+                    voiceState === "listening"
+                      ? "bg-rose-500/10 border border-rose-500/20 shadow-[0_0_12px_rgba(239,68,68,0.2)]"
+                      : voiceState === "processing"
+                      ? "bg-amber-500/10 border border-amber-500/20"
+                      : voiceState === "speaking"
+                      ? "bg-emerald-500/10 border border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.2)]"
                       : "text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-800/50"
                   }`}
-                  title={isListening ? "Stop dictation" : "Voice dictation (speech-to-text)"}
+                  title={
+                    voiceState === "idle"
+                      ? "Start Voice Mode Conversation"
+                      : voiceState === "listening"
+                      ? "Stop Voice Mode"
+                      : voiceState === "processing"
+                      ? "Nexa is thinking..."
+                      : "Stop AI voice playback"
+                  }
                 >
-                  <Mic className="w-5 h-5" />
+                  {/* Glowing background ring for Listening State */}
+                  {voiceState === "listening" && (
+                    <>
+                      <motion.div
+                        className="absolute inset-0 rounded-xl bg-rose-500/20 border border-rose-500/40"
+                        animate={{ scale: [1, 1.2, 1], opacity: [0.6, 0.2, 0.6] }}
+                        transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                      <motion.div
+                        className="absolute -inset-1 rounded-xl bg-rose-500/10 blur-sm"
+                        animate={{ opacity: [0.2, 0.6, 0.2] }}
+                        transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                    </>
+                  )}
+
+                  {/* Rotating Spinner for Processing State */}
+                  {voiceState === "processing" && (
+                    <div className="absolute inset-1.5 rounded-xl border-2 border-dashed border-[#C96A3D]/30 border-t-[#C96A3D] animate-spin" />
+                  )}
+
+                  {/* Sound Wave Ripples for Speaking State */}
+                  {voiceState === "speaking" && (
+                    <>
+                      <motion.div
+                        className="absolute inset-0 rounded-xl bg-emerald-500/20 border border-emerald-500/40"
+                        animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.2, 0.5] }}
+                        transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                      <div className="absolute -top-1 flex items-center gap-0.5 justify-center h-2">
+                        <span className="w-0.5 bg-emerald-500 h-1.5 animate-bounce rounded-full" style={{ animationDelay: "0ms", animationDuration: "0.6s" }}></span>
+                        <span className="w-0.5 bg-emerald-500 h-2.5 animate-bounce rounded-full" style={{ animationDelay: "150ms", animationDuration: "0.5s" }}></span>
+                        <span className="w-0.5 bg-emerald-500 h-1 animate-bounce rounded-full" style={{ animationDelay: "300ms", animationDuration: "0.7s" }}></span>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Pulsing bottom waveform when Listening */}
+                  {voiceState === "listening" && (
+                    <div className="absolute -bottom-1 flex items-end gap-0.5 justify-center h-3">
+                      <motion.span
+                        className="w-0.5 bg-rose-500 rounded-full"
+                        animate={{ height: [4, 12, 4] }}
+                        transition={{ duration: 0.6, repeat: Infinity, ease: "easeInOut", repeatType: "reverse" }}
+                      />
+                      <motion.span
+                        className="w-0.5 bg-rose-500 rounded-full"
+                        animate={{ height: [2, 16, 2] }}
+                        transition={{ duration: 0.45, repeat: Infinity, ease: "easeInOut", repeatType: "reverse", delay: 0.15 }}
+                      />
+                      <motion.span
+                        className="w-0.5 bg-rose-500 rounded-full"
+                        animate={{ height: [5, 10, 5] }}
+                        transition={{ duration: 0.7, repeat: Infinity, ease: "easeInOut", repeatType: "reverse", delay: 0.3 }}
+                      />
+                      <motion.span
+                        className="w-0.5 bg-rose-500 rounded-full"
+                        animate={{ height: [3, 14, 3] }}
+                        transition={{ duration: 0.5, repeat: Infinity, ease: "easeInOut", repeatType: "reverse", delay: 0.45 }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Core Microphone Icon */}
+                  <Mic
+                    className={`w-5 h-5 transition-all z-10 ${
+                      voiceState === "listening"
+                        ? "text-rose-600 scale-110"
+                        : voiceState === "processing"
+                        ? "text-[#C96A3D]"
+                        : voiceState === "speaking"
+                        ? "text-emerald-500 scale-105"
+                        : "text-slate-400 group-hover:text-[#C96A3D]"
+                    }`}
+                  />
                 </button>
               )}
 

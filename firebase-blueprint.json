@@ -33,8 +33,8 @@
       "required": ["email", "fullName"]
     },
     "ChatSession": {
-      "title": "Chat Session",
-      "description": "A single chat thread session containing conversation messages.",
+      "title": "Chat Session Summary",
+      "description": "A single chat thread metadata summary in the sidebar.",
       "type": "object",
       "properties": {
         "id": {
@@ -66,13 +66,58 @@
         },
         "selectedEngineId": {
           "type": "string"
-        },
-        "messages": {
-          "type": "array",
-          "description": "The message objects inside this chat session"
         }
       },
       "required": ["id", "userEmail", "title", "createdAt", "updatedAt", "mode"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single conversation message stored in the messages subcollection of a chat.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "assistant"]
+        },
+        "content": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "engineId": {
+          "type": "string"
+        },
+        "sources": {
+          "type": "array"
+        },
+        "factCheck": {
+          "type": "object"
+        },
+        "researchReport": {
+          "type": "object"
+        },
+        "quiz": {
+          "type": "object"
+        },
+        "isWritingDraft": {
+          "type": "boolean"
+        },
+        "selectedWritingStyle": {
+          "type": "string"
+        },
+        "attachment": {
+          "type": "object"
+        },
+        "reaction": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "role", "content", "timestamp"]
     }
   },
   "firestore": {
@@ -83,6 +128,10 @@
     "/users/{userId}/chats/{chatId}": {
       "schema": "ChatSession",
       "description": "A subcollection of chat sessions associated with a specific user."
+    },
+    "/users/{userId}/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "The messages collection containing individual conversation records."
     }
   }
 }

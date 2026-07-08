@@ -51,6 +51,15 @@ service cloud.firestore {
              );
     }
 
+    // --- MESSAGE VALIDATION ---
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'role', 'content', 'timestamp']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.role is string && (data.role == 'user' || data.role == 'assistant') &&
+             data.content is string && data.content.size() <= 1048576 &&
+             data.timestamp is string && data.timestamp.size() <= 128;
+    }
+
     // --- COLLECTION RULES ---
 
     // Users Collection
@@ -76,6 +85,14 @@ service cloud.firestore {
         incoming().diff(existing()).affectedKeys().hasAny(['title', 'updatedAt', 'messages', 'isPinned', 'pinOrder', 'mode', 'selectedEngineId'])
       );
       allow delete: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
+
+      // Nested messages subcollection
+      match /messages/{messageId} {
+        allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId);
+        allow create: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId) && isValidMessage(incoming());
+        allow update: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId) && isValidMessage(incoming());
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId);
+      }
     }
   }
 }

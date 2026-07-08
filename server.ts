@@ -9,6 +9,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -319,6 +320,70 @@ async function startServer() {
     }
   };
 
+  const sendWaitlistEmail = async (toEmail: string): Promise<boolean> => {
+    try {
+      const host = process.env.SMTP_HOST || "smtp.gmail.com";
+      const port = parseInt(process.env.SMTP_PORT || "587", 10);
+      const user = process.env.SMTP_USER;
+      const pass = process.env.SMTP_PASS;
+      const from = process.env.SMTP_FROM || `Nexa <${user}>`;
+
+      if (!user || !pass) {
+        console.warn("[Nexa Server] SMTP credentials are not configured. Skipping confirmation email.");
+        return false;
+      }
+
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: {
+          user,
+          pass,
+        },
+      });
+
+      const mailOptions = {
+        from,
+        to: toEmail,
+        subject: "🚀 Welcome to the Nexa Premium Waitlist!",
+        text: `Hi,\n\nThank you for joining the Nexa Premium Waitlist! 🎉\n\nWe're excited to have you with us.\n\nYou are now officially on the waitlist and will be among the first users to get early access when Nexa Premium launches.\n\nHere's what you'll get with Nexa Premium:\n\n⚡ Faster AI Responses\n\n🔍 Unlimited Deep Research\n\n📚 Advanced Study Mode\n\n🎨 AI Image Generator\n\n🧠 Long-Term Memory\n\n✨ Nexa Companion\n\n👥 AI Group Chat\n\n📞 AI Voice Calls\n\n🚀 Early Access to Upcoming Features\n\nWe'll notify you as soon as Nexa Premium is ready.\n\nThank you for believing in Nexa and being part of our journey.\n\nBest regards,\n\nThe Nexa Team`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">
+            <p style="font-size: 16px;">Hi,</p>
+            <p style="font-size: 16px;">Thank you for joining the Nexa Premium Waitlist! 🎉</p>
+            <p style="font-size: 16px;">We're excited to have you with us.</p>
+            <p style="font-size: 16px;">You are now officially on the waitlist and will be among the first users to get early access when Nexa Premium launches.</p>
+            
+            <p style="font-size: 16px; font-weight: bold; margin-top: 24px;">Here's what you'll get with Nexa Premium:</p>
+            <p style="font-size: 15px; margin: 8px 0;">⚡ Faster AI Responses</p>
+            <p style="font-size: 15px; margin: 8px 0;">🔍 Unlimited Deep Research</p>
+            <p style="font-size: 15px; margin: 8px 0;">📚 Advanced Study Mode</p>
+            <p style="font-size: 15px; margin: 8px 0;">🎨 AI Image Generator</p>
+            <p style="font-size: 15px; margin: 8px 0;">🧠 Long-Term Memory</p>
+            <p style="font-size: 15px; margin: 8px 0;">✨ Nexa Companion</p>
+            <p style="font-size: 15px; margin: 8px 0;">👥 AI Group Chat</p>
+            <p style="font-size: 15px; margin: 8px 0;">📞 AI Voice Calls</p>
+            <p style="font-size: 15px; margin: 8px 0;">🚀 Early Access to Upcoming Features</p>
+            
+            <p style="font-size: 16px; margin-top: 24px;">We'll notify you as soon as Nexa Premium is ready.</p>
+            <p style="font-size: 16px;">Thank you for believing in Nexa and being part of our journey.</p>
+            
+            <p style="font-size: 16px; margin-top: 24px; margin-bottom: 4px;">Best regards,</p>
+            <p style="font-size: 16px; font-weight: bold; color: #0f172a; margin-top: 0;">The Nexa Team</p>
+          </div>
+        `,
+      };
+
+      const info = await transporter.sendMail(mailOptions);
+      console.info(`[Nexa Server] Confirmation email sent successfully to ${toEmail}: ${info.messageId}`);
+      return true;
+    } catch (err: any) {
+      console.error("[Nexa Server] SMTP Email Sending Failed for", toEmail, "Error:", err.message || err);
+      return false;
+    }
+  };
+
   // --- FEEDBACK DATABASE SETUP ---
   const FEEDBACK_DB_PATH = path.join(process.cwd(), "feedback_db.json");
 
@@ -488,10 +553,15 @@ async function startServer() {
 
       console.info(`[Nexa Server] New user joined Premium waitlist: ${normalizedEmail} (Source: ${source})`);
 
+      // Send confirmation email asynchronously (background task) and catch errors gracefully to not fail registration
+      sendWaitlistEmail(normalizedEmail).catch((emailErr) => {
+        console.error(`[Nexa Server] Background waitlist email sending failed for ${normalizedEmail}:`, emailErr);
+      });
+
       return res.status(200).json({
         success: true,
         status: "joined",
-        message: "🎉 You're officially on the Nexa Premium waitlist!\n\nWe'll notify you here in Nexa when Premium launches."
+        message: "🎉 You're officially on the Nexa Premium Waitlist!\n\nA confirmation email has been sent to your email address."
       });
 
     } catch (error: any) {

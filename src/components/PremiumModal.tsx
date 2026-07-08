@@ -476,10 +476,12 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                     <CheckCircle className="w-6 h-6" />
                   </div>
                   <h3 className="text-base font-bold text-slate-900 dark:text-white whitespace-pre-line">
-                    🎉 You're officially on the Nexa Premium waitlist!
+                    🎉 You're officially on the Nexa Premium Waitlist!
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto whitespace-pre-line">
-                    We'll notify you here in Nexa when Premium launches.
+                    {waitlistStatus === "already_registered"
+                      ? "You're already registered on the waitlist."
+                      : "A confirmation email has been sent to your email address."}
                   </p>
                   
                   <div className="pt-2 flex flex-col gap-2.5">

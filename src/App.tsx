@@ -34,7 +34,8 @@ import {
   Trophy,
   Award,
   MoreVertical,
-  ThumbsUp
+  ThumbsUp,
+  AlertTriangle
 } from "lucide-react";
 import { trackAction } from "./utils/gamification";
 import {
@@ -98,6 +99,17 @@ export default function App() {
   const [showInputMoreActions, setShowInputMoreActions] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [showFeedbackToast, setShowFeedbackToast] = useState(false);
+  const [customToast, setCustomToast] = useState<{ message: string; title: string; type: "success" | "warning" | "info" } | null>(null);
+
+  useEffect(() => {
+    if (customToast) {
+      const timer = setTimeout(() => {
+        setCustomToast(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [customToast]);
+
   const uploadOptionsRef = useRef<HTMLDivElement>(null);
   const [unlockedBadgesToast, setUnlockedBadgesToast] = useState<{ id: string; title: string; description: string; pointsAwarded: number } | null>(null);
 
@@ -504,7 +516,14 @@ export default function App() {
         try {
           const chatsSnapshot = await getDocs(collection(db, "users", firebaseUser.uid, "chats"));
           userChats = chatsSnapshot.docs.map(d => d.data() as ChatSession);
-          userChats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+          userChats.sort((a, b) => {
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+            if (a.isPinned && b.isPinned) {
+              return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+            }
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+          });
         } catch (err) {
           console.error("Failed to restore chat sessions from Firestore:", err);
         }
@@ -904,9 +923,40 @@ export default function App() {
   };
 
   const handlePinSession = (id: string) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, isPinned: !s.isPinned } : s))
-    );
+    const sessionToPin = sessions.find((s) => s.id === id);
+    if (!sessionToPin) return;
+
+    if (!sessionToPin.isPinned) {
+      const pinnedCount = sessions.filter((s) => s.isPinned).length;
+      if (pinnedCount >= 10) {
+        setCustomToast({
+          title: "Pin Limit Reached",
+          message: "You can pin up to 10 chats. Unpin an existing chat to pin another.",
+          type: "warning",
+        });
+        return;
+      }
+    }
+
+    setSessions((prev) => {
+      const updated = prev.map((s) => {
+        if (s.id === id) {
+          const newPinned = !s.isPinned;
+          return {
+            ...s,
+            isPinned: newPinned,
+            pinOrder: newPinned ? Date.now() : undefined,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return s;
+      });
+      return updated;
+    });
+  };
+
+  const handleReorderSessions = (updatedSessions: ChatSession[]) => {
+    setSessions(updatedSessions);
   };
 
   const handleClearChats = () => {
@@ -1705,6 +1755,7 @@ export default function App() {
             onDeleteSession={handleDeleteSession}
             onRenameSession={handleRenameSession}
             onPinSession={handlePinSession}
+            onReorderSessions={handleReorderSessions}
             onChangeMode={(mode) => {
               setActiveMode(mode);
               handleNewSession(mode);
@@ -1753,6 +1804,7 @@ export default function App() {
                   onDeleteSession={handleDeleteSession}
                   onRenameSession={handleRenameSession}
                   onPinSession={handlePinSession}
+                  onReorderSessions={handleReorderSessions}
                   onChangeMode={(mode) => {
                     setActiveMode(mode);
                     handleNewSession(mode);
@@ -2382,6 +2434,36 @@ export default function App() {
                 <span className="text-slate-450">BONUS AWARDED</span>
                 <span className="text-emerald-400">+{unlockedBadgesToast.pointsAwarded} XP</span>
               </div>
+            </div>
+          </motion.div>
+        )}
+
+        {customToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 30, scale: 0.95 }}
+            className="fixed bottom-6 right-6 z-55 max-w-sm w-full bg-slate-900 border border-[#C96A3D]/80 rounded-2xl p-4 shadow-xl text-white flex items-start gap-3 select-none"
+            id="nexa-custom-toast"
+          >
+            <div className="p-3 bg-[#C96A3D]/20 rounded-xl flex items-center justify-center shrink-0 border border-[#C96A3D]/30 shadow-[0_0_12px_rgba(201,106,61,0.3)]">
+              <AlertTriangle className="w-6 h-6 text-amber-500 animate-pulse" />
+            </div>
+            
+            <div className="space-y-1 w-full text-left">
+              <div className="flex justify-between items-start">
+                <span className="text-[10px] font-black uppercase text-[#C96A3D] tracking-widest">
+                  {customToast.title}
+                </span>
+                <button
+                  onClick={() => setCustomToast(null)}
+                  className="text-slate-400 hover:text-white transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              
+              <h5 className="font-extrabold text-xs">{customToast.message}</h5>
             </div>
           </motion.div>
         )}

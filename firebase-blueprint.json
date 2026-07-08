@@ -57,6 +57,9 @@
         "isPinned": {
           "type": "boolean"
         },
+        "pinOrder": {
+          "type": "number"
+        },
         "mode": {
           "type": "string",
           "enum": ["general", "research", "study", "factcheck", "writing", "quiz"]

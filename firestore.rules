@@ -73,7 +73,7 @@ service cloud.firestore {
       allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
       allow create: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidChat(incoming());
       allow update: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidChat(incoming()) && (
-        incoming().diff(existing()).affectedKeys().hasAny(['title', 'updatedAt', 'messages', 'isPinned', 'mode', 'selectedEngineId'])
+        incoming().diff(existing()).affectedKeys().hasAny(['title', 'updatedAt', 'messages', 'isPinned', 'pinOrder', 'mode', 'selectedEngineId'])
       );
       allow delete: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
     }

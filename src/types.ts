@@ -70,6 +70,7 @@ export interface ChatSession {
   updatedAt: string;
   messages: Message[];
   isPinned: boolean;
+  pinOrder?: number;
   mode: "general" | "research" | "study" | "factcheck" | "writing" | "quiz";
   selectedEngineId?: NexaEngineId; // custom force engine override if any, defaults to smart routing
 }

@@ -291,42 +291,6 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* C: Other AI Tools Section */}
-        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-            Other AI Tools
-          </h4>
-          <div className="grid grid-cols-1 gap-1">
-            {[
-              { id: "general", label: "Core General Chat", icon: <HelpCircle className="w-4 h-4 shrink-0 text-[#C96A3D]" /> },
-              { id: "research", label: "Deep Research Mode", icon: <Search className="w-4 h-4 shrink-0 text-rose-500" /> },
-              { id: "study", label: "Study Mode Arena", icon: <GraduationCap className="w-4 h-4 shrink-0 text-emerald-500" /> },
-              { id: "factcheck", label: "Fact Check Mode", icon: <CheckCircle className="w-4 h-4 shrink-0 text-indigo-500" /> },
-              { id: "writing", label: "Writing Assistant", icon: <PencilLine className="w-4 h-4 shrink-0 text-orange-500" /> },
-              { id: "quiz", label: "MCQ Quiz Arena", icon: <GraduationCap className="w-4 h-4 shrink-0 text-amber-500 animate-pulse" /> },
-            ].map((item) => {
-              const isActive = activeMode === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    onChangeMode(item.id as any);
-                    onCloseMobile?.();
-                  }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-semibold select-none transition-all cursor-pointer ${
-                    isActive
-                      ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
-                      : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30"
-                  }`}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {/* D: Settings Section */}
         <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
           <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">

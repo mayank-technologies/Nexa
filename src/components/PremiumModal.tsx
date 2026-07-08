@@ -175,9 +175,15 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
         }),
       });
 
-      const data = await response.json();
+      let data: any;
+      const responseText = await response.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch (jsonErr) {
+        throw new Error(`The server returned an invalid response (Status ${response.status}): ${responseText.substring(0, 120)}`);
+      }
 
-      if (data.success) {
+      if (response.ok && data.success) {
         if (data.status === "already_registered") {
           setWaitlistStatus("already_registered");
           playUiSound("success");
@@ -187,13 +193,13 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           playUiSound("waitlist_joined");
         }
       } else {
-        setErrorMessage(data.error || "Something went wrong. Please try again.");
+        setErrorMessage(data.error || `Server error (Status ${response.status}). Please try again.`);
         setWaitlistStatus("error");
         playUiSound("error");
       }
     } catch (err: any) {
       console.error("Waitlist error:", err);
-      setErrorMessage("Network error. Please check your connection and try again.");
+      setErrorMessage(err.message || "Network error. Please check your connection and try again.");
       setWaitlistStatus("error");
       playUiSound("error");
     } finally {

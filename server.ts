@@ -298,18 +298,33 @@ async function startServer() {
   });
 
   const sendWaitlistEmail = async (toEmail: string): Promise<boolean> => {
+    console.log("[Nexa SMTP Diagnostic] [Stage: Email send attempted] Beginning sendWaitlistEmail for:", toEmail);
+
+    const host = process.env.SMTP_HOST || "smtp.gmail.com";
+    const port = parseInt(process.env.SMTP_PORT || "587", 10);
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    const from = process.env.SMTP_FROM || `Nexa <${user}>`;
+
+    const maskedUser = user ? (user.includes("@") ? `${user.split("@")[0].slice(0, 3)}***@${user.split("@")[1]}` : `${user.slice(0, 3)}***`) : "UNDEFINED";
+    const passExists = pass ? "YES (defined)" : "NO (undefined)";
+
+    console.log("[Nexa SMTP Diagnostic] Environment Variables Check:");
+    console.log(`  - SMTP_HOST: ${host}`);
+    console.log(`  - SMTP_PORT: ${port}`);
+    console.log(`  - SMTP_USER: ${maskedUser}`);
+    console.log(`  - SMTP_PASS exists: ${passExists}`);
+    console.log(`  - SMTP_FROM: ${from}`);
+    console.log(`  - VERCEL env is present: ${process.env.VERCEL ? "YES" : "NO"}`);
+    console.log(`  - NODE_ENV: ${process.env.NODE_ENV}`);
+
+    if (!user || !pass) {
+      console.warn("[Nexa SMTP Diagnostic] [Stage: Aborted] SMTP credentials are not configured. Skipping confirmation email.");
+      return false;
+    }
+
     try {
-      const host = process.env.SMTP_HOST || "smtp.gmail.com";
-      const port = parseInt(process.env.SMTP_PORT || "587", 10);
-      const user = process.env.SMTP_USER;
-      const pass = process.env.SMTP_PASS;
-      const from = process.env.SMTP_FROM || `Nexa <${user}>`;
-
-      if (!user || !pass) {
-        console.warn("[Nexa Server] SMTP credentials are not configured. Skipping confirmation email.");
-        return false;
-      }
-
+      console.log("[Nexa SMTP Diagnostic] [Stage: SMTP transporter created] Creating Nodemailer transporter...");
       const transporter = nodemailer.createTransport({
         host,
         port,
@@ -318,7 +333,27 @@ async function startServer() {
           user,
           pass,
         },
+        // Set short timeouts to avoid stalling the dev server
+        connectionTimeout: 5000,
+        greetingTimeout: 5000,
+        socketTimeout: 5000,
       });
+
+      console.log("[Nexa SMTP Diagnostic] [Stage: SMTP authentication verification] Verifying transporter connection...");
+      try {
+        await transporter.verify();
+        console.log("[Nexa SMTP Diagnostic] [Stage: SMTP authentication success] SMTP server verified successfully!");
+      } catch (verifyErr: any) {
+        console.error("[Nexa SMTP Diagnostic] [Stage: SMTP authentication failure] Verification failed:", {
+          message: verifyErr.message,
+          code: verifyErr.code,
+          command: verifyErr.command,
+          response: verifyErr.response,
+          responseCode: verifyErr.responseCode,
+          stack: verifyErr.stack,
+        });
+        throw verifyErr;
+      }
 
       const mailOptions = {
         from,
@@ -352,11 +387,19 @@ async function startServer() {
         `,
       };
 
+      console.log("[Nexa SMTP Diagnostic] [Stage: Email send attempted] Sending email via Nodemailer...");
       const info = await transporter.sendMail(mailOptions);
-      console.info(`[Nexa Server] Confirmation email sent successfully to ${toEmail}: ${info.messageId}`);
+      console.info(`[Nexa SMTP Diagnostic] [Stage: Email send success] Confirmation email sent successfully to ${toEmail}: ${info.messageId}`);
       return true;
     } catch (err: any) {
-      console.error("[Nexa Server] SMTP Email Sending Failed for", toEmail, "Error:", err.message || err);
+      console.error("[Nexa SMTP Diagnostic] [Stage: Email send failure] Email delivery failed:", {
+        message: err.message,
+        code: err.code,
+        command: err.command,
+        response: err.response,
+        responseCode: err.responseCode,
+        stack: err.stack,
+      });
       return false;
     }
   };
@@ -495,17 +538,31 @@ async function startServer() {
   // Premium Waitlist Post endpoint
   app.post("/api/premium/waitlist", async (req, res) => {
     try {
-      const { email } = req.body;
+      const { email, userId, source } = req.body;
+      console.log(`[Nexa SMTP Diagnostic] [Stage: Request received] POST /api/premium/waitlist reached for email: ${email}, userId: ${userId}, source: ${source}`);
 
       if (!email) {
+        console.warn("[Nexa SMTP Diagnostic] [Stage: Aborted] Missing email in waitlist request body.");
         return res.status(400).json({ success: false, error: "Email is required to join the waitlist." });
       }
 
       const normalizedEmail = email.toLowerCase().trim();
 
-      // Send confirmation email asynchronously (background task) and catch errors gracefully to not fail registration
-      sendWaitlistEmail(normalizedEmail).catch((emailErr) => {
-        console.error(`[Nexa Server] Background waitlist email sending failed for ${normalizedEmail}:`, emailErr);
+      // Since the frontend successfully writes the document in the 'waitlist' collection
+      // before dispatching this fetch call, we confirm Firestore success here.
+      console.log(`[Nexa SMTP Diagnostic] [Stage: Firestore success] Verified that waitlist record for ${normalizedEmail} was written to Firestore by the client.`);
+
+      console.log(`[Nexa SMTP Diagnostic] [Stage: Email send attempted] Handing off email delivery to sendWaitlistEmail for: ${normalizedEmail}`);
+      
+      // Execute sendWaitlistEmail and catch error
+      sendWaitlistEmail(normalizedEmail).then((success) => {
+        if (success) {
+          console.log(`[Nexa SMTP Diagnostic] [Stage: Email send success] sendWaitlistEmail succeeded for: ${normalizedEmail}`);
+        } else {
+          console.error(`[Nexa SMTP Diagnostic] [Stage: Email send failure] sendWaitlistEmail reported failure for: ${normalizedEmail}`);
+        }
+      }).catch((emailErr) => {
+        console.error(`[Nexa SMTP Diagnostic] [Stage: Email send failure] Background waitlist email sending threw exception for ${normalizedEmail}:`, emailErr);
       });
 
       return res.status(200).json({
@@ -515,7 +572,7 @@ async function startServer() {
       });
 
     } catch (error: any) {
-      console.error("Premium waitlist registration error:", error);
+      console.error("[Nexa SMTP Diagnostic] Premium waitlist registration API error:", error);
       return res.status(500).json({
         success: false,
         error: error.message || "Failed to join the waitlist. Please try again."

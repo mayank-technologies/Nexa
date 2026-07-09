@@ -323,7 +323,7 @@ async function startServer() {
       const mailOptions = {
         from,
         to: toEmail,
-        subject: "🚀 Welcome to the Nexa Premium Waitlist!",
+        subject: "You're on the Nexa Premium Waitlist 🎉",
         text: `Hi,\n\nThank you for joining the Nexa Premium Waitlist! 🎉\n\nWe're excited to have you with us.\n\nYou are now officially on the waitlist and will be among the first users to get early access when Nexa Premium launches.\n\nHere's what you'll get with Nexa Premium:\n\n⚡ Faster AI Responses\n\n🔍 Unlimited Deep Research\n\n📚 Advanced Study Mode\n\n🎨 AI Image Generator\n\n🧠 Long-Term Memory\n\n✨ Nexa Companion\n\n👥 AI Group Chat\n\n📞 AI Voice Calls\n\n🚀 Early Access to Upcoming Features\n\nWe'll notify you as soon as Nexa Premium is ready.\n\nThank you for believing in Nexa and being part of our journey.\n\nBest regards,\n\nThe Nexa Team`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">

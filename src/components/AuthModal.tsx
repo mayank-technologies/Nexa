@@ -77,6 +77,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             ux_mode: "redirect", // Handles mobile browsers cleanly by preventing standard popup blockers on Chrome/Safari Mobile
             auto_select: false, // Prevents unintended auto-logging which can be confusing
             itp_support: true, // Intelligent Tracking Prevention support for Safari iOS users
+            use_fedcm: false, // Disables FedCM to avoid 'identity-credentials-get' feature policy exceptions in sandboxed dev environment iframes
             callback: (response: any) => {
               if (response?.credential) {
                 // Decode Google JWT locally and seamlessly authenticate/sign-in

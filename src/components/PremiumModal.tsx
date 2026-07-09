@@ -56,7 +56,10 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
 
   // Load waitlist status from localStorage and check with the server
   useEffect(() => {
-    if (user?.email) {
+    const currentUser = auth.currentUser;
+    if (currentUser && currentUser.email) {
+      setEmail(currentUser.email);
+    } else if (user?.email) {
       setEmail(user.email);
     }
     
@@ -67,10 +70,14 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
         setWaitlistStatus("joined");
       }
       
-      const currentUser = auth.currentUser;
-      if (currentUser && !user?.isGuest && user?.email) {
+      const currentAuthUser = auth.currentUser;
+      console.log("[PremiumModal] checkWaitlistStatus - auth.currentUser.uid:", currentAuthUser?.uid);
+      console.log("[PremiumModal] checkWaitlistStatus - auth.currentUser.email:", currentAuthUser?.email);
+      console.log("[PremiumModal] checkWaitlistStatus - auth state:", currentAuthUser ? "authenticated" : "not authenticated");
+
+      if (currentAuthUser && currentAuthUser.email) {
         try {
-          const docRef = doc(db, "waitlist", user.email.toLowerCase().trim());
+          const docRef = doc(db, "waitlist", currentAuthUser.email.toLowerCase().trim());
           const docSnap = await getDoc(docRef);
           const registered = docSnap.exists();
           
@@ -120,7 +127,11 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
       let errorMsg = "";
 
       const currentUser = auth.currentUser;
-      if (!currentUser || user?.isGuest) {
+      console.log("[PremiumModal] handleLeaveWaitlist - auth.currentUser.uid:", currentUser?.uid);
+      console.log("[PremiumModal] handleLeaveWaitlist - auth.currentUser.email:", currentUser?.email);
+      console.log("[PremiumModal] handleLeaveWaitlist - auth state:", currentUser ? "authenticated" : "not authenticated");
+
+      if (!currentUser) {
         setErrorMessage("Please sign in to join the Nexa Premium Waitlist.");
         setWaitlistStatus("error");
         setShowConfirmLeave(false);
@@ -194,7 +205,11 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
 
     try {
       const currentUser = auth.currentUser;
-      if (!currentUser || user?.isGuest) {
+      console.log("[PremiumModal] handleSubmit - auth.currentUser.uid:", currentUser?.uid);
+      console.log("[PremiumModal] handleSubmit - auth.currentUser.email:", currentUser?.email);
+      console.log("[PremiumModal] handleSubmit - auth state:", currentUser ? "authenticated" : "not authenticated");
+
+      if (!currentUser) {
         setErrorMessage("Please sign in to join the Nexa Premium Waitlist.");
         setWaitlistStatus("error");
         playUiSound("error");

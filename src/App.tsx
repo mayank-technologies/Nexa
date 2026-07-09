@@ -66,7 +66,7 @@ import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
 import { auth, db } from "./firebase";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut, getRedirectResult } from "firebase/auth";
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
@@ -680,6 +680,24 @@ export default function App() {
       updateProfileInFirestore();
     }
   }, [user]);
+
+  // Check for Google Sign-In redirect result on startup
+  useEffect(() => {
+    const handleRedirectResult = async () => {
+      try {
+        console.log("[Nexa Client] Checking for Google Sign-In redirect result...");
+        const result = await getRedirectResult(auth);
+        if (result && result.user) {
+          console.log("[Nexa Client] Google Sign-In redirect success:", result.user.email);
+          // Standard onAuthStateChanged listener will automatically pick up this user,
+          // load their Firestore profile, sync chats, settings, etc.
+        }
+      } catch (err: any) {
+        console.error("[Nexa Client] Redirect result retrieval error:", err);
+      }
+    };
+    handleRedirectResult();
+  }, []);
 
   // Persistent Firebase Authentication Observer
   useEffect(() => {

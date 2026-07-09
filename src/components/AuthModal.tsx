@@ -14,7 +14,10 @@ import {
   updateProfile,
   GoogleAuthProvider,
   linkWithCredential,
-  signInWithCredential
+  signInWithCredential,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
 } from "firebase/auth";
 import { 
   doc, 
@@ -361,7 +364,62 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }, 1200);
   };
 
-  const handleSelectGoogleAccount = async (selectedEmail: string, selectedName: string, idToken?: string) => {
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setErrorFlag("");
+
+    try {
+      const provider = new GoogleAuthProvider();
+      // Display all Google accounts already signed into the device/browser using Google's native account chooser.
+      provider.setCustomParameters({
+        prompt: "select_account"
+      });
+
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+      if (isMobile) {
+        console.log("[Nexa Client] Mobile browser detected. Using signInWithRedirect...");
+        await signInWithRedirect(auth, provider);
+      } else {
+        console.log("[Nexa Client] Desktop browser detected. Using signInWithPopup...");
+        const result = await signInWithPopup(auth, provider);
+        const firebaseUser = result.user;
+        console.log("[Nexa Client] Popup auth success for user:", firebaseUser.email);
+        
+        await handleSelectGoogleAccount(
+          firebaseUser.email || "",
+          firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Google User",
+          undefined,
+          firebaseUser
+        );
+      }
+    } catch (err: any) {
+      console.error("[Nexa Client] Google auth error:", err);
+      let friendlyMessage = "Google sign-in failed. Please try again.";
+      if (err.code === "auth/popup-blocked") {
+        friendlyMessage = "Google login popup was blocked by your browser. Please allow popups for Nexa.";
+      } else if (err.code === "auth/account-exists-with-different-credential") {
+        // Automatically fetch details and link
+        const email = err.customData?.email || err.email;
+        if (email) {
+          setLinkingEmail(email);
+          setLinkingName(err.customData?.displayName || "Google User");
+          const credential = GoogleAuthProvider.credentialFromError(err);
+          if (credential) {
+            // Store credential if possible or keep track of flow
+          }
+          setIsLinking(true);
+        }
+        friendlyMessage = "An account with this email already exists with a different login method. Please sign in with password to link.";
+      } else if (err.message) {
+        friendlyMessage = err.message;
+      }
+      setErrorFlag(friendlyMessage);
+      setLoading(false);
+    }
+  };
+
+  const handleSelectGoogleAccount = async (selectedEmail: string, selectedName: string, idToken?: string, loggedInUser?: any) => {
     setLoading(true);
     setErrorFlag("");
 
@@ -381,7 +439,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       let isNewUser = false;
       
       // Determine if we are doing a real Google login using GSI credential or simulated login
-      if (idToken) {
+      if (loggedInUser) {
+        firebaseUser = loggedInUser;
+      } else if (idToken) {
         try {
           const credential = GoogleAuthProvider.credential(idToken);
           const userCredential = await signInWithCredential(auth, credential);
@@ -1204,8 +1264,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
             {/* Google Authentication */}
             <button
               onClick={() => {
-                setGoogleChooser(true);
-                setErrorFlag("");
+                handleGoogleSignIn();
               }}
               disabled={loading}
               className="w-full flex justify-center items-center gap-3 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/80 text-[#14213D] dark:text-slate-200 border border-slate-200 dark:border-slate-800 font-semibold py-2.5 rounded-xl transition-colors hover:shadow-xs disabled:opacity-50"
@@ -1228,7 +1287,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                   fill="#EA4335"
                 />
               </svg>
-              Google Identity Login
+              Continue with Google
             </button>
 
             <p className="mt-5 text-center text-xs text-slate-400 font-normal leading-relaxed">

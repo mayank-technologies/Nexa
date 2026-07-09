@@ -78,14 +78,39 @@ service cloud.firestore {
     }
 
     // Waitlist Collection
-    match /waitlist/{email} {
-      allow get: if true;
-      allow create: if email is string && email.size() <= 128 &&
-                      incoming().keys().hasAll(['email', 'timestamp']) &&
-                      incoming().email == email &&
-                      incoming().email.size() <= 128 &&
-                      incoming().timestamp is string && incoming().timestamp.size() <= 128;
-      allow delete: if true;
+    match /waitlist/{emailOrUid} {
+      allow get: if isSignedIn() && (
+        request.auth.uid == emailOrUid ||
+        (request.auth.token != null && request.auth.token.email == emailOrUid) ||
+        (request.auth.token != null && request.auth.token.email.matches('(?i)^' + emailOrUid + '$')) ||
+        (resource != null && (
+          resource.data.uid == request.auth.uid || 
+          resource.data.userId == request.auth.uid ||
+          (request.auth.token != null && resource.data.email == request.auth.token.email) ||
+          (request.auth.token != null && resource.data.email.matches('(?i)^' + request.auth.token.email + '$'))
+        ))
+      );
+      
+      allow create: if isSignedIn() && (
+        request.auth.uid == emailOrUid ||
+        (request.auth.token != null && request.auth.token.email == emailOrUid) ||
+        (request.auth.token != null && request.auth.token.email.matches('(?i)^' + emailOrUid + '$'))
+      ) &&
+      incoming().keys().hasAll(['email', 'timestamp']) &&
+      incoming().timestamp is string && incoming().timestamp.size() <= 128 &&
+      (incoming().uid == request.auth.uid || incoming().userId == request.auth.uid);
+
+      allow delete: if isSignedIn() && (
+        request.auth.uid == emailOrUid ||
+        (request.auth.token != null && request.auth.token.email == emailOrUid) ||
+        (request.auth.token != null && request.auth.token.email.matches('(?i)^' + emailOrUid + '$')) ||
+        (resource != null && (
+          resource.data.uid == request.auth.uid || 
+          resource.data.userId == request.auth.uid ||
+          (request.auth.token != null && resource.data.email == request.auth.token.email) ||
+          (request.auth.token != null && resource.data.email.matches('(?i)^' + request.auth.token.email + '$'))
+        ))
+      );
     }
 
     // Chat Sessions subcollection

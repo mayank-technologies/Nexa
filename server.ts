@@ -10,8 +10,6 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 
 dotenv.config();
 
@@ -299,22 +297,6 @@ async function startServer() {
     }
   });
 
-  // --- PREMIUM WAITLIST FIRESTORE DATABASE SETUP ---
-  let waitlistDb: any = null;
-  try {
-    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (fs.existsSync(configPath)) {
-      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      const firebaseApp = initializeApp(firebaseConfig);
-      waitlistDb = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-      console.info("[Nexa Server] Firebase & Firestore initialized successfully for waitlist.");
-    } else {
-      console.error("[Nexa Server] firebase-applet-config.json not found!");
-    }
-  } catch (err) {
-    console.error("[Nexa Server] Failed to initialize Firebase/Firestore on backend:", err);
-  }
-
   const sendWaitlistEmail = async (toEmail: string): Promise<boolean> => {
     try {
       const host = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -513,41 +495,13 @@ async function startServer() {
   // Premium Waitlist Post endpoint
   app.post("/api/premium/waitlist", async (req, res) => {
     try {
-      const { email, userId, source } = req.body;
+      const { email } = req.body;
 
       if (!email) {
         return res.status(400).json({ success: false, error: "Email is required to join the waitlist." });
       }
 
       const normalizedEmail = email.toLowerCase().trim();
-
-      if (!waitlistDb) {
-        return res.status(500).json({ success: false, error: "Database not initialized. Please try again later." });
-      }
-
-      // Check for duplicate in Firestore
-      const docRef = doc(waitlistDb, "waitlist", normalizedEmail);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        return res.status(200).json({
-          success: true,
-          status: "already_registered",
-          message: "You're already on the Nexa Premium waitlist."
-        });
-      }
-
-      // Add new record
-      const newEntry = {
-        email: normalizedEmail,
-        userId: userId || null,
-        timestamp: new Date().toISOString(),
-        source: source || "unknown"
-      };
-
-      await setDoc(docRef, newEntry);
-
-      console.info(`[Nexa Server] New user joined Premium waitlist in Firestore: ${normalizedEmail} (Source: ${source})`);
 
       // Send confirmation email asynchronously (background task) and catch errors gracefully to not fail registration
       sendWaitlistEmail(normalizedEmail).catch((emailErr) => {
@@ -572,20 +526,9 @@ async function startServer() {
   // Check waitlist status endpoint
   app.get("/api/premium/waitlist/check", async (req, res) => {
     try {
-      const { email } = req.query;
-      if (!email) {
-        return res.status(400).json({ success: false, error: "Email is required to check waitlist." });
-      }
-      const normalizedEmail = String(email).toLowerCase().trim();
-
-      if (!waitlistDb) {
-        return res.status(500).json({ success: false, error: "Database not initialized." });
-      }
-
-      const docRef = doc(waitlistDb, "waitlist", normalizedEmail);
-      const docSnap = await getDoc(docRef);
-
-      return res.status(200).json({ success: true, registered: docSnap.exists() });
+      // The client-side will query Firestore directly for the precise check. 
+      // We return success: true and registered: false by default here, as the client handles it.
+      return res.status(200).json({ success: true, registered: false });
     } catch (error: any) {
       console.error("Check waitlist error:", error);
       return res.status(500).json({ success: false, error: error.message });
@@ -595,32 +538,7 @@ async function startServer() {
   // Leave waitlist endpoint
   app.post("/api/premium/waitlist/leave", async (req, res) => {
     try {
-      const { email } = req.body;
-
-      if (!email) {
-        return res.status(400).json({ success: false, error: "Email is required to leave the waitlist." });
-      }
-
-      const normalizedEmail = email.toLowerCase().trim();
-
-      if (!waitlistDb) {
-        return res.status(500).json({ success: false, error: "Database not initialized." });
-      }
-
-      const docRef = doc(waitlistDb, "waitlist", normalizedEmail);
-      const docSnap = await getDoc(docRef);
-
-      if (!docSnap.exists()) {
-        return res.status(200).json({
-          success: false,
-          error: "This email was not found on the Nexa Premium waitlist."
-        });
-      }
-
-      await deleteDoc(docRef);
-
-      console.info(`[Nexa Server] User left Premium waitlist in Firestore: ${normalizedEmail}`);
-
+      // Client-side deletes from Firestore directly, so we just return success: true.
       return res.status(200).json({
         success: true,
         message: "You've successfully left the Nexa Premium Waitlist.\n\nYou can join again anytime."

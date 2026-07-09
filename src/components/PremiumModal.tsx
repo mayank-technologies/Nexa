@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { db, handleFirestoreError, OperationType } from "../firebase";
+import { auth, db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import {
   X,
@@ -67,41 +67,22 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
         setWaitlistStatus("joined");
       }
       
-      if (user?.email) {
+      const currentUser = auth.currentUser;
+      if (currentUser && !user?.isGuest && user?.email) {
         try {
-          let registered = false;
-          let success = false;
-          try {
-            const res = await fetch(`/api/premium/waitlist/check?email=${encodeURIComponent(user.email)}`);
-            if (res.status === 404) {
-              throw new Error("404");
-            }
-            const data = await res.json();
-            if (data.success) {
-              registered = data.registered;
-              success = true;
-            }
-          } catch (apiErr) {
-            console.warn("[Waitlist] API check failed or returned 404, falling back to direct Firestore read:", apiErr);
-            // Direct Firestore fallback
-            const docRef = doc(db, "waitlist", user.email.toLowerCase().trim());
-            const docSnap = await getDoc(docRef);
-            registered = docSnap.exists();
-            success = true;
-          }
-
-          if (success) {
-            if (registered) {
-              setWaitlistStatus("joined");
-              safeStorage.setItem("nexa_premium_waitlist_joined", "true");
-            } else if (savedStatus === "true") {
-              // Server/Firestore says not registered, so sync local state back
-              setWaitlistStatus("idle");
-              safeStorage.removeItem("nexa_premium_waitlist_joined");
-            }
+          const docRef = doc(db, "waitlist", user.email.toLowerCase().trim());
+          const docSnap = await getDoc(docRef);
+          const registered = docSnap.exists();
+          
+          if (registered) {
+            setWaitlistStatus("joined");
+            safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+          } else if (savedStatus === "true") {
+            setWaitlistStatus("idle");
+            safeStorage.removeItem("nexa_premium_waitlist_joined");
           }
         } catch (e) {
-          console.error("Error checking waitlist status:", e);
+          console.error("Error checking waitlist status from Firestore:", e);
         }
       }
     };
@@ -138,37 +119,40 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
       let success = false;
       let errorMsg = "";
 
+      const currentUser = auth.currentUser;
+      if (!currentUser || user?.isGuest) {
+        setErrorMessage("Please sign in to join the Nexa Premium Waitlist.");
+        setWaitlistStatus("error");
+        setShowConfirmLeave(false);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Direct Firestore delete using client SDK
       try {
-        const response = await fetch("/api/premium/waitlist/leave", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email: email.trim(),
-          }),
-        });
+        const docRef = doc(db, "waitlist", email.toLowerCase().trim());
+        await deleteDoc(docRef);
+        success = true;
 
-        if (response.status === 404) {
-          throw new Error("404");
-        }
-
-        const data = await response.json();
-        if (data.success) {
-          success = true;
-        } else {
-          errorMsg = data.error || "Something went wrong. Please try again.";
-        }
-      } catch (apiErr) {
-        console.warn("[Waitlist] API leave failed or returned 404, falling back to direct Firestore delete:", apiErr);
-        // Direct Firestore fallback
+        // Optionally notify the server
         try {
-          const docRef = doc(db, "waitlist", email.toLowerCase().trim());
-          await deleteDoc(docRef);
-          success = true;
-        } catch (fsErr: any) {
+          await fetch("/api/premium/waitlist/leave", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: email.trim(),
+            }),
+          });
+        } catch (apiErr) {
+          console.warn("[Waitlist] API leave failed, continuing since Firestore delete succeeded:", apiErr);
+        }
+      } catch (fsErr: any) {
+        try {
           handleFirestoreError(fsErr, OperationType.DELETE, `waitlist/${email}`);
-          errorMsg = fsErr.message || "Failed to leave waitlist. Please try again.";
+        } catch (wrappedErr: any) {
+          errorMsg = wrappedErr.message || fsErr.message;
         }
       }
 
@@ -182,7 +166,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           setWaitlistStatus("idle");
         }, 3500);
       } else {
-        setErrorMessage(errorMsg);
+        setErrorMessage(errorMsg || "Failed to leave waitlist. Please try again.");
         setWaitlistStatus("error");
         setShowConfirmLeave(false);
       }
@@ -209,66 +193,64 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
     setErrorMessage("");
 
     try {
+      const currentUser = auth.currentUser;
+      if (!currentUser || user?.isGuest) {
+        setErrorMessage("Please sign in to join the Nexa Premium Waitlist.");
+        setWaitlistStatus("error");
+        playUiSound("error");
+        setIsSubmitting(false);
+        return;
+      }
+
       let success = false;
       let statusResult = "";
       let errorMsg = "";
 
+      const normalizedEmail = email.toLowerCase().trim();
+      const docRef = doc(db, "waitlist", normalizedEmail);
+
+      // Direct Firestore check
       try {
-        const response = await fetch("/api/premium/waitlist", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email: email.trim(),
-            userId: user?.isGuest ? null : user?.email,
-            source: source,
-          }),
-        });
+        const docSnap = await getDoc(docRef);
 
-        if (response.status === 404) {
-          throw new Error("404");
-        }
-
-        const responseText = await response.text();
-        let data: any;
-        try {
-          data = JSON.parse(responseText);
-        } catch (jsonErr) {
-          throw new Error(`The server returned an invalid response (Status ${response.status}): ${responseText.substring(0, 120)}`);
-        }
-
-        if (response.ok && data.success) {
-          success = true;
-          statusResult = data.status;
+        if (docSnap.exists()) {
+          success = false;
+          errorMsg = "You're already on the Nexa Premium Waitlist.";
         } else {
-          errorMsg = data.error || `Server error (Status ${response.status}). Please try again.`;
-        }
-      } catch (apiErr) {
-        console.warn("[Waitlist] API submit failed or returned 404, falling back to direct Firestore write:", apiErr);
-        // Direct Firestore fallback
-        try {
-          const normalizedEmail = email.toLowerCase().trim();
-          const docRef = doc(db, "waitlist", normalizedEmail);
-          const docSnap = await getDoc(docRef);
+          // Store email, uid, userId, timestamp, source
+          const newEntry = {
+            email: normalizedEmail,
+            uid: currentUser.uid,
+            userId: currentUser.uid,
+            timestamp: new Date().toISOString(),
+            source: source,
+          };
+          await setDoc(docRef, newEntry);
+          success = true;
+          statusResult = "joined";
 
-          if (docSnap.exists()) {
-            success = true;
-            statusResult = "already_registered";
-          } else {
-            const newEntry = {
-              email: normalizedEmail,
-              userId: user?.isGuest ? null : user?.email,
-              timestamp: new Date().toISOString(),
-              source: source,
-            };
-            await setDoc(docRef, newEntry);
-            success = true;
-            statusResult = "joined";
+          // Send confirmation email asynchronously via server, catch error gracefully
+          try {
+            await fetch("/api/premium/waitlist", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                email: normalizedEmail,
+                userId: currentUser.uid,
+                source: source,
+              }),
+            });
+          } catch (apiErr) {
+            console.warn("[Waitlist] Optional confirmation email API call failed:", apiErr);
           }
-        } catch (fsErr: any) {
+        }
+      } catch (fsErr: any) {
+        try {
           handleFirestoreError(fsErr, OperationType.WRITE, `waitlist/${email}`);
-          errorMsg = fsErr.message || "Failed to join waitlist. Please try again.";
+        } catch (wrappedErr: any) {
+          errorMsg = wrappedErr.message || fsErr.message;
         }
       }
 
@@ -282,7 +264,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           playUiSound("waitlist_joined");
         }
       } else {
-        setErrorMessage(errorMsg);
+        setErrorMessage(errorMsg || "Failed to join waitlist. Please try again.");
         setWaitlistStatus("error");
         playUiSound("error");
       }

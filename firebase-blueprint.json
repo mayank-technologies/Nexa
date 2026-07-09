@@ -132,6 +132,10 @@
           "type": "string",
           "description": "The authenticated user's ID if signed in, or null"
         },
+        "uid": {
+          "type": "string",
+          "description": "The authenticated user's ID if signed in, or null"
+        },
         "timestamp": {
           "type": "string",
           "format": "date-time"

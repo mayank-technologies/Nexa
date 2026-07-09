@@ -46,6 +46,7 @@ interface MessageListProps {
   onEditPrompt: (msgId: string, newContent: string) => void;
   onReact?: (msgId: string, reaction: string | null) => void;
   isLoading?: boolean;
+  isGenerating?: boolean;
   onCompleteQuiz?: (score: number, total: number) => void;
   userName?: string;
   isFocusMode?: boolean;
@@ -59,6 +60,7 @@ export function MessageList({
   onEditPrompt,
   onReact,
   isLoading,
+  isGenerating,
   onCompleteQuiz,
   userName,
   isFocusMode,
@@ -180,7 +182,7 @@ export function MessageList({
   return (
     <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto py-4 select-text" id="nexa-message-list">
       <AnimatePresence initial={false}>
-        {messages.map((msg) => {
+        {messages.map((msg, idx) => {
           const isModel = msg.role === "assistant";
           const isEditing = editingMsgId === msg.id;
 
@@ -312,7 +314,11 @@ export function MessageList({
                 {/* 5. Custom parsed text body (supports bolding headers bullet checks etc.) */}
                 {!msg.quiz && !msg.factCheck && !msg.researchReport && (
                   <div className="space-y-3 prose prose-sm max-w-none dark:prose-invert" id="nexa-rich-text-container">
-                    {parseCustomMarkdown(msg.content)}
+                    {parseCustomMarkdown(
+                      isGenerating && idx === messages.length - 1
+                        ? msg.content + "▍"
+                        : msg.content
+                    )}
                   </div>
                 )}
               </div>
@@ -877,9 +883,17 @@ function parseInlineStyles(text: string) {
   
   // We can do a simpler rendering by converting HTML/React elements directly
   // However, simple split mapping is completely robust and type safe for code and strong bold blocks
-  const segments = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+  const segments = text.split(/(\*\*.*?\*\*|`.*?`|▍)/g);
 
   return segments.map((seg, idx) => {
+    if (seg === "▍") {
+      return (
+        <span
+          key={idx}
+          className="inline-block w-1.5 h-3.5 bg-[#C96A3D] dark:bg-[#C96A3D] ml-0.5 animate-cursor-blink align-middle rounded-xs"
+        />
+      );
+    }
     if (seg.startsWith("**") && seg.endsWith("**")) {
       return (
         <strong key={idx} className="font-extrabold text-[#14213D] dark:text-white">

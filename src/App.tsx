@@ -35,7 +35,8 @@ import {
   Award,
   MoreVertical,
   ThumbsUp,
-  AlertTriangle
+  AlertTriangle,
+  Square
 } from "lucide-react";
 import { trackAction } from "./utils/gamification";
 import {
@@ -529,6 +530,9 @@ export default function App() {
   // Controls Chat thread inputs
   const [inputPrompt, setInputPrompt] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamIntervalRef = useRef<any>(null);
   const [attachment, setAttachment] = useState<any>(null);
   const [explainLikeIm10, setExplainLikeIm10] = useState(false);
   const [writingStyle, setWritingStyle] = useState<"formal" | "casual" | "academic" | "professional">("casual");
@@ -1415,6 +1419,12 @@ export default function App() {
 
     setIsLoading(true);
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     // Set the specific message to a regenerating/loading state locally
     setSessions((prev) =>
       prev.map((s) => {
@@ -1464,30 +1474,30 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       const data = await response.json();
+
+      setIsLoading(false);
+      setIsGenerating(true);
+
+      const updatedMsg: Message = {
+        ...activeSession.messages[idx],
+        content: "",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        engineId: data.engineId || "core",
+        sources: data.sources || undefined,
+        factCheck: data.factCheck || undefined,
+        researchReport: data.researchReport || undefined,
+        quiz: data.quiz || undefined,
+      };
 
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id === activeSessionId) {
             const updatedMsgs = [...s.messages];
-            updatedMsgs[idx] = {
-              ...updatedMsgs[idx],
-              content: data.content || "",
-              timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-              engineId: data.engineId || "core",
-              sources: data.sources || undefined,
-              factCheck: data.factCheck || undefined,
-              researchReport: data.researchReport || undefined,
-              quiz: data.quiz || undefined,
-            };
-            // Sync updated message and chat summary to Firestore
-            syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
-            syncChatSummaryToFirestore({
-              ...s,
-              updatedAt: new Date().toISOString()
-            });
+            updatedMsgs[idx] = updatedMsg;
             return {
               ...s,
               messages: updatedMsgs,
@@ -1497,6 +1507,41 @@ export default function App() {
           return s;
         })
       );
+
+      // Start tokenized streaming
+      const fullContent = data.content || "";
+      const tokens = fullContent.split(/(\s+)/);
+      let currentTokenIdx = 0;
+      let currentText = "";
+
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+      }
+
+      streamIntervalRef.current = setInterval(() => {
+        if (currentTokenIdx >= tokens.length) {
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
+          setIsGenerating(false);
+
+          const finalMsg = { ...updatedMsg, content: fullContent };
+          triggerVoiceIfNeeded(finalMsg);
+
+          // Sync complete message to Firestore
+          syncMessageToFirestore(activeSessionId, finalMsg);
+          syncChatSummaryToFirestore({
+            ...activeSession,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
+          for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
+            currentText += tokens[currentTokenIdx];
+            currentTokenIdx++;
+          }
+          updateMessageContent(msgId, currentText);
+        }
+      }, 20);
 
       // Track routing updates inside Admin Metric streams
       const routeId = data.engineId || "core";
@@ -1510,6 +1555,10 @@ export default function App() {
       }));
 
     } catch (err: any) {
+      if (err.name === "AbortError" || err.message?.includes("aborted")) {
+        console.log("Regeneration aborted cleanly");
+        return;
+      }
       console.error(err);
       setSessions((prev) =>
         prev.map((s) => {
@@ -1666,6 +1715,12 @@ export default function App() {
 
     const feedMessages = updatedMsgs.slice(0, idx + 1).slice(-12);
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const otherSessionsPayload = sessions
         .filter((s) => s.id !== activeSessionId && s.messages && s.messages.length > 0)
@@ -1692,9 +1747,25 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       const data = await response.json();
+
+      setIsLoading(false);
+      setIsGenerating(true);
+
+      const updatedMsg: Message = {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        engineId: data.engineId || "core",
+        sources: data.sources || undefined,
+        factCheck: data.factCheck || undefined,
+        researchReport: data.researchReport || undefined,
+        quiz: data.quiz || undefined,
+      };
 
       setSessions((prev) =>
         prev.map((s) => {
@@ -1702,22 +1773,7 @@ export default function App() {
             const currentMsgs = [...s.messages];
             const aIdx = currentMsgs.findIndex((m) => m.id === assistantId);
             if (aIdx !== -1) {
-              currentMsgs[aIdx] = {
-                ...currentMsgs[aIdx],
-                content: data.content || "",
-                timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-                engineId: data.engineId || "core",
-                sources: data.sources || undefined,
-                factCheck: data.factCheck || undefined,
-                researchReport: data.researchReport || undefined,
-                quiz: data.quiz || undefined,
-              };
-              // Sync the completed assistant message to Firestore
-              syncMessageToFirestore(activeSessionId, currentMsgs[aIdx]);
-              syncChatSummaryToFirestore({
-                ...s,
-                updatedAt: new Date().toISOString()
-              });
+              currentMsgs[aIdx] = updatedMsg;
             }
             return {
               ...s,
@@ -1728,6 +1784,41 @@ export default function App() {
           return s;
         })
       );
+
+      // Start tokenized streaming
+      const fullContent = data.content || "";
+      const tokens = fullContent.split(/(\s+)/);
+      let currentTokenIdx = 0;
+      let currentText = "";
+
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
+      }
+
+      streamIntervalRef.current = setInterval(() => {
+        if (currentTokenIdx >= tokens.length) {
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
+          setIsGenerating(false);
+
+          const finalMsg = { ...updatedMsg, content: fullContent };
+          triggerVoiceIfNeeded(finalMsg);
+
+          // Sync the completed assistant message to Firestore
+          syncMessageToFirestore(activeSessionId, finalMsg);
+          syncChatSummaryToFirestore({
+            ...activeSession,
+            updatedAt: new Date().toISOString()
+          });
+        } else {
+          const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
+          for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
+            currentText += tokens[currentTokenIdx];
+            currentTokenIdx++;
+          }
+          updateMessageContent(assistantId, currentText);
+        }
+      }, 20);
 
       const routeId = data.engineId || "core";
       setAdminMetrics((prev) => ({
@@ -1740,6 +1831,10 @@ export default function App() {
       }));
 
     } catch (err: any) {
+      if (err.name === "AbortError" || err.message?.includes("aborted")) {
+        console.log("Edit prompt fetch aborted cleanly");
+        return;
+      }
       console.error(err);
       setSessions((prev) =>
         prev.map((s) => {
@@ -1910,6 +2005,86 @@ export default function App() {
     }
   };
 
+  const updateMessageContent = (msgId: string, content: string) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id === activeSessionId) {
+          return {
+            ...s,
+            messages: s.messages.map((m) => (m.id === msgId ? { ...m, content } : m)),
+          };
+        }
+        return s;
+      })
+    );
+  };
+
+  const triggerVoiceIfNeeded = (msg: Message) => {
+    if (voiceModeActiveRef.current) {
+      setVoiceState("speaking");
+      speakUtterance(msg.content, () => {
+        if (voiceModeActiveRef.current) {
+          setVoiceState("listening");
+          startListeningSession();
+        } else {
+          setVoiceState("idle");
+        }
+      });
+    } else if (settingsRef.current.voiceAutoPlay !== false) {
+      speakUtterance(msg.content);
+    }
+  };
+
+  const handleStopGenerating = () => {
+    // 1. Abort fetch request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    // 2. Clear streaming interval
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+
+    // 3. Stop speech/voice playback if active
+    if (voiceModeActiveRef.current || voiceStateRef.current !== "idle") {
+      setVoiceModeActive(false);
+      setVoiceState("idle");
+      setIsListening(false);
+      accumulatedTranscriptRef.current = "";
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    }
+
+    // 4. Set states to idle
+    setIsLoading(false);
+    setIsGenerating(false);
+
+    // 5. Clean up blinking cursor and save partial state to Firestore
+    setSessions((prev) => {
+      const currentSess = prev.find((s) => s.id === activeSessionId);
+      if (currentSess && currentSess.messages && currentSess.messages.length > 0) {
+        const lastMsg = currentSess.messages[currentSess.messages.length - 1];
+        if (lastMsg && lastMsg.role === "assistant") {
+          syncMessageToFirestore(activeSessionId, lastMsg);
+          syncChatSummaryToFirestore({
+            ...currentSess,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+      return prev;
+    });
+  };
+
   // Submit Main Chat Trigger
   const handleChatSubmit = async (customPrompt?: string, customAttachment?: any) => {
     const promptToSend = customPrompt || inputPrompt;
@@ -1963,6 +2138,12 @@ export default function App() {
 
     setAttachment(null);
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       // Build previous messages stream context list (limited to last 12 messages)
       const feedMessages = [...activeSession.messages, newUserMsg].slice(-12);
@@ -1993,6 +2174,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       const data = await response.json();
@@ -2003,10 +2185,14 @@ export default function App() {
         playUiSound("ai_response_start");
       }
 
+      setIsLoading(false);
+      setIsGenerating(true);
+
+      const assistantMsgId = `ast-${Date.now()}`;
       const newAssistantMsg: Message = {
-        id: `ast-${Date.now()}`,
+        id: assistantMsgId,
         role: "assistant",
-        content: data.content || "",
+        content: "",
         timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         engineId: data.engineId || "core",
         sources: data.sources || undefined,
@@ -2015,16 +2201,7 @@ export default function App() {
         quiz: data.quiz || undefined,
       };
 
-      // Sync AI response message to Firestore & update parent metadata
-      syncMessageToFirestore(activeSessionId, newAssistantMsg);
-      
-      const finalParentChat: ChatSession = {
-        ...updatedParentChat,
-        updatedAt: new Date().toISOString()
-      };
-      syncChatSummaryToFirestore(finalParentChat);
-
-      // Update Chat with Assistant's parsed answers
+      // Append assistant message placeholder immediately
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id === activeSessionId) {
@@ -2038,20 +2215,41 @@ export default function App() {
         })
       );
 
-      // Play voice reply if voiceModeActive is active or settings voiceAutoPlay is enabled
-      if (voiceModeActiveRef.current) {
-        setVoiceState("speaking");
-        speakUtterance(newAssistantMsg.content, () => {
-          if (voiceModeActiveRef.current) {
-            setVoiceState("listening");
-            startListeningSession();
-          } else {
-            setVoiceState("idle");
-          }
-        });
-      } else if (settingsRef.current.voiceAutoPlay !== false) {
-        speakUtterance(newAssistantMsg.content);
+      // Start tokenized streaming
+      const fullContent = data.content || "";
+      const tokens = fullContent.split(/(\s+)/);
+      let currentTokenIdx = 0;
+      let currentText = "";
+
+      if (streamIntervalRef.current) {
+        clearInterval(streamIntervalRef.current);
       }
+
+      streamIntervalRef.current = setInterval(() => {
+        if (currentTokenIdx >= tokens.length) {
+          clearInterval(streamIntervalRef.current);
+          streamIntervalRef.current = null;
+          setIsGenerating(false);
+
+          const finalMsg = { ...newAssistantMsg, content: fullContent };
+          triggerVoiceIfNeeded(finalMsg);
+
+          // Sync complete message to Firestore
+          syncMessageToFirestore(activeSessionId, finalMsg);
+          const finalParentChat: ChatSession = {
+            ...updatedParentChat,
+            updatedAt: new Date().toISOString()
+          };
+          syncChatSummaryToFirestore(finalParentChat);
+        } else {
+          const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
+          for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
+            currentText += tokens[currentTokenIdx];
+            currentTokenIdx++;
+          }
+          updateMessageContent(assistantMsgId, currentText);
+        }
+      }, 20);
 
       // Track routing updates inside Admin Metric streams
       const routeId = data.engineId || "core";
@@ -2077,6 +2275,10 @@ export default function App() {
       }
 
     } catch (err: any) {
+      if (err.name === "AbortError" || err.message?.includes("aborted")) {
+        console.log("Fetch aborted cleanly");
+        return;
+      }
       console.error(err);
       playUiSound("error");
       const errorMsg: Message = {
@@ -2334,6 +2536,7 @@ export default function App() {
                   onEditPrompt={handleEditPromptMessage}
                   onReact={handleMessageReaction}
                   isLoading={isLoading}
+                  isGenerating={isGenerating}
                   onCompleteQuiz={handleCompleteQuiz}
                   userName={user.fullName}
                   isFocusMode={isFocusMode}
@@ -2750,18 +2953,37 @@ export default function App() {
                 className="flex-1 text-xs py-2 px-3 bg-transparent outline-none max-h-36 resize-none text-[#14213D] dark:text-white placeholder:text-slate-400 font-normal m-0"
               />
 
-              <button
-                type="submit"
-                disabled={isLoading || (!inputPrompt.trim() && !attachment)}
-                className="p-2.5 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white rounded-xl transition-all hover:scale-105 shrink-0 disabled:opacity-40 disabled:hover:scale-100 cursor-pointer"
-                title="Send Message"
-              >
-                {isLoading ? (
-                  <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+              <AnimatePresence mode="wait">
+                {isLoading || isGenerating ? (
+                  <motion.button
+                    key="stop-btn"
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.15 }}
+                    type="button"
+                    onClick={handleStopGenerating}
+                    className="p-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all shadow-[0_0_15px_rgba(239,68,68,0.5)] border border-red-500/40 flex items-center justify-center shrink-0 cursor-pointer"
+                    title="Stop Generating"
+                  >
+                    <Square className="w-4 h-4 shrink-0 fill-current text-white" />
+                  </motion.button>
                 ) : (
-                  <Send className="w-4 h-4 shrink-0" />
+                  <motion.button
+                    key="send-btn"
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.15 }}
+                    type="submit"
+                    disabled={(!inputPrompt.trim() && !attachment)}
+                    className="p-2.5 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white rounded-xl transition-all hover:scale-105 shrink-0 disabled:opacity-40 disabled:hover:scale-100 cursor-pointer flex items-center justify-center"
+                    title="Send Message"
+                  >
+                    <Send className="w-4 h-4 shrink-0" />
+                  </motion.button>
                 )}
-              </button>
+              </AnimatePresence>
             </form>
 
 

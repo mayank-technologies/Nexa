@@ -324,7 +324,7 @@ async function startServer() {
     }
 
     try {
-      console.log("[Nexa SMTP Diagnostic] [Stage: SMTP transporter created] Creating Nodemailer transporter...");
+      console.log("[Nexa SMTP Diagnostic] [Stage: SMTP transporter created] Creating Nodemailer transporter with debug & logger enabled...");
       const transporter = nodemailer.createTransport({
         host,
         port,
@@ -333,10 +333,11 @@ async function startServer() {
           user,
           pass,
         },
-        // Set short timeouts to avoid stalling the dev server
-        connectionTimeout: 5000,
-        greetingTimeout: 5000,
-        socketTimeout: 5000,
+        debug: true,
+        logger: true,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 10000,
       });
 
       console.log("[Nexa SMTP Diagnostic] [Stage: SMTP authentication verification] Verifying transporter connection...");
@@ -355,41 +356,26 @@ async function startServer() {
         throw verifyErr;
       }
 
+      console.log(`[Nexa SMTP Diagnostic] Verifying fields: To=${toEmail}, From=${from}, ReplyTo=${from}`);
+
       const mailOptions = {
         from,
         to: toEmail,
+        replyTo: from,
         subject: "You're on the Nexa Premium Waitlist 🎉",
         text: `Hi,\n\nThank you for joining the Nexa Premium Waitlist! 🎉\n\nWe're excited to have you with us.\n\nYou are now officially on the waitlist and will be among the first users to get early access when Nexa Premium launches.\n\nHere's what you'll get with Nexa Premium:\n\n⚡ Faster AI Responses\n\n🔍 Unlimited Deep Research\n\n📚 Advanced Study Mode\n\n🎨 AI Image Generator\n\n🧠 Long-Term Memory\n\n✨ Nexa Companion\n\n👥 AI Group Chat\n\n📞 AI Voice Calls\n\n🚀 Early Access to Upcoming Features\n\nWe'll notify you as soon as Nexa Premium is ready.\n\nThank you for believing in Nexa and being part of our journey.\n\nBest regards,\n\nThe Nexa Team`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; line-height: 1.6;">
-            <p style="font-size: 16px;">Hi,</p>
-            <p style="font-size: 16px;">Thank you for joining the Nexa Premium Waitlist! 🎉</p>
-            <p style="font-size: 16px;">We're excited to have you with us.</p>
-            <p style="font-size: 16px;">You are now officially on the waitlist and will be among the first users to get early access when Nexa Premium launches.</p>
-            
-            <p style="font-size: 16px; font-weight: bold; margin-top: 24px;">Here's what you'll get with Nexa Premium:</p>
-            <p style="font-size: 15px; margin: 8px 0;">⚡ Faster AI Responses</p>
-            <p style="font-size: 15px; margin: 8px 0;">🔍 Unlimited Deep Research</p>
-            <p style="font-size: 15px; margin: 8px 0;">📚 Advanced Study Mode</p>
-            <p style="font-size: 15px; margin: 8px 0;">🎨 AI Image Generator</p>
-            <p style="font-size: 15px; margin: 8px 0;">🧠 Long-Term Memory</p>
-            <p style="font-size: 15px; margin: 8px 0;">✨ Nexa Companion</p>
-            <p style="font-size: 15px; margin: 8px 0;">👥 AI Group Chat</p>
-            <p style="font-size: 15px; margin: 8px 0;">📞 AI Voice Calls</p>
-            <p style="font-size: 15px; margin: 8px 0;">🚀 Early Access to Upcoming Features</p>
-            
-            <p style="font-size: 16px; margin-top: 24px;">We'll notify you as soon as Nexa Premium is ready.</p>
-            <p style="font-size: 16px;">Thank you for believing in Nexa and being part of our journey.</p>
-            
-            <p style="font-size: 16px; margin-top: 24px; margin-bottom: 4px;">Best regards,</p>
-            <p style="font-size: 16px; font-weight: bold; color: #0f172a; margin-top: 0;">The Nexa Team</p>
-          </div>
-        `,
       };
 
-      console.log("[Nexa SMTP Diagnostic] [Stage: Email send attempted] Sending email via Nodemailer...");
+      console.log("[Nexa SMTP Diagnostic] [Stage: Email send attempted] Sending plain-text email via Nodemailer...");
       const info = await transporter.sendMail(mailOptions);
-      console.info(`[Nexa SMTP Diagnostic] [Stage: Email send success] Confirmation email sent successfully to ${toEmail}: ${info.messageId}`);
+      console.info("[Nexa SMTP Diagnostic] [Stage: Email send success] Confirmation email sendMail() reported success:", {
+        accepted: info.accepted,
+        rejected: info.rejected,
+        pending: info.pending,
+        response: info.response,
+        envelope: info.envelope,
+        messageId: info.messageId,
+      });
       return true;
     } catch (err: any) {
       console.error("[Nexa SMTP Diagnostic] [Stage: Email send failure] Email delivery failed:", {
@@ -606,6 +592,101 @@ async function startServer() {
       return res.status(500).json({
         success: false,
         error: error.message || "Failed to remove you from the waitlist. Please try again."
+      });
+    }
+  });
+
+  // Test email endpoint
+  app.all("/api/test-email", async (req, res) => {
+    const host = process.env.SMTP_HOST || "smtp.gmail.com";
+    const port = parseInt(process.env.SMTP_PORT || "587", 10);
+    const user = process.env.SMTP_USER;
+    const pass = process.env.SMTP_PASS;
+    const from = process.env.SMTP_FROM || `Nexa <${user}>`;
+
+    if (!user || !pass) {
+      return res.status(500).json({
+        success: false,
+        error: "SMTP credentials are not configured in environment variables."
+      });
+    }
+
+    const recipients = ["bittomaurya0@gmail.com", "mayanktechnologies00@gmail.com"];
+
+    console.log("[Nexa Express SMTP Test] [Stage: Request received] Triggering test email delivery...");
+
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: {
+          user,
+          pass,
+        },
+        debug: true,
+        logger: true,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 10000,
+      });
+
+      console.log("[Nexa Express SMTP Test] [Stage: Transporter created] Verifying connection...");
+      await transporter.verify();
+      console.log("[Nexa Express SMTP Test] [Stage: SMTP authentication success] Verification succeeded!");
+
+      const mailOptions = {
+        from,
+        to: recipients.join(", "),
+        replyTo: from,
+        subject: "Nexa SMTP Test",
+        text: "Hello! This is a test email from Nexa.",
+      };
+
+      console.log("[Nexa Express SMTP Test] [Stage: Email send attempted] Sending test mail...");
+      const info = await transporter.sendMail(mailOptions);
+
+      console.log("[Nexa Express SMTP Test] [Stage: Email send success] Full sendMail Result:", {
+        accepted: info.accepted,
+        rejected: info.rejected,
+        pending: info.pending,
+        response: info.response,
+        envelope: info.envelope,
+        messageId: info.messageId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "Test emails sent successfully!",
+        recipients,
+        info: {
+          accepted: info.accepted,
+          rejected: info.rejected,
+          response: info.response,
+          messageId: info.messageId,
+          envelope: info.envelope,
+        }
+      });
+
+    } catch (err: any) {
+      console.error("[Nexa Express SMTP Test] [Stage: Email send failure] Diagnostic failed:", {
+        message: err.message,
+        code: err.code,
+        command: err.command,
+        response: err.response,
+        responseCode: err.responseCode,
+        stack: err.stack,
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: err.message || err,
+        details: {
+          code: err.code,
+          command: err.command,
+          response: err.response,
+          responseCode: err.responseCode,
+        }
       });
     }
   });

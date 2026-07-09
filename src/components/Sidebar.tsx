@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "motion/react";
 import { ChatSession, UserProfile } from "../types";
+import { Logo } from "./Logo";
 
 interface SidebarProps {
   sessions: ChatSession[];
@@ -80,6 +81,13 @@ export function Sidebar({
 
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const touchStartTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Lazy loading state for infinite scrolling
+  const [visibleCount, setVisibleCount] = useState(25);
+
+  useEffect(() => {
+    setVisibleCount(25);
+  }, [searchQuery]);
 
   const handleStartRename = (session: ChatSession) => {
     setEditingId(session.id);
@@ -157,6 +165,63 @@ export function Sidebar({
   const unpinnedChats = filteredSessions
     .filter((s) => !s.isPinned)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
+  // Date-based grouping helpers
+  const getGroupTitle = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const now = new Date();
+    
+    const dDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    const diffTime = nowDate.getTime() - dDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) {
+      return "Today";
+    } else if (diffDays === 1) {
+      return "Yesterday";
+    } else if (diffDays <= 7) {
+      return "Previous 7 Days";
+    } else {
+      return "Older Conversations";
+    }
+  };
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 120) {
+      if (visibleCount < unpinnedChats.length) {
+        setVisibleCount((prev) => Math.min(prev + 25, unpinnedChats.length));
+      }
+    }
+  };
+
+  const displayedUnpinnedChats = unpinnedChats.slice(0, visibleCount);
+
+  // Group displayed chats
+  const groupedUnpinned: { [key: string]: ChatSession[] } = {
+    "Today": [],
+    "Yesterday": [],
+    "Previous 7 Days": [],
+    "Older Conversations": [],
+  };
+
+  displayedUnpinnedChats.forEach((chat) => {
+    const groupName = getGroupTitle(chat.updatedAt);
+    if (groupedUnpinned[groupName]) {
+      groupedUnpinned[groupName].push(chat);
+    } else {
+      groupedUnpinned["Older Conversations"].push(chat);
+    }
+  });
+
+  const activeGroups = [
+    { title: "Today", chats: groupedUnpinned["Today"] },
+    { title: "Yesterday", chats: groupedUnpinned["Yesterday"] },
+    { title: "Previous 7 Days", chats: groupedUnpinned["Previous 7 Days"] },
+    { title: "Older Conversations", chats: groupedUnpinned["Older Conversations"] },
+  ].filter((group) => group.chats.length > 0);
 
   // Render a single chat row
   const renderChatItem = (session: ChatSession, isPinnedItem: boolean) => {
@@ -294,11 +359,13 @@ export function Sidebar({
       className="flex flex-col w-full h-full bg-white dark:bg-[#0c1222] select-none overflow-hidden"
       id="nexa-control-sidebar"
     >
-      {/* Sidebar Header: Create Thread */}
-      <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 space-y-3">
-        {isMobileOpen && (
-          <div className="flex items-center justify-between pb-1">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#C96A3D]">Nexa Navigation</span>
+      {/* Sidebar Header: Logo, Start New Chat & Search (Fixed at the top) */}
+      <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 space-y-3 shrink-0">
+        <div className="flex items-center justify-between pb-1">
+          <div className="flex items-center gap-2">
+            <Logo size={28} showText={true} textClass="text-base font-black text-[#14213D] dark:text-white" animate={false} />
+          </div>
+          {isMobileOpen && (
             <button
               onClick={onCloseMobile}
               className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
@@ -306,8 +373,9 @@ export function Sidebar({
             >
               <X className="w-3.5 h-3.5" />
             </button>
-          </div>
-        )}
+          )}
+        </div>
+
         <button
           onClick={() => {
             onNewSession(activeMode);
@@ -366,8 +434,12 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Primary Scrollable Workspace Section */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-5">
+      {/* Primary Scrollable Workspace Section (One continuous scroll container) */}
+      <div 
+        className="flex-1 overflow-y-auto p-4 space-y-5"
+        onScroll={handleScroll}
+        style={{ scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}
+      >
         
         {/* A: Pinned Chats section */}
         {pinnedChats.length > 0 && (
@@ -405,45 +477,50 @@ export function Sidebar({
           </div>
         )}
 
-        {/* B: Recent Thread logs */}
-        <div className="space-y-2 pt-1">
-          <div className="flex justify-between items-center">
-            <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-              Recent Conversations
-            </h4>
-            <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
-              {unpinnedChats.length}
-            </span>
-          </div>
+        {/* B: Grouped Conversations (Continuous List with Today, Yesterday, Last 7 days, Older) */}
+        {activeGroups.length > 0 ? (
+          activeGroups.map((group) => (
+            <div key={group.title} className="space-y-2 pt-1">
+              <div className="flex justify-between items-center">
+                <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                  {group.title}
+                </h4>
+                <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
+                  {group.chats.length}
+                </span>
+              </div>
 
-          <div className="space-y-1.5 max-h-[340px] overflow-y-auto pr-1">
-            {unpinnedChats.length === 0 ? (
+              <div className="space-y-1.5 pr-1">
+                <AnimatePresence initial={false}>
+                  {group.chats.map((session) => (
+                    <motion.div
+                      key={session.id}
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {renderChatItem(session, false)}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </div>
+          ))
+        ) : (
+          unpinnedChats.length === 0 && (
+            <div className="space-y-2 pt-1">
+              <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                Recent Conversations
+              </h4>
               <p className="text-[11px] text-slate-400 italic text-left p-2">
                 No matching logs found.
               </p>
-            ) : (
-              <AnimatePresence initial={false}>
-                {unpinnedChats.map((session) => (
-                  <motion.div
-                    key={session.id}
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                  >
-                    {renderChatItem(session, false)}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            )}
-          </div>
-        </div>
-
-
+            </div>
+          )
+        )}
 
       </div>
-
-
 
       {/* Guest Mode Sign-In / Account footer */}
       {user.isGuest ? (

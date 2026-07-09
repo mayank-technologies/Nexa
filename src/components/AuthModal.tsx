@@ -11,7 +11,10 @@ import { auth, db, handleFirestoreError, OperationType } from "../firebase";
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
-  updateProfile 
+  updateProfile,
+  GoogleAuthProvider,
+  linkWithCredential,
+  signInWithCredential
 } from "firebase/auth";
 import { 
   doc, 
@@ -45,6 +48,14 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [isEnteringCustomGoogle, setIsEnteringCustomGoogle] = useState(false);
   const [customGoogleEmail, setCustomGoogleEmail] = useState("");
   const [customGoogleName, setCustomGoogleName] = useState("");
+
+  // Account linking states
+  const [isLinking, setIsLinking] = useState(false);
+  const [linkingEmail, setLinkingEmail] = useState("");
+  const [linkingName, setLinkingName] = useState("");
+  const [linkingIdToken, setLinkingIdToken] = useState<string | undefined>(undefined);
+  const [linkingPassword, setLinkingPassword] = useState("");
+  const [showLinkingPassword, setShowLinkingPassword] = useState(false);
 
   const googleAccounts = [
     { email: "mayanktechnologies00@gmail.com", name: "Mayank Technologies" },
@@ -82,7 +93,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
                   if (payload.email) {
                     handleSelectGoogleAccount(
                       payload.email,
-                      payload.name || payload.given_name || "Google User"
+                      payload.name || payload.given_name || "Google User",
+                      response.credential
                     );
                   }
                 } catch (jwtErr) {
@@ -348,7 +360,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }, 1200);
   };
 
-  const handleSelectGoogleAccount = async (selectedEmail: string, selectedName: string) => {
+  const handleSelectGoogleAccount = async (selectedEmail: string, selectedName: string, idToken?: string) => {
     setLoading(true);
     setErrorFlag("");
 
@@ -367,17 +379,56 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       let firebaseUser;
       let isNewUser = false;
       
-      try {
-        const userCredential = await signInWithEmailAndPassword(auth, selectedEmail, federatedPass);
-        firebaseUser = userCredential.user;
-      } catch (loginErr: any) {
-        if (loginErr.code === "auth/user-not-found" || loginErr.code === "auth/invalid-credential") {
-          const userCredential = await createUserWithEmailAndPassword(auth, selectedEmail, federatedPass);
+      // Determine if we are doing a real Google login using GSI credential or simulated login
+      if (idToken) {
+        try {
+          const credential = GoogleAuthProvider.credential(idToken);
+          const userCredential = await signInWithCredential(auth, credential);
           firebaseUser = userCredential.user;
-          await updateProfile(firebaseUser, { displayName: selectedName });
-          isNewUser = true;
-        } else {
+        } catch (loginErr: any) {
+          console.error("signInWithCredential error:", loginErr);
+          // If the email is already in use by a different provider (e.g., Email/Password), we trigger linking!
+          if (loginErr.code === "auth/account-exists-with-different-credential") {
+            setLinkingEmail(selectedEmail);
+            setLinkingName(selectedName);
+            setLinkingIdToken(idToken);
+            setLinkingPassword("");
+            setIsLinking(true);
+            setLoading(false);
+            return;
+          }
           throw loginErr;
+        }
+      } else {
+        // Simulated Google Sign-In using federated password
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, selectedEmail, federatedPass);
+          firebaseUser = userCredential.user;
+        } catch (loginErr: any) {
+          if (loginErr.code === "auth/user-not-found" || loginErr.code === "auth/invalid-credential") {
+            // Check if account already exists as a custom Email/Password account by attempting registration
+            try {
+              const userCredential = await createUserWithEmailAndPassword(auth, selectedEmail, federatedPass);
+              firebaseUser = userCredential.user;
+              await updateProfile(firebaseUser, { displayName: selectedName });
+              isNewUser = true;
+            } catch (createErr: any) {
+              if (createErr.code === "auth/email-already-in-use") {
+                // Email already exists as a custom Email/Password account!
+                setLinkingEmail(selectedEmail);
+                setLinkingName(selectedName);
+                setLinkingIdToken(undefined);
+                setLinkingPassword("");
+                setIsLinking(true);
+                setLoading(false);
+                return;
+              } else {
+                throw createErr;
+              }
+            }
+          } else {
+            throw loginErr;
+          }
         }
       }
 
@@ -470,6 +521,133 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     }
   };
 
+  const handleLinkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkingPassword) {
+      setErrorFlag("Please enter your account password to verify and link.");
+      return;
+    }
+    setLoading(true);
+    setErrorFlag("");
+
+    let currentChats: any[] = [];
+    try {
+      const cached = localStorage.getItem("nexa_sessions");
+      if (cached) {
+        currentChats = JSON.parse(cached);
+      }
+    } catch (_) {}
+
+    try {
+      // 1. Sign in with the Email/Password account
+      const userCredential = await signInWithEmailAndPassword(auth, linkingEmail, linkingPassword);
+      const firebaseUser = userCredential.user;
+
+      // 2. Link the Google provider automatically
+      if (linkingIdToken) {
+        try {
+          const googleCred = GoogleAuthProvider.credential(linkingIdToken);
+          await linkWithCredential(firebaseUser, googleCred);
+          console.log("Successfully linked Google provider with linkWithCredential!");
+        } catch (linkErr: any) {
+          console.error("linkWithCredential error:", linkErr);
+          if (linkErr.code !== "auth/credential-already-in-use" && linkErr.code !== "auth/provider-already-linked") {
+            throw linkErr;
+          }
+        }
+      } else {
+        // Simulated Google linking
+        try {
+          await setDoc(doc(db, "users", firebaseUser.uid), {
+            isGoogleLinked: true,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        } catch (dbErr) {
+          console.error("Failed to set isGoogleLinked in Firestore:", dbErr);
+        }
+      }
+
+      // 3. Fetch/Create Profile
+      let userProfile: UserProfile;
+      try {
+        const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          userProfile = {
+            email: data.email || firebaseUser.email || linkingEmail,
+            fullName: data.fullName || firebaseUser.displayName || linkingName,
+            isGuest: false,
+            avatarUrl: data.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${data.fullName || linkingName}`,
+            preferences: data.preferences,
+            gamification: data.gamification
+          };
+        } else {
+          userProfile = {
+            email: linkingEmail.toLowerCase().trim(),
+            fullName: linkingName.trim(),
+            isGuest: false,
+            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${linkingName.trim()}`,
+            preferences: {
+              primaryLanguage: "English",
+              rememberPersonalization: true,
+              personalizationContext: "",
+            },
+            gamification: {
+              points: 0,
+              unlockedBadges: [],
+              stats: {
+                chatsCompleted: 0,
+                enginesUsed: [],
+                deepResearchCompleted: 0,
+                studyCompleted: 0,
+                quizzesTaken: 0,
+                perfectQuizzes: 0,
+                factChecksCompleted: 0
+              }
+            }
+          };
+          await setDoc(doc(db, "users", firebaseUser.uid), {
+            ...userProfile,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } catch (dbErr) {
+        handleFirestoreError(dbErr, OperationType.WRITE, `users/${firebaseUser.uid}`);
+        userProfile = {
+          email: linkingEmail.toLowerCase().trim(),
+          fullName: linkingName.trim(),
+          isGuest: false,
+          avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${linkingName.trim()}`
+        };
+      }
+
+      // 4. Fetch user's chats
+      let userChats: any[] = [];
+      try {
+        const chatsSnapshot = await getDocs(collection(db, "users", firebaseUser.uid, "chats"));
+        userChats = chatsSnapshot.docs.map(d => d.data());
+        userChats.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      } catch (dbErr) {
+        handleFirestoreError(dbErr, OperationType.LIST, `users/${firebaseUser.uid}/chats`);
+      }
+
+      setLoading(false);
+      setIsLinking(false);
+      onSuccess(userProfile, userChats);
+      onClose();
+    } catch (err: any) {
+      console.error("Linking Error:", err);
+      let friendlyMessage = "Failed to link accounts. Please verify your password.";
+      if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password") {
+        friendlyMessage = "Incorrect password. Please verify and try again.";
+      } else if (err.message) {
+        friendlyMessage = err.message;
+      }
+      setErrorFlag(friendlyMessage);
+      setLoading(false);
+    }
+  };
+
   const handleCustomGoogleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customGoogleEmail || !customGoogleEmail.includes("@")) {
@@ -491,8 +669,86 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
         <div className="absolute top-0 right-0 w-32 h-32 bg-[#C96A3D]/5 rounded-full blur-2xl" />
         <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl" />
 
-        {/* GOOGLE CHOOSER VIEW */}
-        {googleChooser ? (
+        {/* GOOGLE CHOOSER OR LINKING OR STANDARD VIEW */}
+        {isLinking ? (
+          /* LINKING VIEW */
+          <div>
+            {/* Header with Back button */}
+            <div className="flex justify-between items-center mb-6">
+              <button
+                onClick={() => {
+                  setIsLinking(false);
+                  setErrorFlag("");
+                  setLinkingPassword("");
+                }}
+                className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                Cancel
+              </button>
+              <button
+                onClick={onClose}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Icon and Title */}
+            <div className="flex flex-col items-center justify-center mb-6 text-center">
+              <div className="w-12 h-12 rounded-full bg-indigo-500/10 dark:bg-indigo-500/20 flex items-center justify-center text-indigo-500 mb-3 border border-indigo-500/10">
+                <ShieldCheck className="w-6 h-6 animate-pulse" />
+              </div>
+              <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+                Link Google Account
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 max-w-xs leading-relaxed">
+                An Email/Password account already exists for <strong className="text-slate-800 dark:text-slate-200">{linkingEmail}</strong>. Please enter your account password to link your Google login securely.
+              </p>
+            </div>
+
+            {errorFlag && (
+              <div className="mb-4 text-xs font-medium text-rose-500 bg-rose-500/10 p-3 rounded-xl border border-rose-500/20">
+                {errorFlag}
+              </div>
+            )}
+
+            <form onSubmit={handleLinkSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
+                  Your Password *
+                </label>
+                <div className="relative">
+                  <input
+                    type={showLinkingPassword ? "text" : "password"}
+                    required
+                    placeholder="••••••••"
+                    value={linkingPassword}
+                    onChange={(e) => setLinkingPassword(e.target.value)}
+                    className="w-full text-sm py-2.5 pl-10 pr-10 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
+                  />
+                  <Lock className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
+                  <button
+                    type="button"
+                    onClick={() => setShowLinkingPassword(!showLinkingPassword)}
+                    className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 focus:outline-none cursor-pointer"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-2 flex justify-center items-center gap-2 bg-[#14213D] hover:bg-[#C96A3D] text-white font-semibold py-2.5 rounded-xl transition-colors text-sm disabled:opacity-50 cursor-pointer shadow-xs"
+              >
+                {loading ? "Linking your profile..." : "Confirm & Link Account"}
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
+        ) : googleChooser ? (
           <div>
             {/* Header with Back button */}
             <div className="flex justify-between items-center mb-6">

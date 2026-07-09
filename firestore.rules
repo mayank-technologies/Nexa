@@ -77,6 +77,17 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Waitlist Collection
+    match /waitlist/{email} {
+      allow get: if true;
+      allow create: if email is string && email.size() <= 128 &&
+                      incoming().keys().hasAll(['email', 'timestamp']) &&
+                      incoming().email == email &&
+                      incoming().email.size() <= 128 &&
+                      incoming().timestamp is string && incoming().timestamp.size() <= 128;
+      allow delete: if true;
+    }
+
     // Chat Sessions subcollection
     match /users/{userId}/chats/{chatId} {
       allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(chatId);

@@ -118,6 +118,29 @@
         }
       },
       "required": ["id", "role", "content", "timestamp"]
+    },
+    "WaitlistEntry": {
+      "title": "Waitlist Entry",
+      "description": "Information about users who have joined the Nexa Premium waitlist.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "The waitlist subscriber's email address"
+        },
+        "userId": {
+          "type": "string",
+          "description": "The authenticated user's ID if signed in, or null"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": ["email", "timestamp"]
     }
   },
   "firestore": {
@@ -132,6 +155,10 @@
     "/users/{userId}/chats/{chatId}/messages/{messageId}": {
       "schema": "Message",
       "description": "The messages collection containing individual conversation records."
+    },
+    "/waitlist/{email}": {
+      "schema": "WaitlistEntry",
+      "description": "The collection of premium waitlist signups."
     }
   }
 }

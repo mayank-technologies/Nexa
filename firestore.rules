@@ -13,7 +13,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128;
     }
 
     function incoming() {
@@ -115,7 +115,8 @@ service cloud.firestore {
 
     // Chat Sessions subcollection
     match /users/{userId}/chats/{chatId} {
-      allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
+      allow get: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
+      allow list: if isOwner(userId) && isValidId(userId);
       allow create: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidChat(incoming());
       allow update: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidChat(incoming()) && (
         incoming().diff(existing()).affectedKeys().hasAny(['title', 'updatedAt', 'messages', 'isPinned', 'pinOrder', 'mode', 'selectedEngineId'])
@@ -124,7 +125,8 @@ service cloud.firestore {
 
       // Nested messages subcollection
       match /messages/{messageId} {
-        allow get, list: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId);
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId);
+        allow list: if isOwner(userId) && isValidId(userId) && isValidId(chatId);
         allow create: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId) && isValidMessage(incoming());
         allow update: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId) && isValidMessage(incoming());
         allow delete: if isOwner(userId) && isValidId(userId) && isValidId(chatId) && isValidId(messageId);

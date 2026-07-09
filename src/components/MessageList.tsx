@@ -890,7 +890,7 @@ function parseInlineStyles(text: string) {
       return (
         <span
           key={idx}
-          className="inline-block w-1.5 h-3.5 bg-[#C96A3D] dark:bg-[#C96A3D] ml-0.5 animate-cursor-blink align-middle rounded-xs"
+          className="inline-block w-1.5 h-3.5 bg-black dark:bg-white ml-0.5 animate-cursor-blink align-middle rounded-xs"
         />
       );
     }

@@ -2458,7 +2458,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* 3. Main Stage Content */}
-        <main className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-[#0e1628] overflow-hidden relative p-3 sm:p-6 pb-0 sm:pb-0">
+        <main className="flex-1 min-h-0 flex flex-col h-full bg-slate-50 dark:bg-[#0e1628] overflow-hidden relative p-3 sm:p-6 pb-0 sm:pb-0">
           
           {/* Diagnostic Monitor Panel (Sliding overlay or toggle inline grid) */}
           {showAdmin && settings.isAdminVerified ? (
@@ -2477,53 +2477,55 @@ export default function App() {
           ) : null}
 
           {/* Chat thread feed section */}
-          <div className="flex-1 flex flex-col max-w-4xl w-full mx-auto overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col max-w-4xl w-full mx-auto overflow-hidden">
             {activeSession.messages.length === 0 ? (
               // Empty Thread Page (Curated Hero + Bentley Highlights + FAQs)
-              <div className="flex-1 overflow-y-auto space-y-12 py-10 text-center animate-fadeIn scrollbar-thin" id="nexa-hero-landing-page">
-                {/* Greeting */}
-                <div className="space-y-4 flex flex-col items-center justify-center">
-                  <h1 
-                    className="text-slate-900 dark:text-white tracking-tight leading-tight"
-                    style={{ fontFamily: 'Times New Roman', fontStyle: 'italic', fontSize: '50px' }}
-                  >
-                    Meet Nexa Intelligence
-                  </h1>
-                  <button
-                    onClick={() => setShowOnboarding(true)}
-                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-full border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/40 hover:border-[#C96A3D] dark:hover:border-[#C96A3D] text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] cursor-pointer transition-all active:scale-95 shadow-sm"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-[#C96A3D]" />
-                    Take Interactive Walkthrough
-                  </button>
-                </div>
+              <div className="flex-1 overflow-y-auto py-10 text-center animate-fadeIn scrollbar-thin flex flex-col" id="nexa-hero-landing-page">
+                <div className="w-full my-auto space-y-12">
+                  {/* Greeting */}
+                  <div className="space-y-4 flex flex-col items-center justify-center">
+                    <h1 
+                      className="text-slate-900 dark:text-white tracking-tight leading-tight"
+                      style={{ fontFamily: 'Times New Roman', fontStyle: 'italic', fontSize: '50px' }}
+                    >
+                      Meet Nexa Intelligence
+                    </h1>
+                    <button
+                      onClick={() => setShowOnboarding(true)}
+                      className="flex items-center gap-1.5 px-4 py-1.5 rounded-full border border-slate-200 dark:border-slate-800 bg-white/70 dark:bg-slate-900/40 hover:border-[#C96A3D] dark:hover:border-[#C96A3D] text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] cursor-pointer transition-all active:scale-95 shadow-sm"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#C96A3D]" />
+                      Take Interactive Walkthrough
+                    </button>
+                  </div>
 
-                {/* Quick actions Suggestions Prompts */}
-                <SuggestedPrompts
-                  onSelectPrompt={(prompt, mode) => {
-                    setActiveMode(mode);
-                    handleChatSubmit(prompt);
-                  }}
-                />
-
-                {/* Specific Mode settings center displays */}
-                {activeMode === "study" && (
-                  <StudyModeCenter
-                    explainLikeIm10={explainLikeIm10}
-                    onToggleELI10={setExplainLikeIm10}
-                    onQuickAction={(txt) => handleChatSubmit(txt)}
-                  />
-                )}
-
-                {activeMode === "writing" && (
-                  <WritingAssistantCenter
-                    onDraft={(prompt, style) => {
-                      setWritingStyle(style);
+                  {/* Quick actions Suggestions Prompts */}
+                  <SuggestedPrompts
+                    onSelectPrompt={(prompt, mode) => {
+                      setActiveMode(mode);
                       handleChatSubmit(prompt);
                     }}
-                    loading={isLoading}
                   />
-                )}
+
+                  {/* Specific Mode settings center displays */}
+                  {activeMode === "study" && (
+                    <StudyModeCenter
+                      explainLikeIm10={explainLikeIm10}
+                      onToggleELI10={setExplainLikeIm10}
+                      onQuickAction={(txt) => handleChatSubmit(txt)}
+                    />
+                  )}
+
+                  {activeMode === "writing" && (
+                    <WritingAssistantCenter
+                      onDraft={(prompt, style) => {
+                        setWritingStyle(style);
+                        handleChatSubmit(prompt);
+                      }}
+                      loading={isLoading}
+                    />
+                  )}
+                </div>
 
               </div>
             ) : (

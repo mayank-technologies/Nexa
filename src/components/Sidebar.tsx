@@ -439,22 +439,7 @@ export function Sidebar({
           </div>
         </div>
 
-        {/* D: Settings Section */}
-        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
-          <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-            Preferences & Settings
-          </h4>
-          <button
-            onClick={() => {
-              onOpenSettings?.();
-              onCloseMobile?.();
-            }}
-            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-transparent hover:border-slate-100 dark:hover:border-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 text-slate-500 hover:text-[#C96A3D] text-xs font-semibold select-none transition-all cursor-pointer"
-          >
-            <Settings className="w-4 h-4 shrink-0 text-slate-400 group-hover:text-[#C96A3D]" />
-            <span>Settings</span>
-          </button>
-        </div>
+
 
       </div>
 
@@ -489,7 +474,7 @@ export function Sidebar({
         </div>
       ) : (
         /* Logged-In User Profile bottom footer */
-        <div className="p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-3 text-xs shrink-0">
+        <div className="p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-3 text-xs shrink-0" id="nexa-sidebar-footer">
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             {user.avatarUrl ? (
               <img
@@ -506,10 +491,43 @@ export function Sidebar({
               <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
                 {user.fullName}
               </h5>
-              <p className="text-[10px] text-[#C96A3D] dark:text-[#C96A3D] font-black truncate font-mono text-[9px] bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full inline-block mt-0.5 w-max">
-                {user.gamification?.points || 0} XP
+              <p className="text-[10px] text-slate-450 dark:text-slate-450 truncate font-normal" title={user.email}>
+                {user.email}
               </p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-[9px] font-black text-[#C96A3D] bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full inline-block font-mono">
+                  {user.gamification?.points || 0} XP
+                </span>
+              </div>
             </div>
+          </div>
+
+          {/* Settings and logout buttons next to Gmail email */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => {
+                onOpenSettings?.();
+                onCloseMobile?.();
+              }}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
+              title="Open Settings"
+              id="sidebar-footer-settings-btn"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            {onLogout && (
+              <button
+                onClick={() => {
+                  onLogout();
+                  onCloseMobile?.();
+                }}
+                className="p-2 rounded-xl border border-transparent hover:border-slate-200 dark:hover:border-slate-800 text-slate-400 hover:text-rose-500 hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer"
+                title="Sign Out"
+                id="sidebar-footer-logout-btn"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -4,7 +4,7 @@
  */
 
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getFirestore, doc, getDocFromServer, enableIndexedDbPersistence } from "firebase/firestore";
 import firebaseConfig from "../firebase-applet-config.json";
 
@@ -14,6 +14,15 @@ const app = initializeApp(firebaseConfig);
 // Initialize Firebase Authentication & Firestore (Enterprise Database ID)
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Explicitly set Local Persistence to guarantee session storage across refreshes and browser restarts
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log("[Nexa Client] [LOG] Firebase Auth persistence set to local successfully.");
+  })
+  .catch((err) => {
+    console.error("[Nexa Client] [LOG] Failed to set Firebase Auth persistence:", err);
+  });
 
 // Enable Firestore Offline Persistence
 enableIndexedDbPersistence(db).catch((err) => {

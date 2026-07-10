@@ -180,6 +180,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
         // Create User Profile in Firestore
         const newUserProfile: UserProfile = {
+          uid: firebaseUser.uid,
           email: email.toLowerCase().trim(),
           fullName: fullName.trim(),
           isGuest: false,
@@ -242,6 +243,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           if (userDoc.exists()) {
             const data = userDoc.data();
             userProfile = {
+              uid: firebaseUser.uid,
               email: data.email || firebaseUser.email || email,
               fullName: data.fullName || firebaseUser.displayName || email.split("@")[0],
               isGuest: false,
@@ -252,6 +254,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           } else {
             // Fallback profile if Firestore entry is missing
             userProfile = {
+              uid: firebaseUser.uid,
               email: email.toLowerCase().trim(),
               fullName: firebaseUser.displayName || email.split("@")[0],
               isGuest: false,
@@ -284,6 +287,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
         } catch (dbErr) {
           handleFirestoreError(dbErr, OperationType.GET, `users/${firebaseUser.uid}`);
           userProfile = {
+            uid: firebaseUser.uid,
             email: email.toLowerCase().trim(),
             fullName: firebaseUser.displayName || email.split("@")[0],
             isGuest: false,
@@ -349,7 +353,9 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     setTimeout(() => {
       setLoading(false);
+      const simulatedUid = auth.currentUser?.uid || `otp-${phoneNumber}`;
       onSuccess({
+        uid: simulatedUid,
         email: `${phoneNumber}@nexa.ai`,
         fullName: `User ${phoneNumber.slice(-4)}`,
         isGuest: false,
@@ -503,6 +509,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
         if (userDoc.exists() && !isNewUser) {
           const data = userDoc.data();
           userProfile = {
+            uid: firebaseUser.uid,
             email: data.email || firebaseUser.email || selectedEmail,
             fullName: data.fullName || firebaseUser.displayName || selectedName,
             isGuest: false,
@@ -512,6 +519,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           };
         } else {
           userProfile = {
+            uid: firebaseUser.uid,
             email: selectedEmail.toLowerCase().trim(),
             fullName: selectedName.trim(),
             isGuest: false,
@@ -558,6 +566,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       } catch (dbErr) {
         handleFirestoreError(dbErr, OperationType.WRITE, `users/${firebaseUser.uid}`);
         userProfile = {
+          uid: firebaseUser.uid,
           email: selectedEmail.toLowerCase().trim(),
           fullName: selectedName.trim(),
           isGuest: false,
@@ -638,6 +647,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
         if (userDoc.exists()) {
           const data = userDoc.data();
           userProfile = {
+            uid: firebaseUser.uid,
             email: data.email || firebaseUser.email || linkingEmail,
             fullName: data.fullName || firebaseUser.displayName || linkingName,
             isGuest: false,
@@ -647,6 +657,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           };
         } else {
           userProfile = {
+            uid: firebaseUser.uid,
             email: linkingEmail.toLowerCase().trim(),
             fullName: linkingName.trim(),
             isGuest: false,
@@ -678,6 +689,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       } catch (dbErr) {
         handleFirestoreError(dbErr, OperationType.WRITE, `users/${firebaseUser.uid}`);
         userProfile = {
+          uid: firebaseUser.uid,
           email: linkingEmail.toLowerCase().trim(),
           fullName: linkingName.trim(),
           isGuest: false,

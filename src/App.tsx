@@ -152,7 +152,7 @@ export default function App() {
   const [voiceState, setVoiceState] = useState<"idle" | "listening" | "processing" | "speaking">("idle");
   const recognitionRef = useRef<any>(null);
   const startingPromptRef = useRef("");
-  const lastWriteEmailRef = useRef<string>("");
+  const lastWriteUidRef = useRef<string>("");
   const accumulatedTranscriptRef = useRef("");
   const voiceModeActiveRef = useRef(false);
   const voiceStateRef = useRef<"idle" | "listening" | "processing" | "speaking">("idle");
@@ -480,15 +480,21 @@ export default function App() {
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     let email = "guest@nexa.ai";
+    let uid = "guest";
     try {
       const cachedUser = safeStorage.getItem("nexa_user");
       if (cachedUser) {
-        email = JSON.parse(cachedUser).email || "guest@nexa.ai";
+        const parsed = JSON.parse(cachedUser);
+        email = parsed.email || "guest@nexa.ai";
+        uid = parsed.uid || parsed.email || "guest";
       }
     } catch (e) {}
 
-    let cached = safeStorage.getItem(`nexa_sessions_${email}`);
-    if (!cached && email === "guest@nexa.ai") {
+    let cached = safeStorage.getItem(`nexa_sessions_${uid}`);
+    if (!cached && uid !== "guest" && email !== "guest@nexa.ai") {
+      cached = safeStorage.getItem(`nexa_sessions_${email}`);
+    }
+    if (!cached && (uid === "guest" || email === "guest@nexa.ai")) {
       cached = safeStorage.getItem("nexa_sessions");
     }
 
@@ -518,15 +524,21 @@ export default function App() {
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     let email = "guest@nexa.ai";
+    let uid = "guest";
     try {
       const cachedUser = safeStorage.getItem("nexa_user");
       if (cachedUser) {
-        email = JSON.parse(cachedUser).email || "guest@nexa.ai";
+        const parsed = JSON.parse(cachedUser);
+        email = parsed.email || "guest@nexa.ai";
+        uid = parsed.uid || parsed.email || "guest";
       }
     } catch (e) {}
 
-    let cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${email}`);
-    if (!cachedActiveId && email === "guest@nexa.ai") {
+    let cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${uid}`);
+    if (!cachedActiveId && uid !== "guest" && email !== "guest@nexa.ai") {
+      cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${email}`);
+    }
+    if (!cachedActiveId && (uid === "guest" || email === "guest@nexa.ai")) {
       cachedActiveId = safeStorage.getItem("nexa_active_session_id");
     }
 
@@ -692,11 +704,24 @@ export default function App() {
 
   // Helper to remove guest states on login
   const clearGuestCache = () => {
-    console.log("[Nexa Client] [LOG] Removing guest local storage state keys to prevent session bleed.");
+    console.log("[Nexa Client] [LOG] Removing guest local storage and session storage state keys to prevent session bleed.");
     safeStorage.removeItem("nexa_sessions");
     safeStorage.removeItem("nexa_active_session_id");
+    safeStorage.removeItem("nexa_sessions_guest");
+    safeStorage.removeItem("nexa_active_session_id_guest");
     safeStorage.removeItem("nexa_sessions_guest@nexa.ai");
     safeStorage.removeItem("nexa_active_session_id_guest@nexa.ai");
+    try {
+      localStorage.removeItem("nexa_sessions");
+      localStorage.removeItem("nexa_active_session_id");
+      localStorage.removeItem("nexa_sessions_guest");
+      localStorage.removeItem("nexa_active_session_id_guest");
+      localStorage.removeItem("nexa_sessions_guest@nexa.ai");
+      localStorage.removeItem("nexa_active_session_id_guest@nexa.ai");
+      sessionStorage.removeItem("nexa_sessions");
+      sessionStorage.removeItem("nexa_active_session_id");
+      sessionStorage.removeItem("nexa_user");
+    } catch (e) {}
   };
 
   // Check for Google Sign-In redirect result on startup
@@ -737,6 +762,7 @@ export default function App() {
 
       if (firebaseUser) {
         console.log("[Nexa Client] [LOG] Authenticated Firebase user is active. Firebase UID:", firebaseUser.uid);
+        console.log("[Nexa Client] [LOG] Firebase Email:", firebaseUser.email);
         
         // Remove Guest cached data to avoid state leakage
         clearGuestCache();
@@ -749,6 +775,7 @@ export default function App() {
             const data = userDoc.data();
             console.log("[Nexa Client] [LOG] Firestore user profile found.", data);
             userProfile = {
+              uid: firebaseUser.uid,
               email: data.email || firebaseUser.email || "",
               fullName: data.fullName || firebaseUser.displayName || "",
               isGuest: false,
@@ -759,6 +786,7 @@ export default function App() {
           } else {
             console.log("[Nexa Client] [LOG] Firestore profile not found for UID:", firebaseUser.uid, ". Seeding new profile.");
             userProfile = {
+              uid: firebaseUser.uid,
               email: firebaseUser.email || "",
               fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
               isGuest: false,
@@ -778,6 +806,7 @@ export default function App() {
         } catch (err) {
           console.error("[Nexa Client] [LOG] Failed to restore user profile from Firestore:", err);
           userProfile = {
+            uid: firebaseUser.uid,
             email: firebaseUser.email || "",
             fullName: firebaseUser.displayName || "User",
             isGuest: false,
@@ -871,7 +900,13 @@ export default function App() {
           }
         );
       } else {
-        console.log("[Nexa Client] [LOG] No authenticated Firebase user detected. Guest Mode trigger reason: onAuthStateChanged returned null");
+        // Double check auth.currentUser to ensure we don't prematurely switch to Guest Mode
+        if (auth.currentUser) {
+          console.log("[Nexa Client] [LOG] onAuthStateChanged received null but auth.currentUser exists. Bypassing Guest Mode switch. UID:", auth.currentUser.uid);
+          return;
+        }
+
+        console.log("[Nexa Client] [LOG] Entering Guest Mode. Reason: No authenticated Firebase user detected (onAuthStateChanged returned null).");
         
         const guestProfile: UserProfile = {
           email: "guest@nexa.ai",
@@ -1002,19 +1037,21 @@ export default function App() {
 
   useEffect(() => {
     if (isAuthLoading) return;
-    console.log("[Nexa Restorations Debug] [persist trigger] Persisting sessions to storage. Sessions count:", sessions.length, "Active session ID:", activeSessionId, "For user:", user?.email);
-    if (user && user.email) {
-      if (!lastWriteEmailRef.current) {
-        lastWriteEmailRef.current = user.email;
+    const currentUid = user?.isGuest ? "guest" : (user?.uid || auth.currentUser?.uid || "guest");
+    console.log("[Nexa Restorations Debug] [persist trigger] Persisting sessions to storage. Sessions count:", sessions.length, "Active session ID:", activeSessionId, "For UID:", currentUid);
+    
+    if (currentUid) {
+      if (!lastWriteUidRef.current) {
+        lastWriteUidRef.current = currentUid;
       }
       // Avoid writing stale state of previous user to a newly switched user
-      if (lastWriteEmailRef.current !== user.email) {
-        console.warn("[Nexa Restorations Debug] [persist bypassed] Stale write prevented: current user email", user.email, "differs from last write email", lastWriteEmailRef.current);
-        lastWriteEmailRef.current = user.email;
+      if (lastWriteUidRef.current !== currentUid) {
+        console.warn("[Nexa Restorations Debug] [persist bypassed] Stale write prevented: current UID", currentUid, "differs from last write UID", lastWriteUidRef.current);
+        lastWriteUidRef.current = currentUid;
         return;
       }
-      safeStorage.setItem(`nexa_sessions_${user.email}`, JSON.stringify(sessions));
-      safeStorage.setItem(`nexa_active_session_id_${user.email}`, activeSessionId);
+      safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(sessions));
+      safeStorage.setItem(`nexa_active_session_id_${currentUid}`, activeSessionId);
       console.log("[Nexa Restorations Debug] [persist success] Successfully saved sessions & active ID to storage.");
     }
   }, [sessions, activeSessionId, user, isAuthLoading]);

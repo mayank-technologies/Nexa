@@ -536,7 +536,7 @@ export default function App() {
   const messagesUnsubscribeRef = useRef<(() => void) | null>(null);
 
   const syncChatSummaryToFirestore = async (chat: ChatSession) => {
-    if (auth.currentUser && user && !user.isGuest) {
+    if (user && !user.isGuest && user.uid) {
       try {
         const summary = {
           id: chat.id,
@@ -549,7 +549,7 @@ export default function App() {
           selectedEngineId: chat.selectedEngineId || null,
           userEmail: user.email.toLowerCase().trim()
         };
-        await setDoc(doc(db, "users", auth.currentUser.uid, "chats", chat.id), summary, { merge: true });
+        await setDoc(doc(db, "users", user.uid, "chats", chat.id), summary, { merge: true });
         console.log("[Nexa Client] Synced chat summary to Firestore:", chat.id);
       } catch (e) {
         console.error("Failed to sync chat summary to Firestore:", e);
@@ -558,9 +558,9 @@ export default function App() {
   };
 
   const syncMessageToFirestore = async (chatId: string, message: Message) => {
-    if (auth.currentUser && user && !user.isGuest) {
+    if (user && !user.isGuest && user.uid) {
       try {
-        await setDoc(doc(db, "users", auth.currentUser.uid, "chats", chatId, "messages", message.id), {
+        await setDoc(doc(db, "users", user.uid, "chats", chatId, "messages", message.id), {
           id: message.id,
           role: message.role,
           content: message.content,
@@ -1015,15 +1015,7 @@ export default function App() {
   const handleLogout = () => {
     console.log("[Nexa Client] [LOG] handleLogout invoked. Guest Mode trigger reason: user logged out");
     playUiSound("logout");
-    setIsAuthLoading(true);
-    signOut(auth)
-      .then(() => {
-        console.log("[Nexa Client] [LOG] Firebase signOut successful.");
-      })
-      .catch((err) => {
-        console.error("Firebase SignOut error:", err);
-        setIsAuthLoading(false);
-      });
+    logout();
   };
 
   // Chat Session management controls
@@ -1168,10 +1160,6 @@ export default function App() {
   const handleAuthSuccess = (authenticatedUser: UserProfile, cloudChats?: ChatSession[]) => {
     console.log("[Nexa Client] [LOG] handleAuthSuccess triggered for user:", authenticatedUser.email);
     playUiSound("login_success");
-    setUser({
-      ...authenticatedUser,
-      isGuest: false,
-    });
     clearGuestCache();
     setShowAuth(false);
   };
@@ -1455,8 +1443,8 @@ export default function App() {
           return s;
         })
       );
-      if (auth.currentUser && user && !user.isGuest) {
-        deleteDoc(doc(db, "users", auth.currentUser.uid, "chats", activeSessionId, "messages", msgId));
+      if (user && !user.isGuest && user.uid) {
+        deleteDoc(doc(db, "users", user.uid, "chats", activeSessionId, "messages", msgId));
         syncChatSummaryToFirestore({
           ...activeSession,
           updatedAt: new Date().toISOString()
@@ -1503,8 +1491,8 @@ export default function App() {
     syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
     syncMessageToFirestore(activeSessionId, placeholderAssistantMsg);
 
-    if (auth.currentUser && user && !user.isGuest) {
-      const userId = auth.currentUser.uid;
+    if (user && !user.isGuest && user.uid) {
+      const userId = user.uid;
       // Delete obsolete trailing messages from Firestore
       for (const ob of obsoleteMsgs) {
         if (ob.id !== assistantId) {

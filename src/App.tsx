@@ -73,7 +73,16 @@ import { soundManager, playUiSound } from "./utils/sounds";
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [splashTimerDone, setSplashTimerDone] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (splashTimerDone && !isAuthLoading) {
+      console.log("[Nexa Client] [LOG] Splash timer completed and auth loading finished. Exiting splash screen...");
+      setShowSplash(false);
+    }
+  }, [splashTimerDone, isAuthLoading]);
 
   useEffect(() => {
     if (!showSplash) {
@@ -681,19 +690,28 @@ export default function App() {
     }
   }, [user]);
 
+  // Helper to remove guest states on login
+  const clearGuestCache = () => {
+    console.log("[Nexa Client] [LOG] Removing guest local storage state keys to prevent session bleed.");
+    safeStorage.removeItem("nexa_sessions");
+    safeStorage.removeItem("nexa_active_session_id");
+    safeStorage.removeItem("nexa_sessions_guest@nexa.ai");
+    safeStorage.removeItem("nexa_active_session_id_guest@nexa.ai");
+  };
+
   // Check for Google Sign-In redirect result on startup
   useEffect(() => {
     const handleRedirectResult = async () => {
       try {
-        console.log("[Nexa Client] Checking for Google Sign-In redirect result...");
+        console.log("[Nexa Client] [LOG] Checking for Google Sign-In redirect result...");
         const result = await getRedirectResult(auth);
         if (result && result.user) {
-          console.log("[Nexa Client] Google Sign-In redirect success:", result.user.email);
-          // Standard onAuthStateChanged listener will automatically pick up this user,
-          // load their Firestore profile, sync chats, settings, etc.
+          console.log("[Nexa Client] [LOG] Google Sign-In redirect success. Firebase UID:", result.user.uid, "Email:", result.user.email);
+        } else {
+          console.log("[Nexa Client] [LOG] No Google Sign-In redirect result detected.");
         }
       } catch (err: any) {
-        console.error("[Nexa Client] Redirect result retrieval error:", err);
+        console.error("[Nexa Client] [LOG] Redirect result retrieval error:", err);
       }
     };
     handleRedirectResult();
@@ -701,7 +719,12 @@ export default function App() {
 
   // Persistent Firebase Authentication Observer
   useEffect(() => {
+    console.log("[Nexa Client] [LOG] Initializing persistent Firebase Authentication observer.");
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log("[Nexa Client] [LOG] onAuthStateChanged observer triggered.");
+      console.log("[Nexa Client] [LOG] auth.currentUser status:", auth.currentUser ? { uid: auth.currentUser.uid, email: auth.currentUser.email } : "null");
+      console.log("[Nexa Client] [LOG] firebaseUser details:", firebaseUser ? { uid: firebaseUser.uid, email: firebaseUser.email } : "null");
+
       // Clean up previous listeners if any
       if (chatsUnsubscribeRef.current) {
         chatsUnsubscribeRef.current();
@@ -713,13 +736,18 @@ export default function App() {
       }
 
       if (firebaseUser) {
-        console.log("[Nexa Client] Firebase auto-login detected:", firebaseUser.email);
+        console.log("[Nexa Client] [LOG] Authenticated Firebase user is active. Firebase UID:", firebaseUser.uid);
         
+        // Remove Guest cached data to avoid state leakage
+        clearGuestCache();
+
         let userProfile: UserProfile;
         try {
+          console.log("[Nexa Client] [LOG] Initiating Firestore profile lookup for UID:", firebaseUser.uid);
           const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
           if (userDoc.exists()) {
             const data = userDoc.data();
+            console.log("[Nexa Client] [LOG] Firestore user profile found.", data);
             userProfile = {
               email: data.email || firebaseUser.email || "",
               fullName: data.fullName || firebaseUser.displayName || "",
@@ -729,6 +757,7 @@ export default function App() {
               gamification: data.gamification
             };
           } else {
+            console.log("[Nexa Client] [LOG] Firestore profile not found for UID:", firebaseUser.uid, ". Seeding new profile.");
             userProfile = {
               email: firebaseUser.email || "",
               fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
@@ -744,9 +773,10 @@ export default function App() {
               ...userProfile,
               updatedAt: new Date().toISOString()
             });
+            console.log("[Nexa Client] [LOG] Seeded Firestore profile successfully.");
           }
         } catch (err) {
-          console.error("Failed to restore user profile from Firestore:", err);
+          console.error("[Nexa Client] [LOG] Failed to restore user profile from Firestore:", err);
           userProfile = {
             email: firebaseUser.email || "",
             fullName: firebaseUser.displayName || "User",
@@ -757,12 +787,16 @@ export default function App() {
 
         setUser(userProfile);
 
+        // Close auth modal because the user is successfully authenticated!
+        setShowAuth(false);
+
         // Subscribe to chats subcollection in real time (Shallow load summaries only)
+        console.log("[Nexa Client] [LOG] Subscribing to Firestore chats collection for UID:", firebaseUser.uid);
         chatsUnsubscribeRef.current = onSnapshot(
           collection(db, "users", firebaseUser.uid, "chats"),
           (snapshot) => {
             if (snapshot.empty) {
-              console.log("[Nexa Client] User has no chats in Firestore. Seeding default...");
+              console.log("[Nexa Client] [LOG] Firestore chats snapshot is empty. Seeding default starter chat.");
               const defaultId = `session-${Date.now()}`;
               const defaultChat = {
                 id: defaultId,
@@ -776,6 +810,7 @@ export default function App() {
                 userEmail: firebaseUser.email || "",
               };
               setDoc(doc(db, "users", firebaseUser.uid, "chats", defaultId), defaultChat);
+              setIsAuthLoading(false);
               return;
             }
 
@@ -790,7 +825,7 @@ export default function App() {
                 pinOrder: data.pinOrder || null,
                 mode: data.mode || "general",
                 selectedEngineId: data.selectedEngineId || null,
-                messages: [], // Initially empty, populated by message subcollection listener
+                messages: [],
               } as ChatSession;
             });
 
@@ -804,6 +839,7 @@ export default function App() {
               return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
             });
 
+            console.log("[Nexa Client] [LOG] Syncing fetched chats into App state. Count:", summaries.length);
             // Merge with local state to preserve loaded messages
             setSessions((prevSessions) => {
               return summaries.map((summary) => {
@@ -814,11 +850,64 @@ export default function App() {
                 };
               });
             });
+
+            // Ensure activeSessionId is set to a valid session
+            setActiveSessionId((currentId) => {
+              if (summaries.some((s) => s.id === currentId)) {
+                return currentId;
+              }
+              const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${firebaseUser.uid}`);
+              if (cachedActiveId && summaries.some((s) => s.id === cachedActiveId)) {
+                return cachedActiveId;
+              }
+              return summaries.length > 0 ? summaries[0].id : "";
+            });
+
+            setIsAuthLoading(false);
           },
           (error) => {
-            console.error("Firestore chats subscription error:", error);
+            console.error("[Nexa Client] [LOG] Firestore chats subscription error:", error);
+            setIsAuthLoading(false);
           }
         );
+      } else {
+        console.log("[Nexa Client] [LOG] No authenticated Firebase user detected. Guest Mode trigger reason: onAuthStateChanged returned null");
+        
+        const guestProfile: UserProfile = {
+          email: "guest@nexa.ai",
+          fullName: "Guest User",
+          isGuest: true,
+          avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
+          preferences: {
+            primaryLanguage: "English",
+            rememberPersonalization: true,
+            personalizationContext: "",
+          },
+        };
+        setUser(guestProfile);
+
+        // Load guest sessions
+        let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai");
+        if (!cached) {
+          cached = safeStorage.getItem("nexa_sessions");
+        }
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached) as ChatSession[];
+            if (parsed && parsed.length > 0) {
+              setSessions(parsed);
+              const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
+              if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
+                setActiveSessionId(cachedActiveId);
+              } else {
+                setActiveSessionId(parsed[0].id);
+              }
+            }
+          } catch (e) {
+            console.error("[Nexa Client] [LOG] Failed to parse guest sessions:", e);
+          }
+        }
+        setIsAuthLoading(false);
       }
     });
 
@@ -912,8 +1001,12 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
+    if (isAuthLoading) return;
     console.log("[Nexa Restorations Debug] [persist trigger] Persisting sessions to storage. Sessions count:", sessions.length, "Active session ID:", activeSessionId, "For user:", user?.email);
     if (user && user.email) {
+      if (!lastWriteEmailRef.current) {
+        lastWriteEmailRef.current = user.email;
+      }
       // Avoid writing stale state of previous user to a newly switched user
       if (lastWriteEmailRef.current !== user.email) {
         console.warn("[Nexa Restorations Debug] [persist bypassed] Stale write prevented: current user email", user.email, "differs from last write email", lastWriteEmailRef.current);
@@ -924,7 +1017,7 @@ export default function App() {
       safeStorage.setItem(`nexa_active_session_id_${user.email}`, activeSessionId);
       console.log("[Nexa Restorations Debug] [persist success] Successfully saved sessions & active ID to storage.");
     }
-  }, [sessions, activeSessionId, user]);
+  }, [sessions, activeSessionId, user, isAuthLoading]);
 
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [admin metrics update] Admin metrics updated.");
@@ -933,39 +1026,36 @@ export default function App() {
 
   // Startup initialization: On opening the website, always ensure a new empty chat is active for the user
   useEffect(() => {
-    console.log("[Nexa Restorations Debug] [startup init] Component MOUNTED. Triggering initialization flow.");
+    if (isAuthLoading) return;
+    if (!user || !user.isGuest) return;
+
+    console.log("[Nexa Restorations Debug] [startup init] Guest Mode active. Triggering guest initialization flow.");
     let currentSessions = sessions;
-    const email = user?.email || "guest@nexa.ai";
-    console.log("[Nexa Restorations Debug] [startup init] Targeted email for restoration:", email);
-    let cached = safeStorage.getItem(`nexa_sessions_${email}`);
-    if (!cached && email === "guest@nexa.ai") {
-      console.log("[Nexa Restorations Debug] [startup init] Falling back to general 'nexa_sessions' cache.");
+    const email = "guest@nexa.ai";
+    let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai");
+    if (!cached) {
       cached = safeStorage.getItem("nexa_sessions");
     }
     if (cached) {
       try {
         const parsed = JSON.parse(cached) as ChatSession[];
         if (parsed && parsed.length > 0) {
-          console.log("[Nexa Restorations Debug] [startup init] Found cached sessions count:", parsed.length);
+          console.log("[Nexa Restorations Debug] [startup init] Found cached guest sessions count:", parsed.length);
           currentSessions = parsed;
-        } else {
-          console.log("[Nexa Restorations Debug] [startup init] Cached sessions parsed to empty list.");
         }
       } catch (e) {
         console.error("Failed to parse sessions on startup", e);
       }
-    } else {
-      console.log("[Nexa Restorations Debug] [startup init] No cached sessions found for user/guest.");
     }
 
     const emptySession = currentSessions.find((s) => !s.messages || s.messages.length === 0);
     if (emptySession) {
-      console.log("[Nexa Restorations Debug] [startup init] Found existing empty session:", emptySession.id, "mode:", emptySession.mode);
+      console.log("[Nexa Restorations Debug] [startup init] Found existing empty guest session:", emptySession.id);
       setActiveSessionId(emptySession.id);
       setActiveMode(emptySession.mode || "general");
     } else {
       const newId = `session-${Date.now()}`;
-      console.log("[Nexa Restorations Debug] [startup init] No empty session found. Building fresh empty session:", newId);
+      console.log("[Nexa Restorations Debug] [startup init] No empty guest session found. Building fresh guest session:", newId);
       const newChat: ChatSession = {
         id: newId,
         title: "Core Assistant Chat",
@@ -979,7 +1069,7 @@ export default function App() {
       setActiveSessionId(newId);
       setActiveMode("general");
     }
-  }, []);
+  }, [isAuthLoading, user?.isGuest]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
   const lastMessage = activeSession && Array.isArray(activeSession.messages) && activeSession.messages.length > 0
@@ -1320,61 +1410,14 @@ export default function App() {
 
   // Auth merge transition successes
   const handleAuthSuccess = (authenticatedUser: UserProfile, cloudChats?: ChatSession[]) => {
+    console.log("[Nexa Client] [LOG] handleAuthSuccess triggered for user:", authenticatedUser.email);
     playUiSound("login_success");
     setUser({
       ...authenticatedUser,
       isGuest: false,
     });
-    if (cloudChats && cloudChats.length > 0) {
-      setSessions(cloudChats);
-      setActiveSessionId(cloudChats[0].id);
-      if (cloudChats[0].mode) {
-        setActiveMode(cloudChats[0].mode);
-      }
-    } else {
-      // Try to load any previously stored chats for this logged-in email from local storage
-      const userEmail = authenticatedUser.email;
-      const cached = safeStorage.getItem(`nexa_sessions_${userEmail}`);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached) as ChatSession[];
-          if (parsed && parsed.length > 0) {
-            setSessions(parsed);
-            const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${userEmail}`);
-            if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
-              setActiveSessionId(cachedActiveId);
-              const activeSessionObj = parsed.find((s) => s.id === cachedActiveId);
-              if (activeSessionObj && activeSessionObj.mode) {
-                setActiveMode(activeSessionObj.mode);
-              }
-            } else {
-              setActiveSessionId(parsed[0].id);
-              if (parsed[0].mode) {
-                setActiveMode(parsed[0].mode);
-              }
-            }
-            return;
-          }
-        } catch (e) {
-          console.error("Failed to restore chats on login key", e);
-        }
-      }
-
-      // Clear sessions back to a clean state if the newly logged in / signed up user has no saved cloud sessions
-      const newSessionId = `session-${Date.now()}`;
-      const newRootSession: ChatSession = {
-        id: newSessionId,
-        title: "Start an Intelligent Chat",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [],
-        isPinned: false,
-        mode: "general",
-      };
-      setSessions([newRootSession]);
-      setActiveSessionId(newSessionId);
-      setActiveMode("general");
-    }
+    clearGuestCache();
+    setShowAuth(false);
   };
 
   // Diagnostic panel actions
@@ -2346,7 +2389,7 @@ export default function App() {
 
   // Render Splash Screen on Arrival
   if (showSplash) {
-    return <SplashScreen onComplete={() => setShowSplash(false)} />;
+    return <SplashScreen onComplete={() => setSplashTimerDone(true)} />;
   }
 
   return (

@@ -420,6 +420,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   };
 
   const handleSelectGoogleAccount = async (selectedEmail: string, selectedName: string, idToken?: string, loggedInUser?: any) => {
+    console.log("[Nexa Client] [LOG] handleSelectGoogleAccount invoked with email:", selectedEmail, "name:", selectedName);
     setLoading(true);
     setErrorFlag("");
 
@@ -441,11 +442,13 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       // Determine if we are doing a real Google login using GSI credential or simulated login
       if (loggedInUser) {
         firebaseUser = loggedInUser;
+        console.log("[Nexa Client] [LOG] Google Sign-In success with native popup/redirect. Firebase UID:", firebaseUser.uid, "Email:", firebaseUser.email);
       } else if (idToken) {
         try {
           const credential = GoogleAuthProvider.credential(idToken);
           const userCredential = await signInWithCredential(auth, credential);
           firebaseUser = userCredential.user;
+          console.log("[Nexa Client] [LOG] Google Sign-In success via GSI credential exchange. Firebase UID:", firebaseUser.uid, "Email:", firebaseUser.email);
         } catch (loginErr: any) {
           console.error("signInWithCredential error:", loginErr);
           // If the email is already in use by a different provider (e.g., Email/Password), we trigger linking!

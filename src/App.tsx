@@ -47,6 +47,7 @@ import {
   Message,
   NexaEngineId,
 } from "./types";
+import { useAuth } from "./context/AuthContext";
 import { SplashScreen } from "./components/SplashScreen";
 import { Logo } from "./components/Logo";
 import { Navbar } from "./components/Navbar";
@@ -66,14 +67,14 @@ import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
 import { auth, db } from "./firebase";
-import { onAuthStateChanged, signOut, getRedirectResult } from "firebase/auth";
+import { signOut, getRedirectResult } from "firebase/auth";
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
 export default function App() {
+  const { user, isAuthLoading, logout, setUser, setIsAuthLoading } = useAuth();
   const [showSplash, setShowSplash] = useState(true);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [splashTimerDone, setSplashTimerDone] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
@@ -390,28 +391,6 @@ export default function App() {
   }, [showFeedbackToast]);
 
   // Core App states load persistent or set default
-  const [user, setUser] = useState<UserProfile>(() => {
-    try {
-      const cached = safeStorage.getItem("nexa_user");
-      if (cached) {
-        return JSON.parse(cached);
-      }
-    } catch (e) {
-      console.error("Failed to parse cached nexa_user", e);
-    }
-    return {
-      email: "guest@nexa.ai",
-      fullName: "Guest User",
-      isGuest: true,
-      avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
-      preferences: {
-        primaryLanguage: "English",
-        rememberPersonalization: true,
-        personalizationContext: "",
-      },
-    };
-  });
-
   const [settings, setSettings] = useState<AppSettings>(() => {
     try {
       const cached = safeStorage.getItem("nexa_settings");
@@ -478,75 +457,9 @@ export default function App() {
     };
   }, []);
 
-  const [sessions, setSessions] = useState<ChatSession[]>(() => {
-    let email = "guest@nexa.ai";
-    let uid = "guest";
-    try {
-      const cachedUser = safeStorage.getItem("nexa_user");
-      if (cachedUser) {
-        const parsed = JSON.parse(cachedUser);
-        email = parsed.email || "guest@nexa.ai";
-        uid = parsed.uid || parsed.email || "guest";
-      }
-    } catch (e) {}
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
 
-    let cached = safeStorage.getItem(`nexa_sessions_${uid}`);
-    if (!cached && uid !== "guest" && email !== "guest@nexa.ai") {
-      cached = safeStorage.getItem(`nexa_sessions_${email}`);
-    }
-    if (!cached && (uid === "guest" || email === "guest@nexa.ai")) {
-      cached = safeStorage.getItem("nexa_sessions");
-    }
-
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as ChatSession[];
-        if (parsed && parsed.length > 0) {
-          return parsed;
-        }
-      } catch (e) {
-        console.error("Failed to parse cached sessions", e);
-      }
-    }
-
-    const newSessionId = `session-${Date.now()}`;
-    const newRootSession: ChatSession = {
-      id: newSessionId,
-      title: "Start an Intelligent Chat",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-      isPinned: false,
-      mode: "general",
-    };
-    return [newRootSession];
-  });
-
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => {
-    let email = "guest@nexa.ai";
-    let uid = "guest";
-    try {
-      const cachedUser = safeStorage.getItem("nexa_user");
-      if (cachedUser) {
-        const parsed = JSON.parse(cachedUser);
-        email = parsed.email || "guest@nexa.ai";
-        uid = parsed.uid || parsed.email || "guest";
-      }
-    } catch (e) {}
-
-    let cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${uid}`);
-    if (!cachedActiveId && uid !== "guest" && email !== "guest@nexa.ai") {
-      cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${email}`);
-    }
-    if (!cachedActiveId && (uid === "guest" || email === "guest@nexa.ai")) {
-      cachedActiveId = safeStorage.getItem("nexa_active_session_id");
-    }
-
-    if (cachedActiveId && sessions.some((s) => s.id === cachedActiveId)) {
-      return cachedActiveId;
-    }
-    return sessions.length > 0 ? sessions[0].id : "";
-  });
+  const [activeSessionId, setActiveSessionId] = useState<string>("");
 
   // Controls Chat thread inputs
   const [inputPrompt, setInputPrompt] = useState("");
@@ -724,240 +637,141 @@ export default function App() {
     } catch (e) {}
   };
 
-  // Check for Google Sign-In redirect result on startup
+  // Real-time Chat Subscription based on Auth User status
   useEffect(() => {
-    const handleRedirectResult = async () => {
-      try {
-        console.log("[Nexa Client] [LOG] Checking for Google Sign-In redirect result...");
-        const result = await getRedirectResult(auth);
-        if (result && result.user) {
-          console.log("[Nexa Client] [LOG] Google Sign-In redirect success. Firebase UID:", result.user.uid, "Email:", result.user.email);
-        } else {
-          console.log("[Nexa Client] [LOG] No Google Sign-In redirect result detected.");
+    // Clean up previous listeners if any
+    if (chatsUnsubscribeRef.current) {
+      chatsUnsubscribeRef.current();
+      chatsUnsubscribeRef.current = null;
+    }
+
+    if (!user) return;
+
+    if (!user.isGuest && user.uid) {
+      console.log("[Nexa Client] [LOG] User is authenticated. Subscribing to Firestore chats collection for UID:", user.uid);
+      
+      // Close auth modal because the user is successfully authenticated!
+      setShowAuth(false);
+      
+      // Remove Guest cached data to avoid state leakage
+      clearGuestCache();
+
+      chatsUnsubscribeRef.current = onSnapshot(
+        collection(db, "users", user.uid, "chats"),
+        (snapshot) => {
+          if (snapshot.empty) {
+            console.log("[Nexa Client] [LOG] Firestore chats snapshot is empty. Seeding default starter chat.");
+            const defaultId = `session-${Date.now()}`;
+            const defaultChat = {
+              id: defaultId,
+              title: "Start an Intelligent Chat",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              isPinned: false,
+              pinOrder: null,
+              mode: "general",
+              selectedEngineId: null,
+              userEmail: user.email || "",
+            };
+            setDoc(doc(db, "users", user.uid!, "chats", defaultId), defaultChat);
+            return;
+          }
+
+          const summaries = snapshot.docs.map((docEl) => {
+            const data = docEl.data();
+            return {
+              id: data.id,
+              title: data.title,
+              createdAt: data.createdAt,
+              updatedAt: data.updatedAt,
+              isPinned: data.isPinned || false,
+              pinOrder: data.pinOrder || null,
+              mode: data.mode || "general",
+              selectedEngineId: data.selectedEngineId || null,
+              messages: [],
+            } as ChatSession;
+          });
+
+          // Sort chat summaries by pinned and updatedAt
+          summaries.sort((a, b) => {
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+            if (a.isPinned && b.isPinned) {
+              return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+            }
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+          });
+
+          console.log("[Nexa Client] [LOG] Syncing fetched chats into App state. Count:", summaries.length);
+          
+          setSessions(summaries);
+
+          // Ensure activeSessionId is set to a valid session
+          setActiveSessionId((currentId) => {
+            if (summaries.some((s) => s.id === currentId)) {
+              return currentId;
+            }
+            const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${user.uid}`);
+            if (cachedActiveId && summaries.some((s) => s.id === cachedActiveId)) {
+              return cachedActiveId;
+            }
+            return summaries.length > 0 ? summaries[0].id : "";
+          });
+        },
+        (error) => {
+          console.error("[Nexa Client] [LOG] Firestore chats subscription error:", error);
         }
-      } catch (err: any) {
-        console.error("[Nexa Client] [LOG] Redirect result retrieval error:", err);
-      }
-    };
-    handleRedirectResult();
-  }, []);
-
-  // Persistent Firebase Authentication Observer
-  useEffect(() => {
-    console.log("[Nexa Client] [LOG] Initializing persistent Firebase Authentication observer.");
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log("[Nexa Client] [LOG] onAuthStateChanged observer triggered.");
-      console.log("[Nexa Client] [LOG] auth.currentUser status:", auth.currentUser ? { uid: auth.currentUser.uid, email: auth.currentUser.email } : "null");
-      console.log("[Nexa Client] [LOG] firebaseUser details:", firebaseUser ? { uid: firebaseUser.uid, email: firebaseUser.email } : "null");
-
-      // Clean up previous listeners if any
-      if (chatsUnsubscribeRef.current) {
-        chatsUnsubscribeRef.current();
-        chatsUnsubscribeRef.current = null;
-      }
-      if (messagesUnsubscribeRef.current) {
-        messagesUnsubscribeRef.current();
-        messagesUnsubscribeRef.current = null;
-      }
-
-      if (firebaseUser) {
-        console.log("[Nexa Client] [LOG] Authenticated Firebase user is active. Firebase UID:", firebaseUser.uid);
-        console.log("[Nexa Client] [LOG] Firebase Email:", firebaseUser.email);
-        
-        // Remove Guest cached data to avoid state leakage
-        clearGuestCache();
-
-        let userProfile: UserProfile;
+      );
+    } else {
+      // User is Guest Mode
+      console.log("[Nexa Client] [LOG] Entering Guest Mode. Subscribing to cached guest sessions.");
+      
+      // Load guest sessions
+      let loadedSessions: ChatSession[] = [];
+      let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai") || safeStorage.getItem("nexa_sessions");
+      if (cached) {
         try {
-          console.log("[Nexa Client] [LOG] Initiating Firestore profile lookup for UID:", firebaseUser.uid);
-          const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            console.log("[Nexa Client] [LOG] Firestore user profile found.", data);
-            userProfile = {
-              uid: firebaseUser.uid,
-              email: data.email || firebaseUser.email || "",
-              fullName: data.fullName || firebaseUser.displayName || "",
-              isGuest: false,
-              avatarUrl: data.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${data.fullName || "User"}`,
-              preferences: data.preferences,
-              gamification: data.gamification
-            };
-          } else {
-            console.log("[Nexa Client] [LOG] Firestore profile not found for UID:", firebaseUser.uid, ". Seeding new profile.");
-            userProfile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || "",
-              fullName: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "User",
-              isGuest: false,
-              avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || "User"}`,
-              preferences: {
-                primaryLanguage: "English",
-                rememberPersonalization: true,
-                personalizationContext: ""
-              }
-            };
-            await setDoc(doc(db, "users", firebaseUser.uid), {
-              ...userProfile,
-              updatedAt: new Date().toISOString()
-            });
-            console.log("[Nexa Client] [LOG] Seeded Firestore profile successfully.");
+          const parsed = JSON.parse(cached) as ChatSession[];
+          if (parsed && parsed.length > 0) {
+            loadedSessions = parsed;
           }
-        } catch (err) {
-          console.error("[Nexa Client] [LOG] Failed to restore user profile from Firestore:", err);
-          userProfile = {
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || "",
-            fullName: firebaseUser.displayName || "User",
-            isGuest: false,
-            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${firebaseUser.displayName || "User"}`
-          };
+        } catch (e) {
+          console.error("[Nexa Client] [LOG] Failed to parse guest sessions:", e);
         }
-
-        setUser(userProfile);
-
-        // Close auth modal because the user is successfully authenticated!
-        setShowAuth(false);
-
-        // Subscribe to chats subcollection in real time (Shallow load summaries only)
-        console.log("[Nexa Client] [LOG] Subscribing to Firestore chats collection for UID:", firebaseUser.uid);
-        chatsUnsubscribeRef.current = onSnapshot(
-          collection(db, "users", firebaseUser.uid, "chats"),
-          (snapshot) => {
-            if (snapshot.empty) {
-              console.log("[Nexa Client] [LOG] Firestore chats snapshot is empty. Seeding default starter chat.");
-              const defaultId = `session-${Date.now()}`;
-              const defaultChat = {
-                id: defaultId,
-                title: "Start an Intelligent Chat",
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                isPinned: false,
-                pinOrder: null,
-                mode: "general",
-                selectedEngineId: null,
-                userEmail: firebaseUser.email || "",
-              };
-              setDoc(doc(db, "users", firebaseUser.uid, "chats", defaultId), defaultChat);
-              setIsAuthLoading(false);
-              return;
-            }
-
-            const summaries = snapshot.docs.map((docEl) => {
-              const data = docEl.data();
-              return {
-                id: data.id,
-                title: data.title,
-                createdAt: data.createdAt,
-                updatedAt: data.updatedAt,
-                isPinned: data.isPinned || false,
-                pinOrder: data.pinOrder || null,
-                mode: data.mode || "general",
-                selectedEngineId: data.selectedEngineId || null,
-                messages: [],
-              } as ChatSession;
-            });
-
-            // Sort chat summaries by pinned and updatedAt
-            summaries.sort((a, b) => {
-              if (a.isPinned && !b.isPinned) return -1;
-              if (!a.isPinned && b.isPinned) return 1;
-              if (a.isPinned && b.isPinned) {
-                return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
-              }
-              return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-            });
-
-            console.log("[Nexa Client] [LOG] Syncing fetched chats into App state. Count:", summaries.length);
-            // Merge with local state to preserve loaded messages
-            setSessions((prevSessions) => {
-              return summaries.map((summary) => {
-                const existing = prevSessions.find((s) => s.id === summary.id);
-                return {
-                  ...summary,
-                  messages: existing && existing.messages.length > 0 ? existing.messages : [],
-                };
-              });
-            });
-
-            // Ensure activeSessionId is set to a valid session
-            setActiveSessionId((currentId) => {
-              if (summaries.some((s) => s.id === currentId)) {
-                return currentId;
-              }
-              const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${firebaseUser.uid}`);
-              if (cachedActiveId && summaries.some((s) => s.id === cachedActiveId)) {
-                return cachedActiveId;
-              }
-              return summaries.length > 0 ? summaries[0].id : "";
-            });
-
-            setIsAuthLoading(false);
-          },
-          (error) => {
-            console.error("[Nexa Client] [LOG] Firestore chats subscription error:", error);
-            setIsAuthLoading(false);
-          }
-        );
-      } else {
-        // Double check auth.currentUser to ensure we don't prematurely switch to Guest Mode
-        if (auth.currentUser) {
-          console.log("[Nexa Client] [LOG] onAuthStateChanged received null but auth.currentUser exists. Bypassing Guest Mode switch. UID:", auth.currentUser.uid);
-          return;
-        }
-
-        console.log("[Nexa Client] [LOG] Entering Guest Mode. Reason: No authenticated Firebase user detected (onAuthStateChanged returned null).");
-        
-        const guestProfile: UserProfile = {
-          email: "guest@nexa.ai",
-          fullName: "Guest User",
-          isGuest: true,
-          avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
-          preferences: {
-            primaryLanguage: "English",
-            rememberPersonalization: true,
-            personalizationContext: "",
-          },
-        };
-        setUser(guestProfile);
-
-        // Load guest sessions
-        let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai");
-        if (!cached) {
-          cached = safeStorage.getItem("nexa_sessions");
-        }
-        if (cached) {
-          try {
-            const parsed = JSON.parse(cached) as ChatSession[];
-            if (parsed && parsed.length > 0) {
-              setSessions(parsed);
-              const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
-              if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
-                setActiveSessionId(cachedActiveId);
-              } else {
-                setActiveSessionId(parsed[0].id);
-              }
-            }
-          } catch (e) {
-            console.error("[Nexa Client] [LOG] Failed to parse guest sessions:", e);
-          }
-        }
-        setIsAuthLoading(false);
       }
-    });
+
+      // If no guest sessions, seed a default one
+      if (loadedSessions.length === 0) {
+        const newId = `session-${Date.now()}`;
+        loadedSessions = [{
+          id: newId,
+          title: "Core Assistant Chat",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          messages: [],
+          isPinned: false,
+          mode: "general",
+        }];
+      }
+
+      setSessions(loadedSessions);
+
+      // Restore activeSessionId for Guest
+      const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
+      if (cachedActiveId && loadedSessions.some((s) => s.id === cachedActiveId)) {
+        setActiveSessionId(cachedActiveId);
+      } else {
+        setActiveSessionId(loadedSessions[0].id);
+      }
+    }
 
     return () => {
-      unsubscribe();
       if (chatsUnsubscribeRef.current) {
         chatsUnsubscribeRef.current();
         chatsUnsubscribeRef.current = null;
       }
-      if (messagesUnsubscribeRef.current) {
-        messagesUnsubscribeRef.current();
-        messagesUnsubscribeRef.current = null;
-      }
     };
-  }, []);
+  }, [user]);
 
   // Subscribe to the messages of the active session in real-time
   useEffect(() => {
@@ -1061,54 +875,7 @@ export default function App() {
     safeStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
   }, [adminMetrics]);
 
-  // Startup initialization: On opening the website, always ensure a new empty chat is active for the user
-  useEffect(() => {
-    if (isAuthLoading) return;
-    if (!user || !user.isGuest) return;
-
-    console.log("[Nexa Restorations Debug] [startup init] Guest Mode active. Triggering guest initialization flow.");
-    let currentSessions = sessions;
-    const email = "guest@nexa.ai";
-    let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai");
-    if (!cached) {
-      cached = safeStorage.getItem("nexa_sessions");
-    }
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as ChatSession[];
-        if (parsed && parsed.length > 0) {
-          console.log("[Nexa Restorations Debug] [startup init] Found cached guest sessions count:", parsed.length);
-          currentSessions = parsed;
-        }
-      } catch (e) {
-        console.error("Failed to parse sessions on startup", e);
-      }
-    }
-
-    const emptySession = currentSessions.find((s) => !s.messages || s.messages.length === 0);
-    if (emptySession) {
-      console.log("[Nexa Restorations Debug] [startup init] Found existing empty guest session:", emptySession.id);
-      setActiveSessionId(emptySession.id);
-      setActiveMode(emptySession.mode || "general");
-    } else {
-      const newId = `session-${Date.now()}`;
-      console.log("[Nexa Restorations Debug] [startup init] No empty guest session found. Building fresh guest session:", newId);
-      const newChat: ChatSession = {
-        id: newId,
-        title: "Core Assistant Chat",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [],
-        isPinned: false,
-        mode: "general",
-      };
-      setSessions([newChat, ...currentSessions]);
-      setActiveSessionId(newId);
-      setActiveMode("general");
-    }
-  }, [isAuthLoading, user?.isGuest]);
-
-  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
+  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || { id: "", title: "", messages: [], mode: "general" };
   const lastMessage = activeSession && Array.isArray(activeSession.messages) && activeSession.messages.length > 0
     ? activeSession.messages[activeSession.messages.length - 1]
     : undefined;
@@ -1246,65 +1013,17 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    console.log("[Nexa Client] [LOG] handleLogout invoked. Guest Mode trigger reason: user logged out");
     playUiSound("logout");
-    signOut(auth).catch((err) => console.error("Firebase SignOut error:", err));
-    setUser({
-      email: "guest@nexa.ai",
-      fullName: "Guest User",
-      isGuest: true,
-      avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
-      preferences: {
-        primaryLanguage: "English",
-        rememberPersonalization: true,
-        personalizationContext: "",
-      },
-    });
-
-    // Restore guest sessions if any exist in user-specific or general cache
-    let cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai");
-    if (!cached) {
-      cached = safeStorage.getItem("nexa_sessions");
-    }
-
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached) as ChatSession[];
-        if (parsed && parsed.length > 0) {
-          setSessions(parsed);
-          const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
-          if (cachedActiveId && parsed.some((s) => s.id === cachedActiveId)) {
-            setActiveSessionId(cachedActiveId);
-            const activeSessionObj = parsed.find((s) => s.id === cachedActiveId);
-            if (activeSessionObj && activeSessionObj.mode) {
-              setActiveMode(activeSessionObj.mode);
-            }
-          } else {
-            setActiveSessionId(parsed[0].id);
-            if (parsed[0].mode) {
-              setActiveMode(parsed[0].mode);
-            }
-          }
-          return;
-        }
-      } catch (e) {
-        console.error("Failed to restore guest chats on logout", e);
-      }
-    }
-
-    // Default to clean board
-    const newSessionId = `session-${Date.now()}`;
-    const newRootSession: ChatSession = {
-      id: newSessionId,
-      title: "Start an Intelligent Chat",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-      isPinned: false,
-      mode: "general",
-    };
-    setSessions([newRootSession]);
-    setActiveSessionId(newSessionId);
-    setActiveMode("general");
+    setIsAuthLoading(true);
+    signOut(auth)
+      .then(() => {
+        console.log("[Nexa Client] [LOG] Firebase signOut successful.");
+      })
+      .catch((err) => {
+        console.error("Firebase SignOut error:", err);
+        setIsAuthLoading(false);
+      });
   };
 
   // Chat Session management controls

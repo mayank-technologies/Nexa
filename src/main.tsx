@@ -91,11 +91,14 @@ window.addEventListener('error', (event) => {
 });
 
 import App from './App.tsx';
+import { AuthProvider } from './context/AuthContext';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </StrictMode>,
 );
 

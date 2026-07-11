@@ -16,8 +16,7 @@ import {
   linkWithCredential,
   signInWithCredential,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult
+  signInWithRedirect
 } from "firebase/auth";
 import { 
   doc, 

@@ -9,13 +9,19 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { UserProfile } from "../types";
 import { safeStorage } from "../utils/storage";
+import { trackAction } from "../utils/gamification";
 
 interface AuthContextType {
   user: UserProfile | null;
   isAuthLoading: boolean;
   authError: string | null;
   logout: () => Promise<void>;
-  setUser: React.Dispatch<React.SetStateAction<UserProfile | null>>;
+  updateUser: (newUser: Partial<UserProfile>) => void;
+  triggerActionTracking: (
+    actionType: "send_message" | "complete_research" | "complete_study" | "complete_quiz" | "complete_fact_check",
+    payload?: { engineId?: string; correctAnswers?: number; totalQuestions?: number },
+    onBadgeUnlocked?: (badge: any) => void
+  ) => void;
   setAuthError: React.Dispatch<React.SetStateAction<string | null>>;
   setIsAuthLoading: React.Dispatch<React.SetStateAction<boolean>>;
 }
@@ -202,12 +208,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateUser = (newUser: Partial<UserProfile>) => {
+    setUser((prev) => {
+      if (!prev) return null;
+      return { ...prev, ...newUser };
+    });
+  };
+
+  const triggerActionTracking = (
+    actionType: "send_message" | "complete_research" | "complete_study" | "complete_quiz" | "complete_fact_check",
+    payload?: { engineId?: string; correctAnswers?: number; totalQuestions?: number },
+    onBadgeUnlocked?: (badge: any) => void
+  ) => {
+    setUser((prevUser) => {
+      if (!prevUser) return null;
+      const { newState, newlyUnlocked } = trackAction(prevUser.gamification, {
+        type: actionType,
+        payload,
+      });
+
+      if (newlyUnlocked.length > 0 && onBadgeUnlocked) {
+        onBadgeUnlocked(newlyUnlocked[0]);
+      }
+
+      return {
+        ...prevUser,
+        gamification: newState,
+      };
+    });
+  };
+
   const value: AuthContextType = {
     user,
     isAuthLoading,
     authError,
     logout,
-    setUser,
+    updateUser,
+    triggerActionTracking,
     setAuthError,
     setIsAuthLoading
   };

@@ -38,7 +38,6 @@ import {
   AlertTriangle,
   Square
 } from "lucide-react";
-import { trackAction } from "./utils/gamification";
 import {
   ChatSession,
   UserProfile,
@@ -72,7 +71,7 @@ import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
 export default function App() {
-  const { user, isAuthLoading, logout, setUser, setIsAuthLoading } = useAuth();
+  const { user, isAuthLoading, logout, updateUser, triggerActionTracking: contextTriggerActionTracking } = useAuth();
   const [showSplash, setShowSplash] = useState(true);
   const [splashTimerDone, setSplashTimerDone] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -951,34 +950,21 @@ export default function App() {
   };
 
   const handleUpdateUser = (newUser: Partial<UserProfile>) => {
-    setUser((prev) => ({ ...prev, ...newUser }));
+    updateUser(newUser);
   };
 
   const triggerActionTracking = (
     actionType: "send_message" | "complete_research" | "complete_study" | "complete_quiz" | "complete_fact_check",
     payload?: { engineId?: string; correctAnswers?: number; totalQuestions?: number }
   ) => {
-    setUser((prevUser) => {
-      const { newState, newlyUnlocked } = trackAction(prevUser.gamification, {
-        type: actionType,
-        payload,
+    contextTriggerActionTracking(actionType, payload, (badge) => {
+      setUnlockedBadgesToast({
+        id: badge.id,
+        title: badge.title,
+        description: badge.description,
+        pointsAwarded: badge.pointsAwarded,
       });
-
-      if (newlyUnlocked.length > 0) {
-        const badge = newlyUnlocked[0];
-        setUnlockedBadgesToast({
-          id: badge.id,
-          title: badge.title,
-          description: badge.description,
-          pointsAwarded: badge.pointsAwarded,
-        });
-        playUiSound("notification_received");
-      }
-
-      return {
-        ...prevUser,
-        gamification: newState,
-      };
+      playUiSound("notification_received");
     });
   };
 

@@ -578,6 +578,38 @@ export default function App() {
     }
   };
 
+  const generateAndSetAutomatedTitle = async (chatId: string, prompt: string, response: string) => {
+    try {
+      console.log("[Nexa Client] Fetching automated title generation...");
+      const res = await fetch("/api/generate-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, response }),
+      });
+      const data = await res.json();
+      if (data && data.title) {
+        const generatedTitle = data.title;
+        console.log(`[Nexa Client] Setting automated title: "${generatedTitle}"`);
+        setSessions((prev) =>
+          prev.map((s) => {
+            if (s.id === chatId) {
+              const updatedChat = {
+                ...s,
+                title: generatedTitle,
+                updatedAt: new Date().toISOString(),
+              };
+              syncChatSummaryToFirestore(updatedChat);
+              return updatedChat;
+            }
+            return s;
+          })
+        );
+      }
+    } catch (e) {
+      console.error("[Nexa Client] Failed to generate automated title:", e);
+    }
+  };
+
   // Apply Theme CSS triggers on mounted or update
   useEffect(() => {
     const root = document.documentElement;
@@ -1875,7 +1907,8 @@ export default function App() {
       attachment: currentAttachment ? { ...currentAttachment } : undefined,
     };
 
-    const titleRename = activeSession.messages.length === 0 ? promptToSend.substring(0, 36) + "..." : activeSession.title;
+    const isFirstAssistantResponse = activeSession.messages.length === 0;
+    const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : activeSession.title;
     
     // Save user message immediately to Firestore subcollection & update parent metadata
     syncMessageToFirestore(activeSessionId, newUserMsg);
@@ -2006,6 +2039,10 @@ export default function App() {
             updatedAt: new Date().toISOString()
           };
           syncChatSummaryToFirestore(finalParentChat);
+
+          if (isFirstAssistantResponse) {
+            generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
+          }
         } else {
           const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
           for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {

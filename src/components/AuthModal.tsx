@@ -1062,41 +1062,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               </button>
             </div>
 
-            {/* Methods Toggle (For Sign-In ONLY) */}
-            {!isSignUp && (
-              <div className="flex border-b border-slate-100 dark:border-slate-800 mb-6 text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMethod("email");
-                    setErrorFlag("");
-                  }}
-                  className={`flex-1 pb-2.5 font-bold tracking-wider uppercase transition-colors relative ${
-                    method === "email"
-                      ? "text-[#C96A3D]"
-                      : "text-slate-450 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
-                  }`}
-                >
-                  Via Email / Pass
-                  {method === "email" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C96A3D]" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMethod("otp");
-                    setErrorFlag("");
-                  }}
-                  className={`flex-1 pb-2.5 font-bold tracking-wider uppercase transition-colors relative ${
-                    method === "otp"
-                      ? "text-[#C96A3D]"
-                      : "text-slate-450 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300"
-                  }`}
-                >
-                  Via Phone (OTP)
-                  {method === "otp" && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#C96A3D]" />}
-                </button>
-              </div>
-            )}
+
 
             {errorFlag && (
               <div className="mb-4 text-xs font-medium text-rose-500 bg-rose-500/10 p-3 rounded-xl border border-rose-500/20">
@@ -1189,91 +1155,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
               </form>
             )}
 
-            {/* OTP Login Form */}
-            {method === "otp" && !isSignUp && (
-              <div className="space-y-4">
-                {!otpSent ? (
-                  <form onSubmit={handleSendOTP} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
-                        Phone Number
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="tel"
-                          required
-                          placeholder="+91 98765 43210"
-                          value={phoneNumber}
-                          onChange={(e) => setPhoneNumber(e.target.value)}
-                          className="w-full text-sm py-2.5 pl-10 pr-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors"
-                        />
-                        <Phone className="absolute left-3.5 top-3.5 text-slate-400 w-4 h-4" />
-                      </div>
-                    </div>
 
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full flex justify-center items-center gap-2 bg-[#14213D] dark:bg-slate-100 hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white font-semibold py-2.5 rounded-xl transition-all disabled:opacity-50"
-                    >
-                      {loading ? "Sending OTP Code..." : "Send Verification Code"}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyOTP} className="space-y-4">
-                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 shrink-0" />
-                      OTP code sent to {phoneNumber}. (Enter any 4 digits to proceed)
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-[#14213D] dark:text-slate-300 uppercase tracking-widest mb-1.5">
-                        Enter OTP Code
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={4}
-                        placeholder="1234"
-                        value={otpCode}
-                        onChange={(e) => setOtpCode(e.target.value)}
-                        className="w-full text-center text-lg tracking-widest py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 focus:border-[#C96A3D] dark:focus:border-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-colors font-mono"
-                      />
-                    </div>
-
-                    <div className="flex justify-between items-center text-xs">
-                      <button
-                        type="button"
-                        onClick={() => setOtpSent(false)}
-                        className="text-slate-400 hover:text-slate-600"
-                      >
-                        Change Phone Number
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOtpCode("");
-                          setErrorFlag("");
-                        }}
-                        className="text-[#C96A3D] font-semibold"
-                      >
-                        Resend Code
-                      </button>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full flex justify-center items-center gap-2 bg-[#14213D] dark:bg-slate-100 hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white font-semibold py-2.5 rounded-xl transition-all disabled:opacity-50"
-                    >
-                      {loading ? "Verifying Code..." : "Complete Login"}
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
-                  </form>
-                )}
-              </div>
-            )}
 
             {/* Quick Switch Helper */}
             <div className="text-center mt-4">

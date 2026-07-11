@@ -1188,6 +1188,50 @@ async function startServer() {
     }
   });
 
+  // Automated Title Generation from Prompt and Response
+  app.post("/api/generate-title", async (req, res) => {
+    try {
+      const { prompt, response } = req.body;
+      if (!prompt) {
+        return res.status(400).json({ error: "No prompt provided" });
+      }
+
+      console.info("[Nexa Core Server] Generating title for new conversation...");
+      
+      const systemInstruction = 
+        "You are a helpful assistant. Generate a highly concise, creative, and professional title summarizing the user query and response. " +
+        "CRITICAL RULES:\n" +
+        "- The title must be between 2 to 5 words long.\n" +
+        "- Do NOT wrap the title in quotes, backticks, or any markdown.\n" +
+        "- Do NOT use any emojis, punctuation, or special characters.\n" +
+        "- Respond ONLY with the title itself, with no extra text or pleasantries.\n" +
+        "- Keep it in the same language/script as the prompt (e.g. if prompt is in Hindi/Hinglish, summarize in Hinglish or simple Hindi; otherwise English).";
+
+      const result = await generateContentWithRetry({
+        initialModel: "gemini-3.1-flash-lite", // Speed-optimized
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: `Prompt: ${prompt}\n\nResponse: ${response || ""}\n\nGenerate Title:` }]
+          }
+        ],
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+        },
+        turboMode: true
+      });
+
+      const title = (result.text || "").trim().replace(/^["']|["']$/g, "").replace(/[#*_`]/g, "");
+      console.info(`[Nexa Core Server] Generated title: "${title}"`);
+      
+      return res.json({ title: title || "New Chat" });
+    } catch (err: any) {
+      console.error("[Nexa Server] Title generation exception:", err);
+      return res.status(200).json({ title: "New Chat" }); // Graceful fallback
+    }
+  });
+
   // Serve static UI assets
   if (process.env.NODE_ENV !== "production") {
     // Vite middleware for real time HMR asset updates in dev mode

@@ -353,7 +353,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     setTimeout(() => {
       setLoading(false);
-      const simulatedUid = auth.currentUser?.uid || `otp-${phoneNumber}`;
+      const simulatedUid = `otp-${phoneNumber}`;
       onSuccess({
         uid: simulatedUid,
         email: `${phoneNumber}@nexa.ai`,

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { auth, db, handleFirestoreError, OperationType } from "../firebase";
+import { db, handleFirestoreError, OperationType } from "../firebase";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import {
   X,
@@ -56,10 +56,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
 
   // Load waitlist status from localStorage and check with the server
   useEffect(() => {
-    const currentUser = auth.currentUser;
-    if (currentUser && currentUser.email) {
-      setEmail(currentUser.email);
-    } else if (user?.email) {
+    if (user && !user.isGuest && user.email) {
       setEmail(user.email);
     }
     
@@ -70,14 +67,13 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
         setWaitlistStatus("joined");
       }
       
-      const currentAuthUser = auth.currentUser;
-      console.log("[PremiumModal] checkWaitlistStatus - auth.currentUser.uid:", currentAuthUser?.uid);
-      console.log("[PremiumModal] checkWaitlistStatus - auth.currentUser.email:", currentAuthUser?.email);
-      console.log("[PremiumModal] checkWaitlistStatus - auth state:", currentAuthUser ? "authenticated" : "not authenticated");
+      console.log("[PremiumModal] checkWaitlistStatus - user.uid:", user?.uid);
+      console.log("[PremiumModal] checkWaitlistStatus - user.email:", user?.email);
+      console.log("[PremiumModal] checkWaitlistStatus - auth state:", user && !user.isGuest ? "authenticated" : "not authenticated");
 
-      if (currentAuthUser && currentAuthUser.email) {
+      if (user && !user.isGuest && user.email) {
         try {
-          const docRef = doc(db, "waitlist", currentAuthUser.email.toLowerCase().trim());
+          const docRef = doc(db, "waitlist", user.email.toLowerCase().trim());
           const docSnap = await getDoc(docRef);
           const registered = docSnap.exists();
           
@@ -126,12 +122,11 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
       let success = false;
       let errorMsg = "";
 
-      const currentUser = auth.currentUser;
-      console.log("[PremiumModal] handleLeaveWaitlist - auth.currentUser.uid:", currentUser?.uid);
-      console.log("[PremiumModal] handleLeaveWaitlist - auth.currentUser.email:", currentUser?.email);
-      console.log("[PremiumModal] handleLeaveWaitlist - auth state:", currentUser ? "authenticated" : "not authenticated");
+      console.log("[PremiumModal] handleLeaveWaitlist - user.uid:", user?.uid);
+      console.log("[PremiumModal] handleLeaveWaitlist - user.email:", user?.email);
+      console.log("[PremiumModal] handleLeaveWaitlist - auth state:", user && !user.isGuest ? "authenticated" : "not authenticated");
 
-      if (!currentUser) {
+      if (!user || user.isGuest) {
         setErrorMessage("Please sign in to join the Nexa Premium Waitlist.");
         setWaitlistStatus("error");
         setShowConfirmLeave(false);
@@ -204,12 +199,11 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
     setErrorMessage("");
 
     try {
-      const currentUser = auth.currentUser;
-      console.log("[PremiumModal] handleSubmit - auth.currentUser.uid:", currentUser?.uid);
-      console.log("[PremiumModal] handleSubmit - auth.currentUser.email:", currentUser?.email);
-      console.log("[PremiumModal] handleSubmit - auth state:", currentUser ? "authenticated" : "not authenticated");
+      console.log("[PremiumModal] handleSubmit - user.uid:", user?.uid);
+      console.log("[PremiumModal] handleSubmit - user.email:", user?.email);
+      console.log("[PremiumModal] handleSubmit - auth state:", user && !user.isGuest ? "authenticated" : "not authenticated");
 
-      if (!currentUser) {
+      if (!user || user.isGuest) {
         setErrorMessage("Please sign in to join the Nexa Premium Waitlist.");
         setWaitlistStatus("error");
         playUiSound("error");
@@ -235,8 +229,8 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           // Store email, uid, userId, timestamp, source
           const newEntry = {
             email: normalizedEmail,
-            uid: currentUser.uid,
-            userId: currentUser.uid,
+            uid: user?.uid,
+            userId: user?.uid,
             timestamp: new Date().toISOString(),
             source: source,
           };
@@ -253,7 +247,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
               },
               body: JSON.stringify({
                 email: normalizedEmail,
-                userId: currentUser.uid,
+                userId: user?.uid,
                 source: source,
               }),
             });

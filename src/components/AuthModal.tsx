@@ -16,7 +16,8 @@ import {
   linkWithCredential,
   signInWithCredential,
   signInWithPopup,
-  signInWithRedirect
+  signInWithRedirect,
+  getRedirectResult
 } from "firebase/auth";
 import { 
   doc, 
@@ -592,6 +593,47 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       setLoading(false);
     }
   };
+
+  // Handle Google Sign-In redirect result on component mount (App startup / initialization)
+  useEffect(() => {
+    let active = true;
+    const handleRedirectResult = async () => {
+      try {
+        console.log("[Nexa Client] Checking redirect result...");
+        const result = await getRedirectResult(auth);
+        if (!active) return;
+        
+        if (result && result.user) {
+          const firebaseUser = result.user;
+          console.log("[Nexa Client] [LOG] Redirect Sign-In successful for:", firebaseUser.email);
+          setLoading(true);
+          setErrorFlag("");
+          
+          await handleSelectGoogleAccount(
+            firebaseUser.email || "",
+            firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Google User",
+            undefined,
+            firebaseUser
+          );
+        }
+      } catch (err: any) {
+        console.error("[Nexa Client] Redirect login result error:", err);
+        let friendlyMessage = "Google sign-in via redirect failed. Please try again.";
+        if (err.code === "auth/account-exists-with-different-credential") {
+          friendlyMessage = "An account with this email already exists with a different login method. Please sign in with password to link.";
+        } else if (err.message) {
+          friendlyMessage = err.message;
+        }
+        setErrorFlag(friendlyMessage);
+        setLoading(false);
+      }
+    };
+    handleRedirectResult();
+    
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

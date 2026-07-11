@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from "react";
-import { X, Mail, Lock, Eye, ArrowRight, User } from "lucide-react";
+import { X, Mail, Lock, Eye, ArrowRight, User, Copy, Check, ExternalLink, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Logo } from "./Logo";
 import { UserProfile } from "../types";
 import { auth } from "../firebase";
@@ -32,6 +32,8 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [loading, setLoading] = useState(false);
   const [errorFlag, setErrorFlag] = useState<React.ReactNode>("");
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [isInIframe] = useState(() => {
     try {
       return window.self !== window.top;
@@ -39,6 +41,16 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       return true;
     }
   });
+
+  const copyToClipboard = () => {
+    try {
+      navigator.clipboard.writeText(window.location.hostname);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error("Clipboard copy failed", e);
+    }
+  };
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,6 +124,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       }
     } catch (err: any) {
       console.error("[Nexa Client] Google auth error:", err);
+      setShowSetupGuide(true);
       let friendlyMessage: React.ReactNode = "Google sign-in failed. Please try again.";
       const hostname = window.location.hostname;
       const projectId = firebaseConfig.projectId;
@@ -442,6 +455,64 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           </svg>
           Continue with Google
         </button>
+
+        {/* Expandable Google Auth Diagnostics Guide */}
+        <div className="mt-4 border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden text-left bg-slate-50/50 dark:bg-slate-900/30">
+          <button
+            type="button"
+            onClick={() => setShowSetupGuide(!showSetupGuide)}
+            className="w-full flex items-center justify-between p-3.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100/50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer"
+          >
+            <div className="flex items-center gap-2">
+              <HelpCircle className="w-4 h-4 text-[#C96A3D]" />
+              <span>Google Login Help & Guide (गूगल लॉगिन सहायता)</span>
+            </div>
+            {showSetupGuide ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </button>
+
+          {showSetupGuide && (
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-[#0c1222] text-xs space-y-4 text-slate-600 dark:text-slate-300 select-text">
+              <div className="p-3 bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-1">
+                <p className="font-bold text-amber-700 dark:text-amber-400">⚠️ Important Notice / जरूरी सूचना:</p>
+                <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                  Google Sign-In dynamic sandbox URLs and Firebase settings need a quick manual link to activate. Follow these 2 simple steps to configure it permanently:
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <p className="font-bold text-slate-800 dark:text-slate-200">Step 1: Add your URL to Firebase Authorized Domains</p>
+                <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800 space-y-2">
+                  <p className="text-[11px] text-slate-500 font-medium">Copy this current app domain:</p>
+                  <div className="flex items-center justify-between gap-2 bg-white dark:bg-slate-950 p-2 rounded-lg border border-slate-200 dark:border-slate-800">
+                    <code className="text-[#C96A3D] font-bold font-mono text-[11px] truncate select-all">{window.location.hostname}</code>
+                    <button
+                      type="button"
+                      onClick={copyToClipboard}
+                      className="flex items-center gap-1 bg-[#14213D] hover:bg-[#C96A3D] text-white px-2.5 py-1 rounded-md text-[10px] font-bold transition-all shrink-0 cursor-pointer"
+                    >
+                      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                      {copied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+                  <ol className="list-decimal pl-4 space-y-1.5 text-[11px] leading-relaxed text-slate-500">
+                    <li>Go to <a href={`https://console.firebase.google.com/project/${firebaseConfig.projectId}/authentication/providers`} target="_blank" rel="noopener noreferrer" className="text-[#C96A3D] underline font-semibold inline-flex items-center gap-0.5">Firebase Console <ExternalLink className="w-3 h-3 inline" /></a></li>
+                    <li>Click the <strong>Settings</strong> tab &gt; click <strong>Authorized Domains</strong> on the left sidebar</li>
+                    <li>Click <strong>Add domain</strong>, paste your copied domain, and click <strong>Add</strong>!</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="font-bold text-slate-800 dark:text-slate-200">Step 2: Enable Google Provider in Firebase Console</p>
+                <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800 text-[11px] leading-relaxed text-slate-500 space-y-1.5">
+                  <p>1. Go to Firebase Console &gt; Build &gt; Authentication &gt; <strong>Sign-in method</strong> tab.</p>
+                  <p>2. Click <strong>Add new provider</strong> and choose <strong>Google</strong>.</p>
+                  <p>3. Toggle the <strong>Enable</strong> switch, configure your support email, and click <strong>Save</strong>.</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {isInIframe && (
           <div className="mt-4 p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-left select-text">

@@ -31,6 +31,13 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [loading, setLoading] = useState(false);
   const [errorFlag, setErrorFlag] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isInIframe] = useState(() => {
+    try {
+      return window.self !== window.top;
+    } catch (e) {
+      return true;
+    }
+  });
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,6 +114,10 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       let friendlyMessage = "Google sign-in failed. Please try again.";
       if (err.code === "auth/popup-blocked") {
         friendlyMessage = "Google login popup was blocked by your browser. Please allow popups.";
+      } else if (err.code === "auth/unauthorized-domain") {
+        friendlyMessage = "This domain is not authorized for Google Sign-In in your Firebase Console. Please add this URL to 'Authorized Domains' in Firebase (Authentication > Settings > Authorized Domains) or use a direct Email/Password login.";
+      } else if (err.code === "auth/popup-closed-by-user") {
+        friendlyMessage = "Google Sign-In popup was closed before completion. Please try again.";
       } else if (err.code === "auth/account-exists-with-different-credential") {
         friendlyMessage = "An account with this email already exists with a different login method. Please sign in with password.";
       } else if (err.message) {
@@ -327,6 +338,17 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
           </svg>
           Continue with Google
         </button>
+
+        {isInIframe && (
+          <div className="mt-4 p-3.5 rounded-2xl bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 text-left select-text">
+            <p className="text-xs text-amber-700 dark:text-amber-400 font-bold mb-1">
+              ⚠️ Live Preview Mode Notice:
+            </p>
+            <p className="text-[11px] text-slate-600 dark:text-slate-300 font-normal leading-relaxed">
+              Google Auth results may be blocked inside the AI Studio sandbox iframe. If Google login doesn't complete, click <strong>"Open in New Tab"</strong> at the top right of the screen first, or use the <strong>Email and Password</strong> method above.
+            </p>
+          </div>
+        )}
 
         <p className="mt-5 text-center text-xs text-slate-400 font-normal leading-relaxed">
           Nexa upholds the highest privacy & security protocols.

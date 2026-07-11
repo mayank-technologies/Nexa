@@ -8,6 +8,7 @@ import { X, Mail, Lock, Eye, ArrowRight, User } from "lucide-react";
 import { Logo } from "./Logo";
 import { UserProfile } from "../types";
 import { auth } from "../firebase";
+import firebaseConfig from "../../firebase-applet-config.json";
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -29,7 +30,7 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errorFlag, setErrorFlag] = useState("");
+  const [errorFlag, setErrorFlag] = useState<React.ReactNode>("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [isInIframe] = useState(() => {
     try {
@@ -111,17 +112,120 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
       }
     } catch (err: any) {
       console.error("[Nexa Client] Google auth error:", err);
-      let friendlyMessage = "Google sign-in failed. Please try again.";
+      let friendlyMessage: React.ReactNode = "Google sign-in failed. Please try again.";
+      const hostname = window.location.hostname;
+      const projectId = firebaseConfig.projectId;
+
       if (err.code === "auth/popup-blocked") {
-        friendlyMessage = "Google login popup was blocked by your browser. Please allow popups.";
+        friendlyMessage = (
+          <div className="space-y-2 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Popup Blocked / पॉपअप ब्लॉक हो गया</p>
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+              Your browser blocked the Google Sign-In popup. Kripya browser Settings mein popups allow karein ya app ko <strong>New Tab</strong> mein open karke check karein.
+            </p>
+          </div>
+        );
       } else if (err.code === "auth/unauthorized-domain") {
-        friendlyMessage = "This domain is not authorized for Google Sign-In in your Firebase Console. Please add this URL to 'Authorized Domains' in Firebase (Authentication > Settings > Authorized Domains) or use a direct Email/Password login.";
+        friendlyMessage = (
+          <div className="space-y-3 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Domain Not Authorized / डोमेन ऑथराइज्ड नहीं है</p>
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 font-medium">
+              This URL domain <strong className="bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-200/50 text-rose-600 dark:text-rose-400 font-mono text-[11px]">{hostname}</strong> is not authorized in your Firebase Project Console.
+            </p>
+            <div className="text-[11px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-2 text-slate-700 dark:text-slate-300 select-text">
+              <p className="font-semibold text-xs text-[#14213D] dark:text-white">How to fix / इसे कैसे ठीक करें:</p>
+              <ol className="list-decimal pl-4.5 space-y-1.5 leading-relaxed">
+                <li>
+                  Open your{" "}
+                  <a
+                    href={`https://console.firebase.google.com/project/${projectId}/authentication/providers`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#C96A3D] font-bold underline hover:text-[#b0582e]"
+                  >
+                    Firebase Console (Auth Settings)
+                  </a>
+                </li>
+                <li>Go to the <strong>Settings</strong> tab &gt; click <strong>Authorized Domains</strong> on the left.</li>
+                <li>Click <strong>Add domain</strong> and enter: <code className="bg-slate-200/80 dark:bg-slate-800 px-1.5 py-0.5 rounded font-mono text-[10px] text-[#C96A3D] font-bold">{hostname}</code></li>
+                <li>Click <strong>Add</strong>, then refresh this page to sign in!</li>
+              </ol>
+            </div>
+          </div>
+        );
+      } else if (err.code === "auth/operation-not-allowed") {
+        friendlyMessage = (
+          <div className="space-y-3 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Google Sign-In Disabled / गूगल साइन-इन चालू नहीं है</p>
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 font-medium">
+              Google Sign-In has not been enabled in your Firebase Project <strong className="text-[#14213D] dark:text-white font-bold">{projectId}</strong>.
+            </p>
+            <div className="text-[11px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-2 text-slate-700 dark:text-slate-300 select-text">
+              <p className="font-semibold text-xs text-[#14213D] dark:text-white">How to enable / इसे कैसे चालू करें:</p>
+              <ol className="list-decimal pl-4.5 space-y-1.5 leading-relaxed">
+                <li>
+                  Go to{" "}
+                  <a
+                    href={`https://console.firebase.google.com/project/${projectId}/authentication/providers`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#C96A3D] font-bold underline hover:text-[#b0582e]"
+                  >
+                    Firebase Sign-In Providers list
+                  </a>
+                </li>
+                <li>Click <strong>Add new provider</strong> and select <strong>Google</strong>.</li>
+                <li>Toggle the <strong>Enable</strong> switch at the top.</li>
+                <li>Configure the <strong>Project support email</strong> (select your Gmail).</li>
+                <li>Click <strong>Save</strong>.</li>
+                <li>Refresh this page and click "Continue with Google" again!</li>
+              </ol>
+            </div>
+          </div>
+        );
       } else if (err.code === "auth/popup-closed-by-user") {
-        friendlyMessage = "Google Sign-In popup was closed before completion. Please try again.";
+        friendlyMessage = (
+          <div className="space-y-1 text-left">
+            <p className="font-bold text-amber-600 dark:text-amber-400">⚠️ Sign-In Cancelled / साइन-इन रद्द किया गया</p>
+            <p className="text-[11px] text-slate-600 dark:text-slate-300">The Google Sign-In window was closed before completion. Please try again.</p>
+          </div>
+        );
       } else if (err.code === "auth/account-exists-with-different-credential") {
-        friendlyMessage = "An account with this email already exists with a different login method. Please sign in with password.";
-      } else if (err.message) {
-        friendlyMessage = err.message;
+        friendlyMessage = (
+          <div className="space-y-1 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Account Merge Required / पासवर्ड जरूरी है</p>
+            <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+              An account with this email address already exists using standard Email/Password method. Kripya upar email and password daalkar login karein.
+            </p>
+          </div>
+        );
+      } else if (err.message && err.message.includes("operation-not-supported-in-this-environment")) {
+        friendlyMessage = (
+          <div className="space-y-3 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Iframe Sandbox Block / आईफ्रेम सैंडबॉक्स ब्लॉक</p>
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 font-medium">
+              Google Sign-In is blocked inside the AI Studio live preview iframe.
+            </p>
+            <div className="text-[11px] bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800 space-y-2 text-slate-700 dark:text-slate-300">
+              <p className="font-semibold text-xs text-[#14213D] dark:text-white">How to fix / इसे कैसे चलाएं:</p>
+              <ul className="list-disc pl-4 space-y-1 leading-relaxed">
+                <li>Click the <strong>"Open in New Tab"</strong> button in the top right corner of the AI Studio screen.</li>
+                <li>Once the app opens in its own tab, click "Continue with Google" there. It will work perfectly!</li>
+                <li>Or, use the <strong>Email Address & Password</strong> method above.</li>
+              </ul>
+            </div>
+          </div>
+        );
+      } else {
+        friendlyMessage = (
+          <div className="space-y-2 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Google Authentication Error</p>
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">{err.message || "An unexpected error occurred."}</p>
+            <div className="text-[10px] bg-slate-50 dark:bg-slate-900/30 p-2 rounded-lg border border-slate-100 dark:border-slate-800 text-slate-500 font-mono select-all">
+              Code: {err.code || "unknown_error"}
+            </div>
+          </div>
+        );
       }
       setErrorFlag(friendlyMessage);
       setLoading(false);

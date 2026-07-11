@@ -146,67 +146,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
 
             // --- GUEST TO AUTHENTICATED CHAT MERGING ---
-            let currentChats: any[] = [];
             try {
-              const cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai") || safeStorage.getItem("nexa_sessions");
-              if (cached) {
-                currentChats = JSON.parse(cached);
-              }
-            } catch (_) {}
-
-            if (Array.isArray(currentChats) && currentChats.length > 0) {
-              console.log("[Nexa AuthProvider] [LOG] Found guest chats to merge. Count:", currentChats.length);
-              for (const chat of currentChats) {
-                // Skip if empty default chat to prevent clutter
-                if (!chat.messages || chat.messages.length === 0) {
-                  continue;
+              let currentChats: any[] = [];
+              try {
+                const cached = safeStorage.getItem("nexa_sessions_guest@nexa.ai") || safeStorage.getItem("nexa_sessions");
+                if (cached) {
+                  currentChats = JSON.parse(cached);
                 }
+              } catch (_) {}
 
-                const summary = {
-                  id: chat.id,
-                  title: chat.title || "Core Assistant Chat",
-                  createdAt: chat.createdAt || new Date().toISOString(),
-                  updatedAt: chat.updatedAt || new Date().toISOString(),
-                  isPinned: chat.isPinned || false,
-                  pinOrder: chat.pinOrder || null,
-                  mode: chat.mode || "general",
-                  selectedEngineId: chat.selectedEngineId || null,
-                  userEmail: userProfile.email.toLowerCase().trim()
-                };
+              if (Array.isArray(currentChats) && currentChats.length > 0) {
+                console.log("[Nexa AuthProvider] [LOG] Found guest chats to merge. Count:", currentChats.length);
+                for (const chat of currentChats) {
+                  // Skip if empty default chat to prevent clutter
+                  if (!chat.messages || chat.messages.length === 0) {
+                    continue;
+                  }
 
-                // Save Chat summary
-                await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id), summary, { merge: true });
+                  const summary = {
+                    id: chat.id,
+                    title: chat.title || "Core Assistant Chat",
+                    createdAt: chat.createdAt || new Date().toISOString(),
+                    updatedAt: chat.updatedAt || new Date().toISOString(),
+                    isPinned: chat.isPinned || false,
+                    pinOrder: chat.pinOrder || null,
+                    mode: chat.mode || "general",
+                    selectedEngineId: chat.selectedEngineId || null,
+                    userEmail: userProfile.email.toLowerCase().trim()
+                  };
 
-                // Save Chat messages
-                if (Array.isArray(chat.messages) && chat.messages.length > 0) {
-                  for (const msg of chat.messages) {
-                    await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id, "messages", msg.id || `msg-${Date.now()}-${Math.random()}`), {
-                      id: msg.id,
-                      role: msg.role,
-                      content: msg.content,
-                      timestamp: msg.timestamp || new Date().toISOString(),
-                      reaction: msg.reaction || null,
-                      engineId: msg.engineId || null,
-                      sources: msg.sources || null,
-                      factCheck: msg.factCheck || null,
-                      researchReport: msg.researchReport || null,
-                      quiz: msg.quiz || null,
-                      attachment: msg.attachment || null
-                    }, { merge: true });
+                  // Save Chat summary
+                  await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id), summary, { merge: true });
+
+                  // Save Chat messages
+                  if (Array.isArray(chat.messages) && chat.messages.length > 0) {
+                    for (const msg of chat.messages) {
+                      const msgId = msg.id || `msg-${Date.now()}-${Math.random()}`;
+                      await setDoc(doc(db, "users", firebaseUser.uid, "chats", chat.id, "messages", msgId), {
+                        id: msgId,
+                        role: msg.role,
+                        content: msg.content,
+                        timestamp: msg.timestamp || new Date().toISOString(),
+                        reaction: msg.reaction || null,
+                        engineId: msg.engineId || null,
+                        sources: msg.sources || null,
+                        factCheck: msg.factCheck || null,
+                        researchReport: msg.researchReport || null,
+                        quiz: msg.quiz || null,
+                        attachment: msg.attachment || null
+                      }, { merge: true });
+                    }
                   }
                 }
-              }
 
-              // Clear guest caches
-              try {
-                safeStorage.removeItem("nexa_sessions_guest@nexa.ai");
-                safeStorage.removeItem("nexa_sessions");
-                safeStorage.removeItem("nexa_active_session_id_guest@nexa.ai");
-                safeStorage.removeItem("nexa_active_session_id");
-                console.log("[Nexa AuthProvider] [LOG] Guest caches cleared successfully after merge.");
-              } catch (e) {
-                console.error("[Nexa AuthProvider] [ERROR] Failed to clear guest cache:", e);
+                // Clear guest caches
+                try {
+                  safeStorage.removeItem("nexa_sessions_guest@nexa.ai");
+                  safeStorage.removeItem("nexa_sessions");
+                  safeStorage.removeItem("nexa_active_session_id_guest@nexa.ai");
+                  safeStorage.removeItem("nexa_active_session_id");
+                  console.log("[Nexa AuthProvider] [LOG] Guest caches cleared successfully after merge.");
+                } catch (e) {
+                  console.error("[Nexa AuthProvider] [ERROR] Failed to clear guest cache:", e);
+                }
               }
+            } catch (mergeErr) {
+              console.error("[Nexa AuthProvider] [ERROR] Non-blocking chat merge failure:", mergeErr);
             }
 
             // Guarantee Guest User is NEVER set or fallback active if authenticated

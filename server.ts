@@ -603,9 +603,9 @@ async function startServer() {
 
       const normalizedEmail = email.toLowerCase().trim();
 
-      // Since the frontend successfully writes the document in the 'waitlist' collection
-      // before dispatching this fetch call, we confirm Firestore success here.
-      console.log(`[Nexa SMTP Diagnostic] [Stage: Firestore success] Verified that waitlist record for ${normalizedEmail} was written to Firestore by the client.`);
+      // Since the frontend successfully writes the record in the 'waitlist' table
+      // before dispatching this fetch call, we confirm Supabase success here.
+      console.log(`[Nexa SMTP Diagnostic] [Stage: Supabase success] Verified that waitlist record for ${normalizedEmail} was written to Supabase by the client.`);
 
       console.log(`[Nexa SMTP Diagnostic] [Stage: Email send attempted] Handing off email delivery to sendWaitlistEmail for: ${normalizedEmail}`);
       
@@ -639,7 +639,7 @@ async function startServer() {
   // Check waitlist status endpoint
   app.get("/api/premium/waitlist/check", async (req, res) => {
     try {
-      // The client-side will query Firestore directly for the precise check. 
+      // The client-side will query Supabase directly for the precise check. 
       // We return success: true and registered: false by default here, as the client handles it.
       return res.status(200).json({ success: true, registered: false });
     } catch (error: any) {
@@ -651,7 +651,7 @@ async function startServer() {
   // Leave waitlist endpoint
   app.post("/api/premium/waitlist/leave", async (req, res) => {
     try {
-      // Client-side deletes from Firestore directly, so we just return success: true.
+      // Client-side deletes from Supabase directly, so we just return success: true.
       return res.status(200).json({
         success: true,
         message: "You've successfully left the Nexa Premium Waitlist.\n\nYou can join again anytime."

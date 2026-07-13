@@ -648,11 +648,11 @@ export default function App() {
   // References to auto-scroll messages
   const messageEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Firestore real-time listener subscription references
+  // Supabase real-time listener subscription references
   const chatsUnsubscribeRef = useRef<(() => void) | null>(null);
   const messagesUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  const syncChatSummaryToFirestore = async (chat: ChatSession) => {
+  const syncChatSummaryToSupabase = async (chat: ChatSession) => {
     if (user && !user.isGuest && user.uid) {
       try {
         // Synchronize directly to Supabase
@@ -664,7 +664,7 @@ export default function App() {
     }
   };
 
-  const syncMessageToFirestore = async (chatId: string, message: Message) => {
+  const syncMessageToSupabase = async (chatId: string, message: Message) => {
     if (user && !user.isGuest && user.uid) {
       try {
         // Synchronize directly to Supabase
@@ -696,7 +696,7 @@ export default function App() {
                 title: generatedTitle,
                 updatedAt: new Date().toISOString(),
               };
-              syncChatSummaryToFirestore(updatedChat);
+              syncChatSummaryToSupabase(updatedChat);
               return updatedChat;
             }
             return s;
@@ -1107,8 +1107,8 @@ export default function App() {
     setActiveMode(mode);
     setAttachment(null);
 
-    // Sync to Firestore
-    syncChatSummaryToFirestore(newChat);
+    // Sync to Supabase
+    syncChatSummaryToSupabase(newChat);
   };
 
   const handleDeleteSession = (id: string) => {
@@ -1138,7 +1138,7 @@ export default function App() {
       setSessions([freshSession]);
       setActiveSessionId(freshId);
       setActiveMode("general");
-      syncChatSummaryToFirestore(freshSession);
+      syncChatSummaryToSupabase(freshSession);
     } else {
       setSessions(remaining);
       if (activeSessionId === id) {
@@ -1154,7 +1154,7 @@ export default function App() {
       prev.map((s) => {
         if (s.id === id) {
           const updated = { ...s, title: newTitle, updatedAt: new Date().toISOString() };
-          syncChatSummaryToFirestore(updated);
+          syncChatSummaryToSupabase(updated);
           return updated;
         }
         return s;
@@ -1188,7 +1188,7 @@ export default function App() {
             pinOrder: newPinned ? Date.now() : undefined,
             updatedAt: new Date().toISOString(),
           };
-          syncChatSummaryToFirestore(updatedChat);
+          syncChatSummaryToSupabase(updatedChat);
           return updatedChat;
         }
         return s;
@@ -1394,9 +1394,9 @@ export default function App() {
           const finalMsg = { ...updatedMsg, content: fullContent };
           triggerVoiceIfNeeded(finalMsg);
 
-          // Sync complete message to Firestore
-          syncMessageToFirestore(activeSessionId, finalMsg);
-          syncChatSummaryToFirestore({
+          // Sync complete message to Supabase
+          syncMessageToSupabase(activeSessionId, finalMsg);
+          syncChatSummaryToSupabase({
             ...activeSession,
             updatedAt: new Date().toISOString()
           });
@@ -1437,9 +1437,9 @@ export default function App() {
               timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
               engineId: "core",
             };
-            // Sync error message and chat summary to Firestore
-            syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
-            syncChatSummaryToFirestore({
+            // Sync error message and chat summary to Supabase
+            syncMessageToSupabase(activeSessionId, updatedMsgs[idx]);
+            syncChatSummaryToSupabase({
               ...s,
               updatedAt: new Date().toISOString()
             });
@@ -1507,7 +1507,7 @@ export default function App() {
       );
       if (user && !user.isGuest && user.uid) {
         deleteMessageFromSupabase(msgId);
-        syncChatSummaryToFirestore({
+        syncChatSummaryToSupabase({
           ...activeSession,
           updatedAt: new Date().toISOString()
         });
@@ -1549,9 +1549,9 @@ export default function App() {
     const obsoleteMsgs = updatedMsgs.slice(idx + 1);
     updatedMsgs = [...updatedMsgs.slice(0, idx + 1), placeholderAssistantMsg];
 
-    // Sync edited user message and placeholder assistant message immediately to Firestore
-    syncMessageToFirestore(activeSessionId, updatedMsgs[idx]);
-    syncMessageToFirestore(activeSessionId, placeholderAssistantMsg);
+    // Sync edited user message and placeholder assistant message immediately to Supabase
+    syncMessageToSupabase(activeSessionId, updatedMsgs[idx]);
+    syncMessageToSupabase(activeSessionId, placeholderAssistantMsg);
 
     if (user && !user.isGuest && user.uid) {
       // Delete obsolete trailing messages from Supabase
@@ -1670,9 +1670,9 @@ export default function App() {
           const finalMsg = { ...updatedMsg, content: fullContent };
           triggerVoiceIfNeeded(finalMsg);
 
-          // Sync the completed assistant message to Firestore
-          syncMessageToFirestore(activeSessionId, finalMsg);
-          syncChatSummaryToFirestore({
+          // Sync the completed assistant message to Supabase
+          syncMessageToSupabase(activeSessionId, finalMsg);
+          syncChatSummaryToSupabase({
             ...activeSession,
             updatedAt: new Date().toISOString()
           });
@@ -1714,9 +1714,9 @@ export default function App() {
                 timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
                 engineId: "core",
               };
-              // Sync error message to Firestore
-              syncMessageToFirestore(activeSessionId, currentMsgs[aIdx]);
-              syncChatSummaryToFirestore({
+              // Sync error message to Supabase
+              syncMessageToSupabase(activeSessionId, currentMsgs[aIdx]);
+              syncChatSummaryToSupabase({
                 ...s,
                 updatedAt: new Date().toISOString()
               });
@@ -1747,7 +1747,7 @@ export default function App() {
           const updatedMsgs = s.messages.map((m) => {
             if (m.id === msgId) {
               const updated = { ...m, reaction: reaction || undefined };
-              syncMessageToFirestore(activeSessionId, updated);
+              syncMessageToSupabase(activeSessionId, updated);
               return updated;
             }
             return m;
@@ -1934,14 +1934,14 @@ export default function App() {
     setIsLoading(false);
     setIsGenerating(false);
 
-    // 5. Clean up blinking cursor and save partial state to Firestore
+    // 5. Clean up blinking cursor and save partial state to Supabase
     setSessions((prev) => {
       const currentSess = prev.find((s) => s.id === activeSessionId);
       if (currentSess && currentSess.messages && currentSess.messages.length > 0) {
         const lastMsg = currentSess.messages[currentSess.messages.length - 1];
         if (lastMsg && lastMsg.role === "assistant") {
-          syncMessageToFirestore(activeSessionId, lastMsg);
-          syncChatSummaryToFirestore({
+          syncMessageToSupabase(activeSessionId, lastMsg);
+          syncChatSummaryToSupabase({
             ...currentSess,
             updatedAt: new Date().toISOString()
           });
@@ -1979,15 +1979,15 @@ export default function App() {
     const isFirstAssistantResponse = activeSession.messages.length === 0;
     const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : activeSession.title;
     
-    // Save user message immediately to Firestore subcollection & update parent metadata
-    syncMessageToFirestore(activeSessionId, newUserMsg);
+    // Save user message immediately to Supabase subcollection & update parent metadata
+    syncMessageToSupabase(activeSessionId, newUserMsg);
     
     const updatedParentChat: ChatSession = {
       ...activeSession,
       title: titleRename,
       updatedAt: new Date().toISOString()
     };
-    syncChatSummaryToFirestore(updatedParentChat);
+    syncChatSummaryToSupabase(updatedParentChat);
 
     setSessions((prev) =>
       prev.map((s) => {
@@ -2101,13 +2101,13 @@ export default function App() {
           const finalMsg = { ...newAssistantMsg, content: fullContent };
           triggerVoiceIfNeeded(finalMsg);
 
-          // Sync complete message to Firestore
-          syncMessageToFirestore(activeSessionId, finalMsg);
+          // Sync complete message to Supabase
+          syncMessageToSupabase(activeSessionId, finalMsg);
           const finalParentChat: ChatSession = {
             ...updatedParentChat,
             updatedAt: new Date().toISOString()
           };
-          syncChatSummaryToFirestore(finalParentChat);
+          syncChatSummaryToSupabase(finalParentChat);
 
           if (isFirstAssistantResponse) {
             generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
@@ -2160,13 +2160,13 @@ export default function App() {
         engineId: "core",
       };
 
-      // Sync error response to Firestore & update parent
-      syncMessageToFirestore(activeSessionId, errorMsg);
+      // Sync error response to Supabase & update parent
+      syncMessageToSupabase(activeSessionId, errorMsg);
       const finalParentChatError: ChatSession = {
         ...updatedParentChat,
         updatedAt: new Date().toISOString()
       };
-      syncChatSummaryToFirestore(finalParentChatError);
+      syncChatSummaryToSupabase(finalParentChatError);
 
       setSessions((prev) =>
         prev.map((s) => {

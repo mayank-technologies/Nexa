@@ -573,14 +573,14 @@ export function SettingsModal({
                     </div>
                   )}
 
-                  {/* Firebase diagnostics nested inside Support */}
+                  {/* Supabase diagnostics nested inside Support */}
                   <div className="pt-3.5 border-t border-slate-150 dark:border-slate-800/60 space-y-3">
                     <h5 className="text-[11px] font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                       <Database className="w-3.5 h-3.5 text-indigo-500" />
                       Cloud Connection Diagnostics
                     </h5>
                     <p className="text-[10px] text-slate-400 font-normal leading-snug">
-                      Verify Firestore document write/read permissions and cloud reliability live.
+                      Verify Supabase connection status and database table access reliability live.
                     </p>
 
                     <button

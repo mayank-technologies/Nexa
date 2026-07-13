@@ -275,13 +275,15 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           success = false;
           errorMsg = "You're already on the Nexa Premium Waitlist.";
         } else {
-          // Store email, uid, userId, timestamp, source
+          // Store email, uid, userId, timestamp, source, fullName, plan
           const newEntry = {
             email: normalizedEmail,
             uid: user?.uid,
             userId: user?.uid,
             timestamp: new Date().toISOString(),
             source: source,
+            fullName: user?.fullName || "Nexa User",
+            plan: "Premium",
           };
           
           // Simultaneously synchronize to Supabase

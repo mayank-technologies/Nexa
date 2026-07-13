@@ -217,6 +217,8 @@ export async function syncWaitlistToSupabase(entry: {
   userId?: string;
   timestamp: string;
   source: string;
+  fullName?: string;
+  plan?: string;
 }): Promise<boolean> {
   if (!entry || !entry.email) return false;
 
@@ -226,10 +228,8 @@ export async function syncWaitlistToSupabase(entry: {
       .from("waitlist")
       .upsert({
         email: entry.email.toLowerCase().trim(),
-        uid: entry.uid || entry.userId || null,
-        user_id: entry.userId || entry.uid || null,
-        timestamp: entry.timestamp || new Date().toISOString(),
-        source: entry.source || "web"
+        full_name: entry.fullName || "Nexa User",
+        plan: entry.plan || "Premium"
       }, { onConflict: "email" });
 
     if (error) {
@@ -297,13 +297,13 @@ CREATE TABLE IF NOT EXISTS public.messages (
     reaction TEXT
 );
 
--- 4. Create Waitlist Table
+-- 4. Create Waitlist Table (Updated)
 CREATE TABLE IF NOT EXISTS public.waitlist (
-    email TEXT PRIMARY KEY,
-    uid TEXT,
-    user_id TEXT,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
-    source TEXT
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT NOT NULL CONSTRAINT unique_waitlist_email UNIQUE,
+    full_name TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
 );
 
 -- Enable Realtime for dynamic state updates (Optional)

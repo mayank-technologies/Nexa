@@ -219,33 +219,39 @@ export async function syncWaitlistToSupabase(entry: {
   source: string;
   fullName?: string;
   plan?: string;
-}): Promise<boolean> {
-  if (!entry || !entry.email) return false;
+}): Promise<{ success: boolean; error?: any }> {
+  if (!entry || !entry.email) {
+    return { success: false, error: { message: "Invalid waitlist entry input." } };
+  }
 
   try {
     console.log("[Nexa Supabase] Syncing premium waitlist entry for:", entry.email);
+    
+    // We do NOT insert "id" or "created_at"; let Supabase generate them automatically.
+    // Insert with exactly: email, full_name, plan
     const { error } = await supabase
       .from("waitlist")
-      .upsert({
+      .insert({
         email: entry.email.toLowerCase().trim(),
         full_name: entry.fullName || "Nexa User",
         plan: entry.plan || "Premium"
-      }, { onConflict: "email" });
+      });
 
     if (error) {
-      if (error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'waitlist' table does not exist in Supabase yet.");
-      } else {
-        console.error("[Nexa Supabase] Error syncing waitlist entry:", error.message);
-      }
-      return false;
+      console.error("[Nexa Supabase] Detailed Supabase Error caught:", {
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      });
+      return { success: false, error };
     }
 
     console.log("[Nexa Supabase] Successfully synced waitlist entry to Supabase!");
-    return true;
-  } catch (err) {
+    return { success: true };
+  } catch (err: any) {
     console.error("[Nexa Supabase] Unexpected error during waitlist sync:", err);
-    return false;
+    return { success: false, error: err };
   }
 }
 

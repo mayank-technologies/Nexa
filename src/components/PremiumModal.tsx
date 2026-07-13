@@ -287,9 +287,16 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           };
           
           // Simultaneously synchronize to Supabase
-          const syncSuccess = await syncWaitlistToSupabase(newEntry);
-          if (!syncSuccess) {
-            throw new Error("Failed to synchronize waitlist entry to database.");
+          const syncResult = await syncWaitlistToSupabase(newEntry);
+          if (!syncResult.success) {
+            const dbErr = syncResult.error;
+            console.error("[PremiumModal] Detailed Supabase waitlist sync error:", {
+              code: dbErr?.code,
+              message: dbErr?.message,
+              details: dbErr?.details,
+              hint: dbErr?.hint
+            });
+            throw new Error(dbErr?.message ? `Supabase Sync Error: ${dbErr.message}` : "Failed to synchronize waitlist entry to database.");
           }
 
           success = true;

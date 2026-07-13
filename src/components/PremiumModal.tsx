@@ -4,8 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
-import { db, handleFirestoreError, OperationType } from "../firebase";
-import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
+import { supabase, syncWaitlistToSupabase } from "../utils/supabaseClient";
 import {
   X,
   Zap,
@@ -73,11 +72,13 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
 
       if (user && !user.isGuest && user.email) {
         try {
-          const docRef = doc(db, "waitlist", user.email.toLowerCase().trim());
-          const docSnap = await getDoc(docRef);
-          const registered = docSnap.exists();
+          const { data, error } = await supabase
+            .from("waitlist")
+            .select("*")
+            .eq("email", user.email.toLowerCase().trim())
+            .maybeSingle();
           
-          if (registered) {
+          if (data && !error) {
             setWaitlistStatus("joined");
             safeStorage.setItem("nexa_premium_waitlist_joined", "true");
           } else if (savedStatus === "true") {
@@ -85,7 +86,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
             safeStorage.removeItem("nexa_premium_waitlist_joined");
           }
         } catch (e) {
-          console.error("Error checking waitlist status from Firestore:", e);
+          console.error("Error checking waitlist status from Supabase:", e);
         }
       }
     };
@@ -134,10 +135,14 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
         return;
       }
 
-      // Direct Firestore delete using client SDK
+      // Direct Supabase delete using client SDK
       try {
-        const docRef = doc(db, "waitlist", email.toLowerCase().trim());
-        await deleteDoc(docRef);
+        const { error: deleteError } = await supabase
+          .from("waitlist")
+          .delete()
+          .eq("email", email.toLowerCase().trim());
+
+        if (deleteError) throw deleteError;
         success = true;
 
         // Optionally notify the server
@@ -152,14 +157,10 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
             }),
           });
         } catch (apiErr) {
-          console.warn("[Waitlist] API leave failed, continuing since Firestore delete succeeded:", apiErr);
+          console.warn("[Waitlist] API leave failed, continuing since Supabase delete succeeded:", apiErr);
         }
       } catch (fsErr: any) {
-        try {
-          handleFirestoreError(fsErr, OperationType.DELETE, `waitlist/${email}`);
-        } catch (wrappedErr: any) {
-          errorMsg = wrappedErr.message || fsErr.message;
-        }
+        errorMsg = fsErr.message || String(fsErr);
       }
 
       if (success) {
@@ -216,13 +217,18 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
       let errorMsg = "";
 
       const normalizedEmail = email.toLowerCase().trim();
-      const docRef = doc(db, "waitlist", normalizedEmail);
 
-      // Direct Firestore check
+      // Direct Supabase check
       try {
-        const docSnap = await getDoc(docRef);
+        const { data: existing, error: checkError } = await supabase
+          .from("waitlist")
+          .select("*")
+          .eq("email", normalizedEmail)
+          .maybeSingle();
 
-        if (docSnap.exists()) {
+        if (checkError) throw checkError;
+
+        if (existing) {
           success = false;
           errorMsg = "You're already on the Nexa Premium Waitlist.";
         } else {
@@ -234,7 +240,13 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
             timestamp: new Date().toISOString(),
             source: source,
           };
-          await setDoc(docRef, newEntry);
+          
+          // Simultaneously synchronize to Supabase
+          const syncSuccess = await syncWaitlistToSupabase(newEntry);
+          if (!syncSuccess) {
+            throw new Error("Failed to synchronize waitlist entry to database.");
+          }
+
           success = true;
           statusResult = "joined";
 
@@ -256,11 +268,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           }
         }
       } catch (fsErr: any) {
-        try {
-          handleFirestoreError(fsErr, OperationType.WRITE, `waitlist/${email}`);
-        } catch (wrappedErr: any) {
-          errorMsg = wrappedErr.message || fsErr.message;
-        }
+        errorMsg = fsErr.message || String(fsErr);
       }
 
       if (success) {

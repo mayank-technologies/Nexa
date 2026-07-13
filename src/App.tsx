@@ -65,9 +65,7 @@ import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
-import { db, auth } from "./firebase";
-import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
-import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
+import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
@@ -78,10 +76,14 @@ function GoogleAuthBridgeView() {
   useEffect(() => {
     const handleAuth = async () => {
       try {
-        const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: "select_account" });
-        const result = await signInWithPopup(auth, provider);
-        console.log("[Nexa Google Bridge View] Successfully logged in:", result.user.email);
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: window.location.origin
+          }
+        });
+        if (error) throw error;
+        console.log("[Nexa Google Bridge View] Successfully initiated Supabase Google OAuth");
         setStatus("success");
         setTimeout(() => {
           window.close();
@@ -144,21 +146,23 @@ function GoogleAuthBridgeView() {
             </div>
             <div className="pt-2 flex flex-col gap-2">
               <button
-                onClick={() => {
-                  setStatus("connecting");
-                  setErrorMessage("");
-                  const provider = new GoogleAuthProvider();
-                  provider.setCustomParameters({ prompt: "select_account" });
-                  signInWithPopup(auth, provider)
-                    .then((res) => {
-                      console.log("Retry success:", res.user.email);
-                      setStatus("success");
-                      setTimeout(() => window.close(), 1500);
-                    })
-                    .catch((err) => {
-                      setStatus("error");
-                      setErrorMessage(err.message || "Retry authentication failed.");
+                onClick={async () => {
+                  try {
+                    setStatus("connecting");
+                    setErrorMessage("");
+                    const { error } = await supabase.auth.signInWithOAuth({
+                      provider: "google",
+                      options: {
+                        redirectTo: window.location.origin
+                      }
                     });
+                    if (error) throw error;
+                    setStatus("success");
+                    setTimeout(() => window.close(), 1500);
+                  } catch (err: any) {
+                    setStatus("error");
+                    setErrorMessage(err.message || "Retry authentication failed.");
+                  }
                 }}
                 className="w-full bg-[#C96A3D] hover:bg-[#b0582e] text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
               >
@@ -651,21 +655,11 @@ export default function App() {
   const syncChatSummaryToFirestore = async (chat: ChatSession) => {
     if (user && !user.isGuest && user.uid) {
       try {
-        const summary = {
-          id: chat.id,
-          title: chat.title,
-          createdAt: chat.createdAt,
-          updatedAt: chat.updatedAt,
-          isPinned: chat.isPinned || false,
-          pinOrder: chat.pinOrder || null,
-          mode: chat.mode || "general",
-          selectedEngineId: chat.selectedEngineId || null,
-          userEmail: user.email.toLowerCase().trim()
-        };
-        await setDoc(doc(db, "users", user.uid, "chats", chat.id), summary, { merge: true });
-        console.log("[Nexa Client] Synced chat summary to Firestore:", chat.id);
+        // Synchronize directly to Supabase
+        await syncChatToSupabase(chat, user.email.toLowerCase().trim());
+        console.log("[Nexa Client] Synced chat summary to Supabase:", chat.id);
       } catch (e) {
-        console.error("Failed to sync chat summary to Firestore:", e);
+        console.error("Failed to sync chat summary to Supabase:", e);
       }
     }
   };
@@ -673,22 +667,11 @@ export default function App() {
   const syncMessageToFirestore = async (chatId: string, message: Message) => {
     if (user && !user.isGuest && user.uid) {
       try {
-        await setDoc(doc(db, "users", user.uid, "chats", chatId, "messages", message.id), {
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          timestamp: message.timestamp,
-          reaction: message.reaction || null,
-          engineId: message.engineId || null,
-          sources: message.sources || null,
-          factCheck: message.factCheck || null,
-          researchReport: message.researchReport || null,
-          quiz: message.quiz || null,
-          attachment: message.attachment || null
-        });
-        console.log("[Nexa Client] Synced message to Firestore:", message.id);
+        // Synchronize directly to Supabase
+        await syncMessageToSupabase(chatId, message);
+        console.log("[Nexa Client] Synced message to Supabase:", message.id);
       } catch (e) {
-        console.error("Failed to sync message to Firestore:", e);
+        console.error("Failed to sync message to Supabase:", e);
       }
     }
   };
@@ -768,7 +751,7 @@ export default function App() {
     if (!user) return;
 
     if (!user.isGuest && user.uid) {
-      console.log("[Nexa Client] [LOG] User is authenticated. Subscribing to Firestore chats collection for UID:", user.uid);
+      console.log("[Nexa Client] [LOG] User is authenticated. Subscribing to Supabase chats for email:", user.email);
       
       // Close auth modal because the user is successfully authenticated!
       setShowAuth(false);
@@ -776,13 +759,14 @@ export default function App() {
       // Remove Guest cached data to avoid state leakage
       clearGuestCache();
 
-      chatsUnsubscribeRef.current = onSnapshot(
-        collection(db, "users", user.uid, "chats"),
-        (snapshot) => {
-          if (snapshot.empty) {
-            console.log("[Nexa Client] [LOG] Firestore chats snapshot is empty. Seeding default starter chat.");
+      const loadChats = async () => {
+        try {
+          const summaries = await fetchChatsFromSupabase(user.email || "");
+          
+          if (summaries.length === 0) {
+            console.log("[Nexa Client] [LOG] Supabase chats is empty. Seeding default starter chat.");
             const defaultId = `session-${Date.now()}`;
-            const defaultChat = {
+            const defaultChat: ChatSession = {
               id: defaultId,
               title: "Start an Intelligent Chat",
               createdAt: new Date().toISOString(),
@@ -792,25 +776,11 @@ export default function App() {
               mode: "general",
               selectedEngineId: null,
               userEmail: user.email || "",
+              messages: [],
             };
-            setDoc(doc(db, "users", user.uid!, "chats", defaultId), defaultChat);
+            await syncChatToSupabase(defaultChat, user.email || "");
             return;
           }
-
-          const summaries = snapshot.docs.map((docEl) => {
-            const data = docEl.data();
-            return {
-              id: data.id,
-              title: data.title,
-              createdAt: data.createdAt,
-              updatedAt: data.updatedAt,
-              isPinned: data.isPinned || false,
-              pinOrder: data.pinOrder || null,
-              mode: data.mode || "general",
-              selectedEngineId: data.selectedEngineId || null,
-              messages: [],
-            } as ChatSession;
-          });
 
           // Sort chat summaries by pinned and updatedAt
           summaries.sort((a, b) => {
@@ -822,8 +792,6 @@ export default function App() {
             return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
           });
 
-          console.log("[Nexa Client] [LOG] Syncing fetched chats into App state. Count:", summaries.length);
-          
           setSessions(summaries);
 
           // Ensure activeSessionId is set to a valid session
@@ -837,11 +805,14 @@ export default function App() {
             }
             return summaries.length > 0 ? summaries[0].id : "";
           });
-        },
-        (error) => {
-          console.error("[Nexa Client] [LOG] Firestore chats subscription error:", error);
+        } catch (error) {
+          console.error("[Nexa Client] [LOG] Supabase chats load error:", error);
         }
-      );
+      };
+
+      loadChats();
+      const pollInterval = setInterval(loadChats, 3500);
+      chatsUnsubscribeRef.current = () => clearInterval(pollInterval);
     } else {
       // User is Guest Mode
       console.log("[Nexa Client] [LOG] Entering Guest Mode. Subscribing to cached guest sessions.");
@@ -901,30 +872,11 @@ export default function App() {
     }
 
     if (user && !user.isGuest && user.uid && activeSessionId) {
-      const userId = user.uid;
-      const messagesRef = collection(db, "users", userId, "chats", activeSessionId, "messages");
+      console.log("[Nexa Client] Subscribing to Supabase messages for chat:", activeSessionId);
       
-      console.log("[Nexa Client] Subscribing to messages for chat:", activeSessionId);
-      
-      messagesUnsubscribeRef.current = onSnapshot(
-        messagesRef,
-        (snapshot) => {
-          const fetchedMessages: Message[] = snapshot.docs.map((d) => {
-            const data = d.data();
-            return {
-              id: data.id,
-              role: data.role,
-              content: data.content,
-              timestamp: data.timestamp,
-              reaction: data.reaction || undefined,
-              engineId: data.engineId || undefined,
-              sources: data.sources || undefined,
-              factCheck: data.factCheck || undefined,
-              researchReport: data.researchReport || undefined,
-              quiz: data.quiz || undefined,
-              attachment: data.attachment || undefined,
-            } as Message;
-          });
+      const loadMessages = async () => {
+        try {
+          const fetchedMessages = await fetchMessagesFromSupabase(activeSessionId);
 
           // Chronological sorting of messages
           fetchedMessages.sort((a, b) => {
@@ -949,11 +901,14 @@ export default function App() {
               return s;
             })
           );
-        },
-        (error) => {
-          console.error("Messages subscription error:", error);
+        } catch (error) {
+          console.error("Messages fetch error:", error);
         }
-      );
+      };
+
+      loadMessages();
+      const pollInterval = setInterval(loadMessages, 3500);
+      messagesUnsubscribeRef.current = () => clearInterval(pollInterval);
     }
 
     return () => {
@@ -1159,15 +1114,15 @@ export default function App() {
   const handleDeleteSession = (id: string) => {
     const remaining = sessions.filter((s) => s.id !== id);
     if (user && !user.isGuest && user.uid) {
-      const deleteFromFirestore = async () => {
+      const deleteFromSupabaseDb = async () => {
         try {
-          await deleteDoc(doc(db, "users", user.uid, "chats", id));
-          console.log("[Nexa Client] Deleted session from Firestore:", id);
+          await deleteChatFromSupabase(id);
+          console.log("[Nexa Client] Deleted session from Supabase:", id);
         } catch (e) {
-          console.error("Failed to delete session from Firestore:", e);
+          console.error("Failed to delete session from Supabase:", e);
         }
       };
-      deleteFromFirestore();
+      deleteFromSupabaseDb();
     }
     if (remaining.length === 0) {
       const freshId = `session-${Date.now()}`;
@@ -1551,7 +1506,7 @@ export default function App() {
         })
       );
       if (user && !user.isGuest && user.uid) {
-        deleteDoc(doc(db, "users", user.uid, "chats", activeSessionId, "messages", msgId));
+        deleteMessageFromSupabase(msgId);
         syncChatSummaryToFirestore({
           ...activeSession,
           updatedAt: new Date().toISOString()
@@ -1599,14 +1554,13 @@ export default function App() {
     syncMessageToFirestore(activeSessionId, placeholderAssistantMsg);
 
     if (user && !user.isGuest && user.uid) {
-      const userId = user.uid;
-      // Delete obsolete trailing messages from Firestore
+      // Delete obsolete trailing messages from Supabase
       for (const ob of obsoleteMsgs) {
         if (ob.id !== assistantId) {
           try {
-            await deleteDoc(doc(db, "users", userId, "chats", activeSessionId, "messages", ob.id));
+            await deleteMessageFromSupabase(ob.id);
           } catch (e) {
-            console.error("Failed to delete obsolete message from Firestore:", e);
+            console.error("Failed to delete obsolete message from Supabase:", e);
           }
         }
       }

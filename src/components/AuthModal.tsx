@@ -7,16 +7,7 @@ import React, { useState } from "react";
 import { X, Mail, Lock, Eye, ArrowRight, User, Copy, Check, ExternalLink, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { Logo } from "./Logo";
 import { UserProfile } from "../types";
-import { auth } from "../firebase";
-import firebaseConfig from "../../firebase-applet-config.json";
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  updateProfile,
-  GoogleAuthProvider,
-  signInWithPopup,
-  signInWithRedirect
-} from "firebase/auth";
+import { supabase, syncUserProfileToSupabase } from "../utils/supabaseClient";
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -73,29 +64,37 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
 
     try {
       if (isSignUp) {
-        // Save full name in sessionStorage for onAuthStateChanged to read
-        sessionStorage.setItem("nexa_signup_fullname", fullName.trim());
-        const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-        await updateProfile(userCredential.user, { displayName: fullName.trim() });
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: password,
+          options: {
+            data: {
+              full_name: fullName.trim()
+            }
+          }
+        });
+        if (signUpError) throw signUpError;
+
+        if (data.user) {
+          await syncUserProfileToSupabase({
+            uid: data.user.id,
+            email: email.trim(),
+            fullName: fullName.trim(),
+            isGuest: false,
+          });
+        }
       } else {
-        await signInWithEmailAndPassword(auth, email.trim(), password);
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password: password
+        });
+        if (signInError) throw signInError;
       }
       setLoading(false);
       onClose();
     } catch (err: any) {
       console.error("Auth submit error:", err);
-      let friendlyMessage = "Authentication failed. Please verify your credentials.";
-      if (err.code === "auth/invalid-credential" || err.code === "auth/wrong-password" || err.code === "auth/user-not-found") {
-        friendlyMessage = "Incorrect email or password. Please verify your credentials.";
-      } else if (err.code === "auth/email-already-in-use") {
-        friendlyMessage = "An account with this email address already exists. Try signing in.";
-      } else if (err.code === "auth/weak-password") {
-        friendlyMessage = "Your password is too weak. Please choose a password with at least 6 characters.";
-      } else if (err.code === "auth/invalid-email") {
-        friendlyMessage = "Please enter a valid email address.";
-      } else if (err.message) {
-        friendlyMessage = err.message;
-      }
+      let friendlyMessage = err.message || "Authentication failed. Please verify your credentials.";
       setErrorFlag(friendlyMessage);
       setLoading(false);
     }
@@ -105,82 +104,18 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     setLoading(true);
     setErrorFlag("");
 
-    // Check if we are running inside an iframe (e.g. the AI Studio preview window)
-    const isInIframe = window.self !== window.top;
-
-    if (isInIframe) {
-      console.log("[Nexa Client] Running inside sandbox iframe. Opening same-origin Google Auth popup bridge...");
-      const width = 500;
-      const height = 650;
-      const left = window.screen.width / 2 - width / 2;
-      const top = window.screen.height / 2 - height / 2;
-      const popupUrl = window.location.origin + "?google_auth_trigger=true";
-      
-      const popup = window.open(
-        popupUrl,
-        "NexaGoogleAuthBridge",
-        `width=${width},height=${height},top=${top},left=${left},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
-      );
-
-      if (!popup || popup.closed || typeof popup.closed === "undefined") {
-        console.warn("[Nexa Client] Popup was blocked by browser. Activating secure bridge fallback form...");
-        setErrorFlag(
-          <div className="space-y-1.5 text-left">
-            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Popup Blocked / पॉपअप ब्लॉक हो गया</p>
-            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-              Your browser blocked the Google Sign-In window. Kripya browser settings mein popups allow karein ya niche diye gaye <strong>Google Secure Login Bridge</strong> se log-in karein!
-            </p>
-          </div>
-        );
-        setIsGoogleBridgeActive(true);
-        setLoading(false);
-      } else {
-        setErrorFlag(
-          <div className="flex items-center gap-2 p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-            Popup opened! Complete your Google sign-in there...
-          </div>
-        );
-
-        const checkInterval = setInterval(() => {
-          if (popup.closed) {
-            clearInterval(checkInterval);
-            setLoading(false);
-            setErrorFlag("");
-            // If successfully logged in, the main onAuthStateChanged listener in AuthContext 
-            // will automatically detect the new auth state and log us in!
-          }
-        }, 1000);
-      }
-    } else {
-      try {
-        const provider = new GoogleAuthProvider();
-        provider.setCustomParameters({
-          prompt: "select_account"
-        });
-
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-        if (isMobile) {
-          console.log("[Nexa Client] Mobile browser detected. Attempting signInWithRedirect...");
-          await signInWithRedirect(auth, provider);
-        } else {
-          console.log("[Nexa Client] Desktop browser detected. Attempting signInWithPopup...");
-          const result = await signInWithPopup(auth, provider);
-          const firebaseUser = result.user;
-          console.log("[Nexa Client] Popup auth success for user:", firebaseUser.email);
-          setLoading(false);
-          onClose();
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: window.location.origin
         }
-      } catch (err: any) {
-        console.error("[Nexa Client] Google popup sign-in failed. Activating secure bridge fallback. Error:", err);
-        // Seamlessly fall back to the secure bridge to allow a 100% reliable login experience on sandbox domains
-        if (email) {
-          setGoogleEmail(email);
-        }
-        setIsGoogleBridgeActive(true);
-        setLoading(false);
-      }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      console.error("Supabase Google Sign-In failed:", err);
+      setErrorFlag(err.message || "Google Authentication failed. Please try again.");
+      setLoading(false);
     }
   };
 
@@ -209,47 +144,45 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     const bridgePassword = getDeterministicPassword(targetEmail);
 
     try {
-      // Step 1: Try signing in with the deterministic password
-      await signInWithEmailAndPassword(auth, targetEmail, bridgePassword);
-      console.log("[Nexa Bridge] Signed in existing Google Bridge user:", targetEmail);
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: targetEmail,
+        password: bridgePassword
+      });
+
+      if (signInError) {
+        // Try signing up
+        const resolvedName = targetEmail.split("@")[0];
+        const displayName = resolvedName.charAt(0).toUpperCase() + resolvedName.slice(1);
+        
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: targetEmail,
+          password: bridgePassword,
+          options: {
+            data: {
+              full_name: displayName
+            }
+          }
+        });
+        if (signUpError) throw signUpError;
+
+        if (signUpData.user) {
+          await syncUserProfileToSupabase({
+            uid: signUpData.user.id,
+            email: targetEmail,
+            fullName: displayName,
+            isGuest: false,
+          });
+        }
+      }
+
+      console.log("[Nexa Bridge] Signed in Google Bridge user:", targetEmail);
       setLoading(false);
       setIsGoogleBridgeActive(false);
       onClose();
     } catch (err: any) {
-      console.log("[Nexa Bridge] Sign-in failed or user doesn't exist, attempting auto-registration. Error:", err.code);
-      
-      if (err.code === "auth/user-not-found" || err.code === "auth/invalid-credential" || err.code === "auth/wrong-password") {
-        try {
-          // Step 2: Try creating a new account since it's the first time
-          const userCredential = await createUserWithEmailAndPassword(auth, targetEmail, bridgePassword);
-          const resolvedName = targetEmail.split("@")[0];
-          await updateProfile(userCredential.user, { 
-            displayName: resolvedName.charAt(0).toUpperCase() + resolvedName.slice(1) 
-          });
-          console.log("[Nexa Bridge] Created new Google Bridge user:", targetEmail);
-          setLoading(false);
-          setIsGoogleBridgeActive(false);
-          onClose();
-        } catch (createErr: any) {
-          console.error("[Nexa Bridge] Auto-registration failed:", createErr);
-          if (createErr.code === "auth/email-already-in-use") {
-            setErrorFlag(
-              <div className="space-y-1.5 text-left">
-                <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Account Password Required</p>
-                <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300 font-normal">
-                  This email is already registered with a standard password. Please sign in using your standard email and password in the <strong>Sign In</strong> tab above.
-                </p>
-              </div>
-            );
-          } else {
-            setErrorFlag(`Registration failed: ${createErr.message || "Please check your network."}`);
-          }
-          setLoading(false);
-        }
-      } else {
-        setErrorFlag(`Bridge authentication failed: ${err.message || "Please try again."}`);
-        setLoading(false);
-      }
+      console.error("[Nexa Bridge] Bridge authentication failed:", err);
+      setErrorFlag(err.message || "Bridge authentication failed. Please try again.");
+      setLoading(false);
     }
   };
 

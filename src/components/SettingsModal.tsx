@@ -9,8 +9,7 @@ import { AppSettings, UserProfile } from "../types";
 import { playUiSound } from "../utils/sounds";
 import { Logo } from "./Logo";
 import { AchievementsProfile } from "./AchievementsProfile";
-import { db } from "../firebase";
-import { collection, addDoc, getDoc } from "firebase/firestore";
+import { checkSupabaseHealth, SUPABASE_SQL_SCHEMA, SupabaseHealthStatus, supabase } from "../utils/supabaseClient";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -55,6 +54,36 @@ export function SettingsModal({
   const [testError, setTestError] = useState<string | null>(null);
   const [testDetails, setTestDetails] = useState<string | null>(null);
 
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseHealthStatus | null>(null);
+  const [checkingSupabase, setCheckingSupabase] = useState(false);
+  const [showSqlSchema, setShowSqlSchema] = useState(false);
+  const [sqlCopied, setSqlCopied] = useState(false);
+
+  const runSupabaseDiagnostics = async () => {
+    setCheckingSupabase(true);
+    try {
+      playUiSound("success");
+    } catch (_) {}
+    
+    try {
+      const res = await checkSupabaseHealth();
+      setSupabaseStatus(res);
+    } catch (err: any) {
+      console.error("Supabase check failed:", err);
+    } finally {
+      setCheckingSupabase(false);
+    }
+  };
+
+  const copySqlSchema = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
+    setSqlCopied(true);
+    try {
+      playUiSound("success");
+    } catch (_) {}
+    setTimeout(() => setSqlCopied(false), 2000);
+  };
+
   const runConnectionTest = async () => {
     setTestStatus("loading");
     setTestError(null);
@@ -64,29 +93,18 @@ export function SettingsModal({
     } catch (_) {}
     
     try {
-      // 1. Create a document in a collection named "connection_test"
-      const testCollectionRef = collection(db, "connection_test");
-      const docRef = await addDoc(testCollectionRef, {
-        timestamp: new Date().toISOString(),
-        testedBy: user.email || "anonymous_test_user",
-        message: "Nexa Firebase connection verification"
-      });
+      // Test Supabase connectivity by querying users table count or selecting a test row
+      const { error } = await supabase.from("users").select("id").limit(1);
       
-      // 2. Read the same document
-      const docSnap = await getDoc(docRef);
+      if (error) throw error;
       
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setTestStatus("success");
-        setTestDetails(`Document Path: connection_test/${docSnap.id}\nTimestamp: ${data.timestamp}`);
-        try {
-          playUiSound("success");
-        } catch (_) {}
-      } else {
-        throw new Error("Document was created but could not be read back (not found).");
-      }
+      setTestStatus("success");
+      setTestDetails(`Supabase Connection Succeeded!\nDatabase is fully reachable and 'users' table is verified.`);
+      try {
+        playUiSound("success");
+      } catch (_) {}
     } catch (err: any) {
-      console.error("Firebase Connection Test failed:", err);
+      console.error("Supabase Connection Test failed:", err);
       setTestStatus("error");
       setTestError(err?.message || String(err));
       try {
@@ -609,6 +627,116 @@ export function SettingsModal({
                             {testError}
                           </div>
                         )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Supabase Diagnostics nested inside Support */}
+                  <div className="pt-3.5 border-t border-slate-150 dark:border-slate-800/60 space-y-3">
+                    <h5 className="text-[11px] font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Database className="w-3.5 h-3.5 text-emerald-500" />
+                      Supabase Sync Diagnostics
+                    </h5>
+                    <p className="text-[10px] text-slate-400 font-normal leading-snug">
+                      Verify table availability, credentials, and live data synchronization with your Supabase account.
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={runSupabaseDiagnostics}
+                      disabled={checkingSupabase}
+                      className="w-full flex justify-center items-center gap-2 py-2 text-[11px] font-bold bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 hover:text-emerald-600 dark:hover:text-emerald-400 text-slate-600 dark:text-slate-300 rounded-xl border border-slate-200 dark:border-slate-800 transition-all cursor-pointer shadow-3xs"
+                    >
+                      {checkingSupabase ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                          Checking Supabase...
+                        </>
+                      ) : (
+                        <>
+                          <Wifi className="w-3.5 h-3.5 text-emerald-500" />
+                          Test Supabase Connection
+                        </>
+                      )}
+                    </button>
+
+                    {supabaseStatus && (
+                      <div className="p-3 bg-slate-100/60 dark:bg-slate-900/40 border border-slate-200/50 dark:border-slate-800 rounded-xl space-y-3 animate-fade-in text-[10px]">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">Status:</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                            supabaseStatus.connected 
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                              : "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                          }`}>
+                            {supabaseStatus.connected ? "Connected" : "Offline"}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <div className="font-bold text-slate-500 dark:text-slate-400 text-[9px] uppercase tracking-wider">Table Schema Check</div>
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex items-center justify-between p-1.5 bg-white dark:bg-slate-950 rounded-lg border border-slate-200/30">
+                              <span className="text-slate-600 dark:text-slate-400">users:</span>
+                              <span className={`font-bold ${supabaseStatus.tables.users ? "text-emerald-500" : "text-amber-500"}`}>
+                                {supabaseStatus.tables.users ? "✓ Ready" : "✗ Missing"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between p-1.5 bg-white dark:bg-slate-950 rounded-lg border border-slate-200/30">
+                              <span className="text-slate-600 dark:text-slate-400">chats:</span>
+                              <span className={`font-bold ${supabaseStatus.tables.chats ? "text-emerald-500" : "text-amber-500"}`}>
+                                {supabaseStatus.tables.chats ? "✓ Ready" : "✗ Missing"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between p-1.5 bg-white dark:bg-slate-950 rounded-lg border border-slate-200/30">
+                              <span className="text-slate-600 dark:text-slate-400">messages:</span>
+                              <span className={`font-bold ${supabaseStatus.tables.messages ? "text-emerald-500" : "text-amber-500"}`}>
+                                {supabaseStatus.tables.messages ? "✓ Ready" : "✗ Missing"}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between p-1.5 bg-white dark:bg-slate-950 rounded-lg border border-slate-200/30">
+                              <span className="text-slate-600 dark:text-slate-400">waitlist:</span>
+                              <span className={`font-bold ${supabaseStatus.tables.waitlist ? "text-emerald-500" : "text-amber-500"}`}>
+                                {supabaseStatus.tables.waitlist ? "✓ Ready" : "✗ Missing"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {(!supabaseStatus.tables.users || !supabaseStatus.tables.chats || !supabaseStatus.tables.messages || !supabaseStatus.tables.waitlist) && (
+                          <div className="p-2 rounded-lg bg-amber-500/5 border border-amber-500/10 text-amber-600 dark:text-amber-400 text-[9px] leading-relaxed">
+                            ⚠️ <strong>Some tables are missing.</strong> Click the button below to view the copy-paste SQL script to create them instantly in your Supabase Dashboard.
+                          </div>
+                        )}
+
+                        <div className="pt-1.5 flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setShowSqlSchema(!showSqlSchema)}
+                            className="w-full py-1.5 text-center text-slate-500 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] font-bold border border-dashed border-slate-200 dark:border-slate-800 rounded-lg hover:border-[#C96A3D]/40 transition-colors cursor-pointer"
+                          >
+                            {showSqlSchema ? "Hide SQL Setup Script" : "Show SQL Setup Script"}
+                          </button>
+
+                          {showSqlSchema && (
+                            <div className="space-y-2 animate-fade-in">
+                              <div className="flex items-center justify-between">
+                                <span className="font-mono text-[8px] text-slate-400">Execute in Supabase SQL Editor</span>
+                                <button
+                                  type="button"
+                                  onClick={copySqlSchema}
+                                  className="px-2 py-0.5 bg-[#C96A3D] hover:bg-[#b0582e] text-white rounded text-[8px] font-bold transition-colors cursor-pointer"
+                                >
+                                  {sqlCopied ? "✓ Copied!" : "Copy SQL"}
+                                </button>
+                              </div>
+                              <pre className="text-[7.5px] font-mono text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-950 p-2.5 rounded-lg overflow-x-auto max-h-40 border border-slate-200/50 dark:border-slate-800 leading-normal select-text">
+                                {SUPABASE_SQL_SCHEMA}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

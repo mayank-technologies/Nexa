@@ -73,6 +73,7 @@ export interface ChatSession {
   pinOrder?: number;
   mode: "general" | "research" | "study" | "factcheck" | "writing" | "quiz";
   selectedEngineId?: NexaEngineId; // custom force engine override if any, defaults to smart routing
+  userEmail?: string;
 }
 
 export interface GamificationState {

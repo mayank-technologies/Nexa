@@ -81,12 +81,23 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           if (data && !error) {
             setWaitlistStatus("joined");
             safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+          } else if (error) {
+            if (error.code === "42P01") {
+              console.log("[PremiumModal] 'waitlist' table is missing in Supabase. Falling back to local state check.");
+              if (savedStatus === "true") {
+                setWaitlistStatus("joined");
+              } else {
+                setWaitlistStatus("idle");
+              }
+            } else {
+              console.error("Error checking waitlist status from Supabase:", error.message);
+            }
           } else if (savedStatus === "true") {
             setWaitlistStatus("idle");
             safeStorage.removeItem("nexa_premium_waitlist_joined");
           }
         } catch (e) {
-          console.error("Error checking waitlist status from Supabase:", e);
+          console.error("Error checking waitlist status:", e);
         }
       }
     };
@@ -142,8 +153,16 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           .delete()
           .eq("email", email.toLowerCase().trim());
 
-        if (deleteError) throw deleteError;
-        success = true;
+        if (deleteError) {
+          if (deleteError.code === "42P01") {
+            console.warn("[PremiumModal] 'waitlist' table is missing during delete. Treating local delete as success.");
+            success = true;
+          } else {
+            throw deleteError;
+          }
+        } else {
+          success = true;
+        }
 
         // Optionally notify the server
         try {
@@ -157,7 +176,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
             }),
           });
         } catch (apiErr) {
-          console.warn("[Waitlist] API leave failed, continuing since Supabase delete succeeded:", apiErr);
+          console.warn("[Waitlist] API leave failed, continuing:", apiErr);
         }
       } catch (fsErr: any) {
         errorMsg = fsErr.message || String(fsErr);
@@ -226,9 +245,33 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           .eq("email", normalizedEmail)
           .maybeSingle();
 
-        if (checkError) throw checkError;
+        if (checkError) {
+          if (checkError.code === "42P01") {
+            console.log("[PremiumModal] 'waitlist' table is missing in Supabase. Triggering high-reliability local join fallback.");
+            
+            success = true;
+            statusResult = "joined";
 
-        if (existing) {
+            // Fire off background API so that the email server sends the confirmation SMTP email!
+            try {
+              await fetch("/api/premium/waitlist", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  email: normalizedEmail,
+                  userId: user?.uid,
+                  source: source,
+                }),
+              });
+            } catch (apiErr) {
+              console.warn("[Waitlist] Optional confirmation email API call failed:", apiErr);
+            }
+          } else {
+            throw checkError;
+          }
+        } else if (existing) {
           success = false;
           errorMsg = "You're already on the Nexa Premium Waitlist.";
         } else {

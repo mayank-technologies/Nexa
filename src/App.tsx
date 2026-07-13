@@ -65,12 +65,127 @@ import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
-import { db } from "./firebase";
+import { db, auth } from "./firebase";
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc, onSnapshot } from "firebase/firestore";
+import { GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
+function GoogleAuthBridgeView() {
+  const [status, setStatus] = useState<"connecting" | "success" | "error">("connecting");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    const handleAuth = async () => {
+      try {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        const result = await signInWithPopup(auth, provider);
+        console.log("[Nexa Google Bridge View] Successfully logged in:", result.user.email);
+        setStatus("success");
+        setTimeout(() => {
+          window.close();
+        }, 1500);
+      } catch (err: any) {
+        console.error("[Nexa Google Bridge View] Auth failed:", err);
+        setStatus("error");
+        setErrorMessage(err.message || "Unknown authentication error.");
+      }
+    };
+    handleAuth();
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-[#0a0f1d] text-white flex flex-col items-center justify-center p-6 font-sans">
+      <div className="w-full max-w-md bg-[#11192e] rounded-3xl p-8 border border-slate-800 shadow-2xl text-center space-y-6">
+        <div className="flex justify-center">
+          <Logo size={48} showText={true} textClass="text-3xl font-bold" animate={true} />
+        </div>
+
+        {status === "connecting" && (
+          <div className="space-y-4">
+            <div className="flex justify-center">
+              <div className="w-12 h-12 border-4 border-[#C96A3D] border-t-transparent rounded-full animate-spin" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-100">Connecting Google Account</h2>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              Establishing a secure connection with Google Auth services. Please sign in using the emerging prompt.
+            </p>
+          </div>
+        )}
+
+        {status === "success" && (
+          <div className="space-y-4">
+            <div className="mx-auto flex items-center justify-center w-16 h-16 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+              <svg className="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-emerald-400">Authentication Successful!</h2>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              Your Google Account is now securely linked. This bridge window will close automatically in a moment.
+            </p>
+          </div>
+        )}
+
+        {status === "error" && (
+          <div className="space-y-4">
+            <div className="mx-auto flex items-center justify-center w-16 h-16 bg-rose-500/10 rounded-full border border-rose-500/20">
+              <svg className="w-8 h-8 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-rose-400">Authentication Failed</h2>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              We couldn't connect your Google Account.
+            </p>
+            <div className="text-xs bg-rose-500/5 border border-rose-500/10 p-3 rounded-xl text-rose-300 font-mono text-left max-h-24 overflow-y-auto">
+              {errorMessage}
+            </div>
+            <div className="pt-2 flex flex-col gap-2">
+              <button
+                onClick={() => {
+                  setStatus("connecting");
+                  setErrorMessage("");
+                  const provider = new GoogleAuthProvider();
+                  provider.setCustomParameters({ prompt: "select_account" });
+                  signInWithPopup(auth, provider)
+                    .then((res) => {
+                      console.log("Retry success:", res.user.email);
+                      setStatus("success");
+                      setTimeout(() => window.close(), 1500);
+                    })
+                    .catch((err) => {
+                      setStatus("error");
+                      setErrorMessage(err.message || "Retry authentication failed.");
+                    });
+                }}
+                className="w-full bg-[#C96A3D] hover:bg-[#b0582e] text-white font-semibold py-2.5 rounded-xl transition-colors text-sm"
+              >
+                Try Again
+              </button>
+              <button
+                onClick={() => window.close()}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl transition-colors text-sm"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  // Check if this is the Google Auth Bridge popup window
+  const isGoogleAuthBridge = window.location.search.includes("google_auth_trigger=true");
+
+  if (isGoogleAuthBridge) {
+    return <GoogleAuthBridgeView />;
+  }
+
   const { user, isAuthLoading, logout, updateUser, triggerActionTracking: contextTriggerActionTracking } = useAuth();
   const [showSplash, setShowSplash] = useState(true);
   const [splashTimerDone, setSplashTimerDone] = useState(false);

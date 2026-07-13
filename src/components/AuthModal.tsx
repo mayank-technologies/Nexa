@@ -105,33 +105,82 @@ export function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
     setLoading(true);
     setErrorFlag("");
 
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({
-        prompt: "select_account"
-      });
+    // Check if we are running inside an iframe (e.g. the AI Studio preview window)
+    const isInIframe = window.self !== window.top;
 
-      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isInIframe) {
+      console.log("[Nexa Client] Running inside sandbox iframe. Opening same-origin Google Auth popup bridge...");
+      const width = 500;
+      const height = 650;
+      const left = window.screen.width / 2 - width / 2;
+      const top = window.screen.height / 2 - height / 2;
+      const popupUrl = window.location.origin + "?google_auth_trigger=true";
+      
+      const popup = window.open(
+        popupUrl,
+        "NexaGoogleAuthBridge",
+        `width=${width},height=${height},top=${top},left=${left},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
+      );
 
-      if (isMobile) {
-        console.log("[Nexa Client] Mobile browser detected. Attempting signInWithRedirect...");
-        await signInWithRedirect(auth, provider);
-      } else {
-        console.log("[Nexa Client] Desktop browser detected. Attempting signInWithPopup...");
-        const result = await signInWithPopup(auth, provider);
-        const firebaseUser = result.user;
-        console.log("[Nexa Client] Popup auth success for user:", firebaseUser.email);
+      if (!popup || popup.closed || typeof popup.closed === "undefined") {
+        console.warn("[Nexa Client] Popup was blocked by browser. Activating secure bridge fallback form...");
+        setErrorFlag(
+          <div className="space-y-1.5 text-left">
+            <p className="font-bold text-rose-600 dark:text-rose-400">⚠️ Popup Blocked / पॉपअप ब्लॉक हो गया</p>
+            <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+              Your browser blocked the Google Sign-In window. Kripya browser settings mein popups allow karein ya niche diye gaye <strong>Google Secure Login Bridge</strong> se log-in karein!
+            </p>
+          </div>
+        );
+        setIsGoogleBridgeActive(true);
         setLoading(false);
-        onClose();
+      } else {
+        setErrorFlag(
+          <div className="flex items-center gap-2 p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+            Popup opened! Complete your Google sign-in there...
+          </div>
+        );
+
+        const checkInterval = setInterval(() => {
+          if (popup.closed) {
+            clearInterval(checkInterval);
+            setLoading(false);
+            setErrorFlag("");
+            // If successfully logged in, the main onAuthStateChanged listener in AuthContext 
+            // will automatically detect the new auth state and log us in!
+          }
+        }, 1000);
       }
-    } catch (err: any) {
-      console.error("[Nexa Client] Google popup sign-in failed. Activating secure bridge fallback. Error:", err);
-      // Seamlessly fall back to the secure bridge to allow a 100% reliable login experience on sandbox domains
-      if (email) {
-        setGoogleEmail(email);
+    } else {
+      try {
+        const provider = new GoogleAuthProvider();
+        provider.setCustomParameters({
+          prompt: "select_account"
+        });
+
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        if (isMobile) {
+          console.log("[Nexa Client] Mobile browser detected. Attempting signInWithRedirect...");
+          await signInWithRedirect(auth, provider);
+        } else {
+          console.log("[Nexa Client] Desktop browser detected. Attempting signInWithPopup...");
+          const result = await signInWithPopup(auth, provider);
+          const firebaseUser = result.user;
+          console.log("[Nexa Client] Popup auth success for user:", firebaseUser.email);
+          setLoading(false);
+          onClose();
+        }
+      } catch (err: any) {
+        console.error("[Nexa Client] Google popup sign-in failed. Activating secure bridge fallback. Error:", err);
+        // Seamlessly fall back to the secure bridge to allow a 100% reliable login experience on sandbox domains
+        if (email) {
+          setGoogleEmail(email);
+        }
+        setIsGoogleBridgeActive(true);
+        setLoading(false);
       }
-      setIsGoogleBridgeActive(true);
-      setLoading(false);
     }
   };
 

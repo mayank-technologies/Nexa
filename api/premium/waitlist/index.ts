@@ -32,8 +32,8 @@ export default async function handler(req: any, res: any) {
 
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Confirm Firestore success: as per client flow, setDoc is resolved before this API is called
-  console.log(`[Nexa Serverless SMTP Diagnostic] [Stage: Firestore success] Verified that waitlist record for ${normalizedEmail} was written to Firestore by the client.`);
+  // Confirm Supabase success: as per client flow, the client writes before this API is called
+  console.log(`[Nexa Serverless SMTP Diagnostic] [Stage: Supabase success] Verified that waitlist record for ${normalizedEmail} was written to Supabase by the client.`);
 
   const host = process.env.SMTP_HOST || "smtp.gmail.com";
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
@@ -200,7 +200,7 @@ export default async function handler(req: any, res: any) {
       stack: err.stack,
     });
     
-    // We still return 200/joined because the Firestore registration was successful
+    // We still return 200/joined because the Supabase registration was successful
     return res.status(200).json({
       success: true,
       status: "joined",

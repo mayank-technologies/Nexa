@@ -299,25 +299,28 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
             throw new Error(dbErr?.message ? `Supabase Sync Error: ${dbErr.message}` : "Failed to synchronize waitlist entry to database.");
           }
 
+          // Send confirmation email via server and block on delivery to ensure success
+          const apiRes = await fetch("/api/premium/waitlist", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              email: normalizedEmail,
+              userId: user?.uid,
+              source: source,
+            }),
+          });
+
+          if (!apiRes.ok) {
+            const apiData = await apiRes.json().catch(() => ({}));
+            const apiErrorMsg = apiData.error || "Failed to send confirmation email.";
+            console.error("[PremiumModal] Confirmation email sending failed:", apiErrorMsg);
+            throw new Error(apiErrorMsg);
+          }
+
           success = true;
           statusResult = "joined";
-
-          // Send confirmation email asynchronously via server, catch error gracefully
-          try {
-            await fetch("/api/premium/waitlist", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                email: normalizedEmail,
-                userId: user?.uid,
-                source: source,
-              }),
-            });
-          } catch (apiErr) {
-            console.warn("[Waitlist] Optional confirmation email API call failed:", apiErr);
-          }
         }
       } catch (fsErr: any) {
         errorMsg = fsErr.message || String(fsErr);

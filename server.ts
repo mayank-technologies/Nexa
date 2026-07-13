@@ -297,7 +297,7 @@ async function startServer() {
     }
   });
 
-  const sendWaitlistEmail = async (toEmail: string): Promise<boolean> => {
+  const sendWaitlistEmail = async (toEmail: string): Promise<{ success: boolean; error?: string; info?: any }> => {
     console.log("[Nexa SMTP Diagnostic] [Stage: Email send attempted] Beginning sendWaitlistEmail for:", toEmail);
 
     const host = process.env.SMTP_HOST || "smtp.gmail.com";
@@ -320,7 +320,7 @@ async function startServer() {
 
     if (!user || !pass) {
       console.warn("[Nexa SMTP Diagnostic] [Stage: Aborted] SMTP credentials are not configured. Skipping confirmation email.");
-      return false;
+      return { success: false, error: "SMTP credentials are not configured in environment variables." };
     }
 
     try {
@@ -333,11 +333,14 @@ async function startServer() {
           user,
           pass,
         },
+        tls: {
+          rejectUnauthorized: false, // Prevents certificate verification failures in sandboxed containers
+        },
         debug: true,
         logger: true,
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 10000,
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 15000,
       });
 
       console.log("[Nexa SMTP Diagnostic] [Stage: SMTP authentication verification] Verifying transporter connection...");
@@ -442,7 +445,7 @@ async function startServer() {
         envelope: info.envelope,
         messageId: info.messageId,
       });
-      return true;
+      return { success: true, info };
     } catch (err: any) {
       console.error("[Nexa SMTP Diagnostic] [Stage: Email send failure] Email delivery failed:", {
         message: err.message,
@@ -452,7 +455,7 @@ async function startServer() {
         responseCode: err.responseCode,
         stack: err.stack,
       });
-      return false;
+      return { success: false, error: err.message || String(err) };
     }
   };
 
@@ -606,22 +609,23 @@ async function startServer() {
 
       console.log(`[Nexa SMTP Diagnostic] [Stage: Email send attempted] Handing off email delivery to sendWaitlistEmail for: ${normalizedEmail}`);
       
-      // Execute sendWaitlistEmail and catch error
-      sendWaitlistEmail(normalizedEmail).then((success) => {
-        if (success) {
-          console.log(`[Nexa SMTP Diagnostic] [Stage: Email send success] sendWaitlistEmail succeeded for: ${normalizedEmail}`);
-        } else {
-          console.error(`[Nexa SMTP Diagnostic] [Stage: Email send failure] sendWaitlistEmail reported failure for: ${normalizedEmail}`);
-        }
-      }).catch((emailErr) => {
-        console.error(`[Nexa SMTP Diagnostic] [Stage: Email send failure] Background waitlist email sending threw exception for ${normalizedEmail}:`, emailErr);
-      });
-
-      return res.status(200).json({
-        success: true,
-        status: "joined",
-        message: "🎉 You're officially on the Nexa Premium Waitlist!\n\nA confirmation email has been sent to your email address."
-      });
+      // Execute sendWaitlistEmail synchronously so we can catch and display errors
+      const emailResult = await sendWaitlistEmail(normalizedEmail);
+      
+      if (emailResult.success) {
+        console.log(`[Nexa SMTP Diagnostic] [Stage: Email send success] sendWaitlistEmail succeeded for: ${normalizedEmail}`);
+        return res.status(200).json({
+          success: true,
+          status: "joined",
+          message: "🎉 You're officially on the Nexa Premium Waitlist!\n\nA confirmation email has been sent to your email address."
+        });
+      } else {
+        console.error(`[Nexa SMTP Diagnostic] [Stage: Email send failure] sendWaitlistEmail reported failure for: ${normalizedEmail}. Error: ${emailResult.error}`);
+        return res.status(500).json({
+          success: false,
+          error: `SMTP Error: ${emailResult.error || "Failed to send confirmation email."}`
+        });
+      }
 
     } catch (error: any) {
       console.error("[Nexa SMTP Diagnostic] Premium waitlist registration API error:", error);

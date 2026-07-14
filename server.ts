@@ -1256,7 +1256,96 @@ async function startServer() {
   // Bind to 0.0.0.0 on port 3000 exclusively
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Nexa Server] Dynamic fullstack service running on http://0.0.0.0:${PORT}`);
+    
+    // Execute a test email immediate startup check using the existing SMTP configuration
+    sendStartupTestEmail();
   });
+}
+
+async function sendStartupTestEmail() {
+  console.log("[Nexa SMTP Startup Test] Starting immediate SMTP startup test email...");
+  
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
+  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || `Nexa <${user}>`;
+  const recipient = "mayanktechnologies00@gmail.com";
+
+  console.log("[Nexa SMTP Startup Test] Configuration details:");
+  console.log(`  - SMTP_HOST: ${host}`);
+  console.log(`  - SMTP_PORT: ${port}`);
+  console.log(`  - SMTP_USER: ${user ? "DEFINED" : "UNDEFINED"}`);
+  console.log(`  - SMTP_PASS: ${pass ? "DEFINED" : "UNDEFINED"}`);
+  console.log(`  - SMTP_FROM: ${from}`);
+  console.log(`  - Target Recipient: ${recipient}`);
+
+  if (!user || !pass) {
+    console.error("[Nexa SMTP Startup Test] SMTP credentials are not configured in environment variables. Aborting test.");
+    return;
+  }
+
+  try {
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: {
+        user,
+        pass,
+      },
+      tls: {
+        rejectUnauthorized: false, // Ensures TLS connection inside sandboxed networks is permissive
+      },
+      debug: true,
+      logger: true,
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 15000,
+    });
+
+    console.log("[Nexa SMTP Startup Test] Verifying transporter...");
+    try {
+      await transporter.verify();
+      console.log("[Nexa SMTP Startup Test] transporter.verify() result: SUCCESS! SMTP connection is verified.");
+    } catch (verifyErr: any) {
+      console.error("[Nexa SMTP Startup Test] transporter.verify() result: FAILED. Error details:", {
+        message: verifyErr.message,
+        code: verifyErr.code,
+        command: verifyErr.command,
+        response: verifyErr.response,
+        responseCode: verifyErr.responseCode,
+        stack: verifyErr.stack,
+      });
+      throw verifyErr;
+    }
+
+    const mailOptions = {
+      from,
+      to: recipient,
+      subject: "Nexa SMTP Diagnostic Test Email",
+      text: "This is a simple startup test email to verify that Nexa SMTP is configured and working correctly.",
+      html: "<p>This is a simple startup test email to verify that Nexa SMTP is configured and working correctly.</p>"
+    };
+
+    console.log("[Nexa SMTP Startup Test] Sending email...");
+    const info = await transporter.sendMail(mailOptions);
+    
+    console.log("[Nexa SMTP Startup Test] sendMail() result: SUCCESS!");
+    console.log(`[Nexa SMTP Startup Test] Message ID: ${info.messageId}`);
+    console.log(`[Nexa SMTP Startup Test] SMTP response: ${info.response}`);
+    console.log("SMTP is working correctly");
+
+  } catch (err: any) {
+    console.error("[Nexa SMTP Startup Test] TEST EMAIL FAILED! Detailed SMTP Error:", {
+      message: err.message,
+      code: err.code,
+      command: err.command,
+      response: err.response,
+      responseCode: err.responseCode,
+      stack: err.stack,
+    });
+  }
 }
 
 startServer();

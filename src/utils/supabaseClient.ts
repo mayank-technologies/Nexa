@@ -210,6 +210,7 @@ export async function syncMessageToSupabase(chatId: string, message: Message): P
 
 /**
  * Sync waitlist join entry to Supabase.
+ * Checks for duplicates, inserts safely, and calculates the waitlist position in real time.
  */
 export async function syncWaitlistToSupabase(entry: {
   email: string;
@@ -219,36 +220,90 @@ export async function syncWaitlistToSupabase(entry: {
   source: string;
   fullName?: string;
   plan?: string;
-}): Promise<{ success: boolean; error?: any }> {
+}): Promise<{ success: boolean; alreadyExists?: boolean; position?: number; entry?: any; error?: any }> {
   if (!entry || !entry.email) {
     return { success: false, error: { message: "Invalid waitlist entry input." } };
   }
 
   try {
-    console.log("[Nexa Supabase] Syncing premium waitlist entry for:", entry.email);
+    const normalizedEmail = entry.email.toLowerCase().trim();
+    console.log("[Nexa Supabase] Syncing premium waitlist entry for:", normalizedEmail);
     
-    // We do NOT insert "id" or "created_at"; let Supabase generate them automatically.
-    // Insert with exactly: email, full_name, plan
-    const { error } = await supabase
+    // 1. Check if email already exists in the waitlist table
+    const { data: existing, error: checkError } = await supabase
       .from("waitlist")
-      .insert({
-        email: entry.email.toLowerCase().trim(),
-        full_name: entry.fullName || "Nexa User",
-        plan: entry.plan || "Premium"
-      });
+      .select("*")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
 
-    if (error) {
-      console.error("[Nexa Supabase] Detailed Supabase Error caught:", {
-        code: error.code,
-        message: error.message,
-        details: error.details,
-        hint: error.hint
-      });
-      return { success: false, error };
+    if (checkError && checkError.code !== "PGRST116" && checkError.code !== "42P01") {
+      console.error("[Nexa Supabase] Check error:", checkError);
+      return { success: false, error: checkError };
     }
 
-    console.log("[Nexa Supabase] Successfully synced waitlist entry to Supabase!");
-    return { success: true };
+    if (existing) {
+      console.log("[Nexa Supabase] Email already exists in waitlist. Calculating position...");
+      const { count, error: countError } = await supabase
+        .from("waitlist")
+        .select("*", { count: "exact", head: true })
+        .lte("created_at", existing.created_at);
+
+      if (countError) {
+        console.error("[Nexa Supabase] Count error for existing:", countError);
+      }
+
+      return {
+        success: true,
+        alreadyExists: true,
+        position: count !== null ? count : 1,
+        entry: existing
+      };
+    }
+
+    // 2. Insert new entry and return all values (including id, created_at generated automatically)
+    const { data: insertData, error: insertError } = await supabase
+      .from("waitlist")
+      .insert({
+        email: normalizedEmail,
+        full_name: entry.fullName || "Nexa User",
+        plan: entry.plan || "Premium"
+      })
+      .select("*");
+
+    if (insertError) {
+      console.error("[Nexa Supabase] Insert error caught:", {
+        code: insertError.code,
+        message: insertError.message,
+        details: insertError.details,
+        hint: insertError.hint
+      });
+      return { success: false, error: insertError };
+    }
+
+    const newRow = insertData?.[0];
+    if (!newRow) {
+      return { success: false, error: { message: "Failed to retrieve inserted waitlist entry." } };
+    }
+
+    console.log("[Nexa Supabase] Successfully inserted new waitlist entry:", newRow);
+
+    // 3. Calculate position (how many rows have created_at <= newRow.created_at)
+    const { count, error: countError } = await supabase
+      .from("waitlist")
+      .select("*", { count: "exact", head: true })
+      .lte("created_at", newRow.created_at);
+
+    if (countError) {
+      console.error("[Nexa Supabase] Count error for new row:", countError);
+    }
+
+    return {
+      success: true,
+      alreadyExists: false,
+      position: count !== null ? count : 1,
+      entry: newRow
+    };
+
   } catch (err: any) {
     console.error("[Nexa Supabase] Unexpected error during waitlist sync:", err);
     return { success: false, error: err };

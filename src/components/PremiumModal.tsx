@@ -48,6 +48,7 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [waitlistStatus, setWaitlistStatus] = useState<"idle" | "joined" | "already_registered" | "error" | "left_success">("idle");
+  const [waitlistPosition, setWaitlistPosition] = useState<number | null>(null);
   const [showConfirmLeave, setShowConfirmLeave] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const modalRef = useRef<HTMLDivElement>(null);
@@ -81,6 +82,16 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           if (data && !error) {
             setWaitlistStatus("joined");
             safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+            
+            // Calculate real-time position based on created_at timestamp
+            const { count, error: countError } = await supabase
+              .from("waitlist")
+              .select("*", { count: "exact", head: true })
+              .lte("created_at", data.created_at);
+            
+            if (!countError && count !== null) {
+              setWaitlistPosition(count);
+            }
           } else if (error) {
             if (error.code === "42P01") {
               console.log("[PremiumModal] 'waitlist' table is missing in Supabase. Falling back to local state check.");
@@ -231,76 +242,43 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
         return;
       }
 
-      let success = false;
-      let statusResult = "";
-      let errorMsg = "";
-
       const normalizedEmail = email.toLowerCase().trim();
 
-      // Direct Supabase check
-      try {
-        const { data: existing, error: checkError } = await supabase
-          .from("waitlist")
-          .select("*")
-          .eq("email", normalizedEmail)
-          .maybeSingle();
+      const newEntry = {
+        email: normalizedEmail,
+        uid: user?.uid,
+        userId: user?.uid,
+        timestamp: new Date().toISOString(),
+        source: source,
+        fullName: user?.fullName || "Nexa User",
+        plan: "Premium",
+      };
 
-        if (checkError) {
-          if (checkError.code === "42P01") {
-            console.log("[PremiumModal] 'waitlist' table is missing in Supabase. Triggering high-reliability local join fallback.");
-            
-            success = true;
-            statusResult = "joined";
+      // Simultaneously synchronize to Supabase
+      const syncResult = await syncWaitlistToSupabase(newEntry);
+      if (!syncResult.success) {
+        const dbErr = syncResult.error;
+        console.error("[PremiumModal] Detailed Supabase waitlist sync error:", dbErr);
+        throw new Error(dbErr?.message ? `Supabase Sync Error: ${dbErr.message}` : "Failed to synchronize waitlist entry to database.");
+      }
 
-            // Fire off background API so that the email server sends the confirmation SMTP email!
-            try {
-              await fetch("/api/premium/waitlist", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  email: normalizedEmail,
-                  userId: user?.uid,
-                  source: source,
-                }),
-              });
-            } catch (apiErr) {
-              console.warn("[Waitlist] Optional confirmation email API call failed:", apiErr);
-            }
-          } else {
-            throw checkError;
-          }
-        } else if (existing) {
-          success = false;
-          errorMsg = "You're already on the Nexa Premium Waitlist.";
-        } else {
-          // Store email, uid, userId, timestamp, source, fullName, plan
-          const newEntry = {
-            email: normalizedEmail,
-            uid: user?.uid,
-            userId: user?.uid,
-            timestamp: new Date().toISOString(),
-            source: source,
-            fullName: user?.fullName || "Nexa User",
-            plan: "Premium",
-          };
-          
-          // Simultaneously synchronize to Supabase
-          const syncResult = await syncWaitlistToSupabase(newEntry);
-          if (!syncResult.success) {
-            const dbErr = syncResult.error;
-            console.error("[PremiumModal] Detailed Supabase waitlist sync error:", {
-              code: dbErr?.code,
-              message: dbErr?.message,
-              details: dbErr?.details,
-              hint: dbErr?.hint
-            });
-            throw new Error(dbErr?.message ? `Supabase Sync Error: ${dbErr.message}` : "Failed to synchronize waitlist entry to database.");
-          }
+      // Store real-time position state
+      if (syncResult.position !== undefined) {
+        setWaitlistPosition(syncResult.position);
+      }
 
-          // Send confirmation email via server and block on delivery to ensure success
-          const apiRes = await fetch("/api/premium/waitlist", {
+      if (syncResult.alreadyExists) {
+        setWaitlistStatus("already_registered");
+        safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+        playUiSound("success");
+      } else {
+        setWaitlistStatus("joined");
+        safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+        playUiSound("waitlist_joined");
+
+        // Send confirmation email via server in background to keep UI ultra-snappy
+        try {
+          await fetch("/api/premium/waitlist", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -311,34 +289,9 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
               source: source,
             }),
           });
-
-          if (!apiRes.ok) {
-            const apiData = await apiRes.json().catch(() => ({}));
-            const apiErrorMsg = apiData.error || "Failed to send confirmation email.";
-            console.error("[PremiumModal] Confirmation email sending failed:", apiErrorMsg);
-            throw new Error(apiErrorMsg);
-          }
-
-          success = true;
-          statusResult = "joined";
+        } catch (apiErr) {
+          console.warn("[Waitlist] Optional confirmation email API call failed:", apiErr);
         }
-      } catch (fsErr: any) {
-        errorMsg = fsErr.message || String(fsErr);
-      }
-
-      if (success) {
-        if (statusResult === "already_registered") {
-          setWaitlistStatus("already_registered");
-          playUiSound("success");
-        } else {
-          setWaitlistStatus("joined");
-          safeStorage.setItem("nexa_premium_waitlist_joined", "true");
-          playUiSound("waitlist_joined");
-        }
-      } else {
-        setErrorMessage(errorMsg || "Failed to join waitlist. Please try again.");
-        setWaitlistStatus("error");
-        playUiSound("error");
       }
     } catch (err: any) {
       console.error("Waitlist error:", err);
@@ -619,19 +572,51 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   key="success"
-                  className="space-y-4"
+                  className="space-y-4 text-center"
                 >
                   <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center mx-auto mb-2 animate-bounce">
                     <CheckCircle className="w-6 h-6" />
                   </div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white whitespace-pre-line">
-                    🎉 You're officially on the Nexa Premium Waitlist!
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto whitespace-pre-line">
-                    {waitlistStatus === "already_registered"
-                      ? "You're already registered on the waitlist."
-                      : "A confirmation email has been sent to your email address."}
-                  </p>
+                  
+                  {waitlistStatus === "already_registered" ? (
+                    <>
+                      <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight leading-snug">
+                        You're already on the waitlist.
+                      </h3>
+                      {waitlistPosition !== null && (
+                        <div className="my-3.5 p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100/60 dark:border-indigo-900/30 rounded-2xl inline-block px-8">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 dark:text-indigo-400">
+                            Your Current Position
+                          </p>
+                          <p className="text-3xl font-black text-[#C96A3D] mt-0.5 font-mono">
+                            #{waitlistPosition}
+                          </p>
+                        </div>
+                      )}
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
+                        We'll notify you as soon as Nexa Premium launches.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="text-base font-black text-slate-900 dark:text-white tracking-tight leading-snug">
+                        🎉 You're on the Nexa Premium Waitlist!
+                      </h3>
+                      {waitlistPosition !== null && (
+                        <div className="my-3.5 p-3 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-100/60 dark:border-emerald-900/30 rounded-2xl inline-block px-8">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-500 dark:text-emerald-400">
+                            Your Position
+                          </p>
+                          <p className="text-3xl font-black text-[#C96A3D] mt-0.5 font-mono">
+                            #{waitlistPosition}
+                          </p>
+                        </div>
+                      )}
+                      <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm mx-auto">
+                        Thank you for joining. We'll notify you as soon as Nexa Premium launches.
+                      </p>
+                    </>
+                  )}
                   
                   <div className="pt-2 flex flex-col gap-2.5">
                     <button

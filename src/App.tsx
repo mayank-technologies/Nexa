@@ -2351,7 +2351,7 @@ export default function App() {
           <div className="flex-1 min-h-0 flex flex-col max-w-4xl w-full mx-auto overflow-hidden">
             {activeSession.messages.length === 0 ? (
               // Empty Thread Page (Curated Hero + Bentley Highlights + FAQs)
-              <div className="flex-1 overflow-y-auto py-10 text-center animate-fadeIn scrollbar-thin flex flex-col" id="nexa-hero-landing-page">
+              <div className="flex-1 overflow-y-auto py-10 pb-28 md:pb-10 text-center animate-fadeIn scrollbar-thin flex flex-col" id="nexa-hero-landing-page">
                 <div className="w-full my-auto space-y-12">
                   {/* Greeting */}
                   <div className="space-y-4 flex flex-col items-center justify-center">
@@ -2401,7 +2401,7 @@ export default function App() {
               </div>
             ) : (
               // Message Logs list feeds
-              <div className="flex-1 overflow-y-auto pb-4 pr-1 scrollbar-thin">
+              <div className="flex-1 overflow-y-auto pb-28 md:pb-4 pr-1 scrollbar-thin">
                 <MessageList
                   messages={activeSession.messages}
                   activeEngine={activeSession.selectedEngineId || "core"}
@@ -2422,7 +2422,11 @@ export default function App() {
           </div>
 
           {/* Dynamic Active input Dock Control Bars anchored */}
-          <div className={`relative z-40 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 pb-6 max-w-4xl w-full mx-auto select-none shrink-0 ${isFocusMode ? "hidden" : ""}`} id="nexa-dock">
+          <div 
+            className={`fixed bottom-0 left-0 right-0 md:relative md:bottom-auto md:left-auto md:right-auto z-40 bg-slate-50/90 dark:bg-[#0e1628]/95 backdrop-blur-md pt-3 px-4 md:px-0 max-w-4xl w-full mx-auto select-none shrink-0 ${isFocusMode ? "hidden" : ""}`} 
+            id="nexa-dock"
+            style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
+          >
             
             {/* Thumbs Up Feedback Toast Slide-in from Right */}
             <AnimatePresence>

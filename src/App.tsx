@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import {
   Sparkles,
   Search,
@@ -3091,6 +3092,9 @@ export default function App() {
         onClose={() => setIsFeedbackOpen(false)}
         user={user}
       />
+
+      {/* Vercel Analytics tracking tag */}
+      <Analytics />
 
     </div>
   );

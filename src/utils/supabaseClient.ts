@@ -134,20 +134,43 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string):
 
   try {
     console.log("[Nexa Supabase] Syncing chat session metadata:", chat.id);
-    const { error } = await supabase
+    const payload: any = {
+      id: chat.id,
+      title: chat.title || "Untitled Session",
+      created_at: chat.createdAt || new Date().toISOString(),
+      updated_at: chat.updatedAt || new Date().toISOString(),
+      is_pinned: chat.isPinned || false,
+      pin_order: chat.pinOrder || null,
+      mode: chat.mode || "general",
+      selected_engine_id: chat.selectedEngineId || null,
+      user_email: userEmail || chat.userEmail || null
+    };
+
+    if (chat.isDeleted !== undefined) {
+      payload.is_deleted = chat.isDeleted;
+    }
+    if (chat.deletedAt !== undefined) {
+      payload.deleted_at = chat.deletedAt;
+    }
+    if (chat.autoDeleteAt !== undefined) {
+      payload.auto_delete_at = chat.autoDeleteAt;
+    }
+
+    let { error } = await supabase
       .from("chats")
-      .upsert({
-        id: chat.id,
-        user_id: chat.messages?.[0] ? undefined : undefined, // Can optionally map to current active user if tables support it
-        title: chat.title || "Untitled Session",
-        created_at: chat.createdAt || new Date().toISOString(),
-        updated_at: chat.updatedAt || new Date().toISOString(),
-        is_pinned: chat.isPinned || false,
-        pin_order: chat.pinOrder || null,
-        mode: chat.mode || "general",
-        selected_engine_id: chat.selectedEngineId || null,
-        user_email: userEmail || chat.userEmail || null
-      }, { onConflict: "id" });
+      .upsert(payload, { onConflict: "id" });
+
+    if (error && (error.code === "42703" || error.message?.includes("column"))) {
+      console.warn("[Nexa Supabase] Soft delete columns do not exist yet. Retrying sync without them...");
+      const fallbackPayload = { ...payload };
+      delete fallbackPayload.is_deleted;
+      delete fallbackPayload.deleted_at;
+      delete fallbackPayload.auto_delete_at;
+      const { error: retryError } = await supabase
+        .from("chats")
+        .upsert(fallbackPayload, { onConflict: "id" });
+      error = retryError;
+    }
 
     if (error) {
       if (error.code === "42P01") {
@@ -339,7 +362,10 @@ CREATE TABLE IF NOT EXISTS public.chats (
     pin_order INTEGER,
     mode TEXT DEFAULT 'general',
     selected_engine_id TEXT,
-    user_email TEXT
+    user_email TEXT,
+    is_deleted BOOLEAN DEFAULT FALSE,
+    deleted_at TIMESTAMP WITH TIME ZONE,
+    auto_delete_at TIMESTAMP WITH TIME ZONE
 );
 
 -- 3. Create Messages Table
@@ -386,16 +412,30 @@ CREATE POLICY "Allow public read and write access for all" ON public.waitlist FO
 `;
 
 /**
- * Fetch all chat summaries from Supabase for a specific user email
+ * Fetch all chat summaries from Supabase for a specific user email (excluding deleted chats)
  */
 export async function fetchChatsFromSupabase(userEmail: string): Promise<ChatSession[]> {
   try {
-    console.log("[Nexa Supabase] Fetching chats for:", userEmail);
-    const { data, error } = await supabase
+    console.log("[Nexa Supabase] Fetching active chats for:", userEmail);
+    // Attempt to exclude deleted chats using OR condition
+    let { data, error } = await supabase
       .from("chats")
       .select("*")
       .eq("user_email", userEmail.toLowerCase().trim())
+      .or("is_deleted.eq.false,is_deleted.is.null")
       .order("updated_at", { ascending: false });
+
+    // Fallback if is_deleted column does not exist yet in database schema
+    if (error && (error.code === "42703" || error.message?.includes("column"))) {
+      console.warn("[Nexa Supabase] 'is_deleted' column does not exist yet. Falling back to simple fetch.");
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from("chats")
+        .select("*")
+        .eq("user_email", userEmail.toLowerCase().trim())
+        .order("updated_at", { ascending: false });
+      data = fallbackData;
+      error = fallbackError;
+    }
 
     if (error) {
       if (error.code === "42P01") {
@@ -416,10 +456,56 @@ export async function fetchChatsFromSupabase(userEmail: string): Promise<ChatSes
       mode: row.mode || "general",
       selectedEngineId: row.selected_engine_id,
       userEmail: row.user_email,
+      isDeleted: row.is_deleted || false,
+      deletedAt: row.deleted_at,
+      autoDeleteAt: row.auto_delete_at,
       messages: [] // loaded separately
     })) as ChatSession[];
   } catch (err) {
     console.error("[Nexa Supabase] Failed to fetch chats:", err);
+    return [];
+  }
+}
+
+/**
+ * Fetch all deleted chat summaries from Supabase for a specific user email
+ */
+export async function fetchDeletedChatsFromSupabase(userEmail: string): Promise<ChatSession[]> {
+  try {
+    console.log("[Nexa Supabase] Fetching deleted chats for:", userEmail);
+    const { data, error } = await supabase
+      .from("chats")
+      .select("*")
+      .eq("user_email", userEmail.toLowerCase().trim())
+      .eq("is_deleted", true)
+      .order("deleted_at", { ascending: false });
+
+    if (error) {
+      if (error.code === "42703" || error.message?.includes("column") || error.code === "42P01") {
+        console.warn("[Nexa Supabase] 'is_deleted' column or chats table does not exist yet. Returning empty.");
+        return [];
+      }
+      console.error("[Nexa Supabase] Error fetching deleted chats:", error.message);
+      return [];
+    }
+
+    return (data || []).map((row) => ({
+      id: row.id,
+      title: row.title,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      isPinned: row.is_pinned || false,
+      pinOrder: row.pin_order,
+      mode: row.mode || "general",
+      selectedEngineId: row.selected_engine_id,
+      userEmail: row.user_email,
+      isDeleted: row.is_deleted || false,
+      deletedAt: row.deleted_at,
+      autoDeleteAt: row.auto_delete_at,
+      messages: [] // loaded separately
+    })) as ChatSession[];
+  } catch (err) {
+    console.error("[Nexa Supabase] Failed to fetch deleted chats:", err);
     return [];
   }
 }

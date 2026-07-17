@@ -66,7 +66,8 @@ import { CameraModal } from "./components/CameraModal";
 import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
-import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
+import { RecentlyDeleted } from "./components/RecentlyDeleted";
+import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
 import { safeStorage } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
@@ -498,6 +499,15 @@ export default function App() {
     };
   }, []);
 
+  const [deletedSessions, setDeletedSessions] = useState<ChatSession[]>([]);
+  const [currentView, setCurrentView] = useState<"chat" | "recently_deleted">("chat");
+  const [isDeletedLoading, setIsDeletedLoading] = useState(false);
+  const [undoToast, setUndoToast] = useState<{
+    message: string;
+    action: () => void;
+    actionLabel?: string;
+  } | null>(null);
+
   // Auto-dismiss feedback toast after 5 seconds
   useEffect(() => {
     if (showFeedbackToast) {
@@ -507,6 +517,23 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [showFeedbackToast]);
+
+  // Auto-dismiss undo toast after 8 seconds
+  useEffect(() => {
+    if (undoToast) {
+      const timer = setTimeout(() => {
+        setUndoToast(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [undoToast]);
+
+  // Run Recycle Bin expired chats automatic cleanup on app load or sign-in
+  useEffect(() => {
+    if (user) {
+      cleanupExpiredChats();
+    }
+  }, [user]);
 
   // Core App states load persistent or set default
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -809,6 +836,17 @@ export default function App() {
         } catch (error) {
           console.error("[Nexa Client] [LOG] Supabase chats load error:", error);
         }
+
+        // Fetch deleted chats on load or user update
+        try {
+          setIsDeletedLoading(true);
+          const deleted = await fetchDeletedChatsAndMessages(user.email || "");
+          setDeletedSessions(deleted);
+        } catch (e) {
+          console.error("[Nexa Client] Failed to load deleted chats on user change:", e);
+        } finally {
+          setIsDeletedLoading(false);
+        }
       };
 
       loadChats();
@@ -847,6 +885,18 @@ export default function App() {
       }
 
       setSessions(loadedSessions);
+
+      // Load guest deleted sessions from local storage
+      let loadedDeleted: ChatSession[] = [];
+      const cachedDeleted = safeStorage.getItem("nexa_deleted_sessions_guest");
+      if (cachedDeleted) {
+        try {
+          loadedDeleted = JSON.parse(cachedDeleted);
+        } catch (e) {
+          console.error("[Nexa Client] Failed to parse guest deleted sessions:", e);
+        }
+      }
+      setDeletedSessions(loadedDeleted);
 
       // Restore activeSessionId for Guest
       const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
@@ -1107,29 +1157,72 @@ export default function App() {
     setActiveSessionId(newId);
     setActiveMode(mode);
     setAttachment(null);
+    setCurrentView("chat");
 
     // Sync to Supabase
     syncChatSummaryToSupabase(newChat);
   };
 
-  const handleDeleteSession = (id: string) => {
-    const remaining = sessions.filter((s) => s.id !== id);
-    if (user && !user.isGuest && user.uid) {
-      const deleteFromSupabaseDb = async () => {
-        try {
-          await deleteChatFromSupabase(id);
-          console.log("[Nexa Client] Deleted session from Supabase:", id);
-        } catch (e) {
-          console.error("Failed to delete session from Supabase:", e);
-        }
-      };
-      deleteFromSupabaseDb();
+  const fetchDeletedChatsAndMessages = async (email: string) => {
+    try {
+      const deletedChats = await fetchDeletedChatsFromSupabase(email);
+      const chatsWithMessages = await Promise.all(
+        deletedChats.map(async (chat) => {
+          try {
+            const msgs = await fetchMessagesFromSupabase(chat.id);
+            return { ...chat, messages: msgs };
+          } catch (e) {
+            console.error("Failed to fetch messages for deleted chat:", chat.id, e);
+            return chat;
+          }
+        })
+      );
+      return chatsWithMessages;
+    } catch (err) {
+      console.error("Failed to fetch deleted chats and messages:", err);
+      return [];
     }
+  };
+
+  const handleDeleteSession = async (id: string) => {
+    playUiSound("error");
+    const sessionToDelete = sessions.find((s) => s.id === id);
+    if (!sessionToDelete) return;
+
+    const deletedAt = new Date().toISOString();
+    const autoDeleteAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const updatedSession: ChatSession = {
+      ...sessionToDelete,
+      isDeleted: true,
+      deletedAt,
+      autoDeleteAt,
+      updatedAt: deletedAt,
+    };
+
+    const remaining = sessions.filter((s) => s.id !== id);
+
+    if (user && !user.isGuest && user.uid) {
+      try {
+        await syncChatToSupabase(updatedSession, user.email || "");
+        console.log("[Nexa Client] Soft deleted session in Supabase:", id);
+      } catch (e) {
+        console.error("Failed to soft delete session in Supabase:", e);
+      }
+    } else {
+      // Guest local storage soft delete
+      const updatedDeletedSessions = [updatedSession, ...deletedSessions];
+      setDeletedSessions(updatedDeletedSessions);
+      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(updatedDeletedSessions));
+      
+      const updatedActiveSessions = remaining.length === 0 ? [] : remaining;
+      safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedActiveSessions));
+    }
+
     if (remaining.length === 0) {
       const freshId = `session-${Date.now()}`;
       const freshSession: ChatSession = {
         id: freshId,
-        title: "New Chat Session",
+        title: "Start an Intelligent Chat",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         messages: [],
@@ -1139,13 +1232,189 @@ export default function App() {
       setSessions([freshSession]);
       setActiveSessionId(freshId);
       setActiveMode("general");
-      syncChatSummaryToSupabase(freshSession);
+      if (user && !user.isGuest && user.uid) {
+        await syncChatToSupabase(freshSession, user.email || "");
+      }
     } else {
       setSessions(remaining);
       if (activeSessionId === id) {
         const nextSession = remaining[0];
         setActiveSessionId(nextSession.id);
         setActiveMode(nextSession.mode || "general");
+      }
+    }
+
+    setUndoToast({
+      message: `Chat "${sessionToDelete.title}" moved to Recently Deleted.`,
+      action: () => {
+        handleRestoreSession(id);
+      },
+      actionLabel: "Undo",
+    });
+
+    if (user && !user.isGuest && user.uid) {
+      try {
+        const deleted = await fetchDeletedChatsAndMessages(user.email || "");
+        setDeletedSessions(deleted);
+      } catch (err) {
+        console.error("Error reloading deleted chats:", err);
+      }
+    }
+  };
+
+  const handleRestoreSession = async (id: string) => {
+    playUiSound("success");
+    
+    const chatToRestore = deletedSessions.find((s) => s.id === id);
+    if (!chatToRestore) return;
+
+    const restoredSession: ChatSession = {
+      ...chatToRestore,
+      isDeleted: false,
+      deletedAt: undefined,
+      autoDeleteAt: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const remainingDeleted = deletedSessions.filter((s) => s.id !== id);
+    setDeletedSessions(remainingDeleted);
+
+    if (user && !user.isGuest && user.uid) {
+      try {
+        await syncChatToSupabase(restoredSession, user.email || "");
+        console.log("[Nexa Client] Restored chat session in Supabase:", id);
+        
+        const activeSummaries = await fetchChatsFromSupabase(user.email || "");
+        setSessions(activeSummaries);
+        
+        setActiveSessionId(id);
+        setCurrentView("chat");
+        setActiveMode(restoredSession.mode || "general");
+      } catch (e) {
+        console.error("Failed to restore chat session in Supabase:", e);
+      }
+    } else {
+      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(remainingDeleted));
+
+      const currentActive = sessions.filter(s => s.messages.length > 0 || s.id !== activeSessionId);
+      const updatedActive = [restoredSession, ...currentActive];
+      
+      setSessions(updatedActive);
+      safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedActive));
+      
+      setActiveSessionId(id);
+      setCurrentView("chat");
+      setActiveMode(restoredSession.mode || "general");
+    }
+
+    setUndoToast({
+      message: `Chat "${restoredSession.title}" restored successfully.`,
+      action: () => {
+        handleDeleteSession(id);
+      },
+      actionLabel: "Undo",
+    });
+  };
+
+  const handleDeleteSessionForever = async (id: string) => {
+    playUiSound("success");
+
+    const chatToDelete = deletedSessions.find((s) => s.id === id);
+    const title = chatToDelete ? chatToDelete.title : "Chat";
+
+    const remainingDeleted = deletedSessions.filter((s) => s.id !== id);
+    setDeletedSessions(remainingDeleted);
+
+    if (user && !user.isGuest && user.uid) {
+      try {
+        await deleteChatFromSupabase(id);
+        console.log("[Nexa Client] Permanently deleted chat from Supabase:", id);
+      } catch (e) {
+        console.error("Failed to permanently delete chat from Supabase:", e);
+      }
+    } else {
+      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(remainingDeleted));
+    }
+
+    setUndoToast({
+      message: `Chat "${title}" deleted permanently.`,
+      action: () => {},
+      actionLabel: "",
+    });
+  };
+
+  const handleEmptyAllRecentlyDeleted = async () => {
+    playUiSound("success");
+
+    const count = deletedSessions.length;
+    setDeletedSessions([]);
+
+    if (user && !user.isGuest && user.uid) {
+      try {
+        await Promise.all(
+          deletedSessions.map((chat) => deleteChatFromSupabase(chat.id))
+        );
+        console.log("[Nexa Client] Emptied all deleted chats from Supabase.");
+      } catch (e) {
+        console.error("Failed to empty all deleted chats from Supabase:", e);
+      }
+    } else {
+      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify([]));
+    }
+
+    setUndoToast({
+      message: `Recycle Bin emptied. ${count} chats deleted permanently.`,
+      action: () => {},
+      actionLabel: "",
+    });
+  };
+
+  const cleanupExpiredChats = async () => {
+    const now = Date.now();
+    console.log("[Nexa Client] Running auto-cleanup scan for expired deleted chats...");
+
+    if (user && !user.isGuest && user.uid) {
+      try {
+        const deleted = await fetchDeletedChatsFromSupabase(user.email || "");
+        const expired = deleted.filter((chat) => {
+          if (!chat.autoDeleteAt) return false;
+          return new Date(chat.autoDeleteAt).getTime() <= now;
+        });
+
+        if (expired.length > 0) {
+          console.log(`[Nexa Client] Found ${expired.length} expired chats to auto-purge:`, expired.map(e => e.id));
+          await Promise.all(expired.map((chat) => deleteChatFromSupabase(chat.id)));
+          
+          const refreshedDeleted = await fetchDeletedChatsAndMessages(user.email || "");
+          setDeletedSessions(refreshedDeleted);
+        }
+      } catch (e) {
+        console.error("[Nexa Client] Failed to auto-cleanup expired chats from Supabase:", e);
+      }
+    } else {
+      let cachedDeleted: ChatSession[] = [];
+      const cached = safeStorage.getItem("nexa_deleted_sessions_guest");
+      if (cached) {
+        try {
+          cachedDeleted = JSON.parse(cached);
+        } catch (e) {
+          console.error("Failed to parse cached deleted sessions for guest auto-cleanup", e);
+        }
+      }
+
+      const activeDeleted = cachedDeleted.filter((chat) => {
+        const baseDate = chat.deletedAt ? new Date(chat.deletedAt) : new Date();
+        const autoDeleteAt = chat.autoDeleteAt 
+          ? new Date(chat.autoDeleteAt).getTime() 
+          : baseDate.getTime() + 30 * 24 * 60 * 60 * 1000;
+        return autoDeleteAt > now;
+      });
+
+      const purgedCount = cachedDeleted.length - activeDeleted.length;
+      if (purgedCount > 0) {
+        console.log(`[Nexa Client] Auto-purged ${purgedCount} expired guest chats.`);
+        setDeletedSessions(activeDeleted);
+        safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(activeDeleted));
       }
     }
   };
@@ -2254,7 +2523,10 @@ export default function App() {
             activeSessionId={activeSessionId}
             activeMode={activeMode}
             user={user}
-            onSelectSession={setActiveSessionId}
+            onSelectSession={(id) => {
+              setActiveSessionId(id);
+              setCurrentView("chat");
+            }}
             onNewSession={handleNewSession}
             onDeleteSession={handleDeleteSession}
             onRenameSession={handleRenameSession}
@@ -2273,6 +2545,8 @@ export default function App() {
               setPremiumSource("sidebar");
             }}
             onOpenFeedback={() => setIsFeedbackOpen(true)}
+            onSelectRecentlyDeleted={() => setCurrentView("recently_deleted")}
+            isRecentlyDeletedActive={currentView === "recently_deleted"}
           />
         </div>
 
@@ -2303,7 +2577,11 @@ export default function App() {
                   activeSessionId={activeSessionId}
                   activeMode={activeMode}
                   user={user}
-                  onSelectSession={setActiveSessionId}
+                  onSelectSession={(id) => {
+                    setActiveSessionId(id);
+                    setCurrentView("chat");
+                    setIsMobileSidebarOpen(false);
+                  }}
                   onNewSession={handleNewSession}
                   onDeleteSession={handleDeleteSession}
                   onRenameSession={handleRenameSession}
@@ -2323,6 +2601,11 @@ export default function App() {
                     setPremiumSource("sidebar");
                   }}
                   onOpenFeedback={() => setIsFeedbackOpen(true)}
+                  onSelectRecentlyDeleted={() => {
+                    setCurrentView("recently_deleted");
+                    setIsMobileSidebarOpen(false);
+                  }}
+                  isRecentlyDeletedActive={currentView === "recently_deleted"}
                 />
               </motion.div>
             </>
@@ -2348,8 +2631,20 @@ export default function App() {
             </div>
           ) : null}
 
-          {/* Chat thread feed section */}
-          <div className="flex-1 min-h-0 flex flex-col max-w-4xl w-full mx-auto overflow-hidden">
+          {currentView === "recently_deleted" ? (
+            <RecentlyDeleted
+              user={user || { fullName: "Guest User", email: "guest@nexa.ai" } as UserProfile}
+              deletedSessions={deletedSessions}
+              isLoading={isDeletedLoading}
+              onRestore={handleRestoreSession}
+              onDeleteForever={handleDeleteSessionForever}
+              onEmptyAll={handleEmptyAllRecentlyDeleted}
+              onClose={() => setCurrentView("chat")}
+            />
+          ) : (
+            <>
+              {/* Chat thread feed section */}
+              <div className="flex-1 min-h-0 flex flex-col max-w-4xl w-full mx-auto overflow-hidden">
             {activeSession.messages.length === 0 ? (
               // Empty Thread Page (Curated Hero + Bentley Highlights + FAQs)
               <div className="flex-1 overflow-y-auto py-10 pb-28 md:pb-10 text-center animate-fadeIn scrollbar-thin flex flex-col" id="nexa-hero-landing-page">
@@ -2866,6 +3161,35 @@ export default function App() {
 
 
           </div>
+          </>
+          )}
+
+          {/* Premium Undo Toast Notification */}
+          <AnimatePresence>
+            {undoToast && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4">
+                <motion.div
+                  initial={{ opacity: 0, y: 50, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                  className="flex items-center justify-between gap-3 p-4 bg-slate-900/95 dark:bg-slate-950/95 text-white rounded-2xl shadow-2xl border border-slate-800 backdrop-blur-md"
+                >
+                  <span className="text-xs font-medium text-slate-200">{undoToast.message}</span>
+                  {undoToast.actionLabel && (
+                    <button
+                      onClick={() => {
+                        undoToast.action();
+                        setUndoToast(null);
+                      }}
+                      className="px-3 py-1.5 bg-[#C96A3D] hover:bg-[#b05d33] text-white text-[11px] font-black uppercase tracking-wider rounded-xl transition-colors cursor-pointer shrink-0"
+                    >
+                      {undoToast.actionLabel}
+                    </button>
+                  )}
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
         </main>
       </div>

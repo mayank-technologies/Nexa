@@ -74,6 +74,9 @@ export interface ChatSession {
   mode: "general" | "research" | "study" | "factcheck" | "writing" | "quiz";
   selectedEngineId?: NexaEngineId; // custom force engine override if any, defaults to smart routing
   userEmail?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
+  autoDeleteAt?: string;
 }
 
 export interface GamificationState {

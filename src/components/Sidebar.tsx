@@ -52,6 +52,8 @@ interface SidebarProps {
   onCloseMobile?: () => void;
   onOpenPremium?: () => void;
   onOpenFeedback?: () => void;
+  onSelectRecentlyDeleted?: () => void;
+  isRecentlyDeletedActive?: boolean;
 }
 
 export function Sidebar({
@@ -73,6 +75,8 @@ export function Sidebar({
   onCloseMobile,
   onOpenPremium,
   onOpenFeedback,
+  onSelectRecentlyDeleted,
+  isRecentlyDeletedActive = false,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -519,6 +523,24 @@ export function Sidebar({
             </div>
           )
         )}
+
+        {/* Recently Deleted Button (placed below chats list and above footer settings) */}
+        <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800/80">
+          <button
+            onClick={() => {
+              onSelectRecentlyDeleted?.();
+              onCloseMobile?.();
+            }}
+            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-semibold select-none transition-all duration-200 cursor-pointer ${
+              isRecentlyDeletedActive
+                ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
+                : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
+            }`}
+          >
+            <Trash2 className={`w-3.5 h-3.5 shrink-0 ${isRecentlyDeletedActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
+            <span>Recently Deleted</span>
+          </button>
+        </div>
 
       </div>
 

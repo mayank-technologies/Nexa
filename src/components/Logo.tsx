@@ -58,7 +58,7 @@ export function Logo({
         strokeWidth={7.5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        variants={animate ? drawVariants : undefined}
+        variants={animate ? (drawVariants as any) : undefined}
         custom={0}
         initial={animate ? "initial" : undefined}
         animate={animate ? "enter" : undefined}
@@ -71,7 +71,7 @@ export function Logo({
         strokeWidth={7.5}
         strokeLinecap="round"
         strokeLinejoin="round"
-        variants={animate ? drawVariants : undefined}
+        variants={animate ? (drawVariants as any) : undefined}
         custom={1.5}
         initial={animate ? "initial" : undefined}
         animate={animate ? "enter" : undefined}
@@ -84,7 +84,7 @@ export function Logo({
         strokeWidth={8}
         strokeLinecap="round"
         strokeLinejoin="round"
-        variants={animate ? drawVariants : undefined}
+        variants={animate ? (drawVariants as any) : undefined}
         custom={3}
         initial={animate ? "initial" : undefined}
         animate={animate ? "enter" : undefined}
@@ -97,7 +97,7 @@ export function Logo({
         strokeWidth={8}
         strokeLinecap="round"
         strokeLinejoin="round"
-        variants={animate ? drawVariants : undefined}
+        variants={animate ? (drawVariants as any) : undefined}
         custom={3.5}
         initial={animate ? "initial" : undefined}
         animate={animate ? "enter" : undefined}
@@ -110,7 +110,7 @@ export function Logo({
         strokeWidth={8}
         strokeLinecap="round"
         strokeLinejoin="round"
-        variants={animate ? drawVariants : undefined}
+        variants={animate ? (drawVariants as any) : undefined}
         custom={4}
         initial={animate ? "initial" : undefined}
         animate={animate ? "enter" : undefined}
@@ -157,7 +157,7 @@ export function Logo({
       {logoNode}
       <motion.div
         className={`${textClass} flex items-baseline tracking-normal font-sans`}
-        variants={animate ? textVariants : undefined}
+        variants={animate ? (textVariants as any) : undefined}
         initial={animate ? "initial" : undefined}
         animate={animate ? "enter" : undefined}
       >

@@ -984,7 +984,7 @@ export default function App() {
         chatsUnsubscribeRef.current = null;
       }
     };
-  }, [user]);
+  }, [user?.uid, user?.email, user?.isGuest]);
 
   // Subscribe to the messages of the active session in real-time
   useEffect(() => {
@@ -1066,7 +1066,7 @@ export default function App() {
         messagesUnsubscribeRef.current = null;
       }
     };
-  }, [activeSessionId, user]);
+  }, [activeSessionId, user?.uid, user?.email, user?.isGuest]);
 
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [settings update] Settings state updated:", settings);
@@ -1075,7 +1075,7 @@ export default function App() {
 
   useEffect(() => {
     if (isAuthLoading) return;
-    const currentUid = user?.isGuest ? "guest" : (user?.uid || "guest");
+    const currentUid = user?.isGuest ? "guest@nexa.ai" : (user?.uid || "guest@nexa.ai");
     console.log("[Nexa Restorations Debug] [persist trigger] Persisting sessions to storage. Sessions count:", sessions.length, "Active session ID:", activeSessionId, "For UID:", currentUid);
     
     if (currentUid) {
@@ -1099,7 +1099,7 @@ export default function App() {
     safeStorage.setItem("nexa_admin_metrics", JSON.stringify(adminMetrics));
   }, [adminMetrics]);
 
-  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || { id: "", title: "", messages: [], mode: "general" };
+  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || ({ id: "", title: "", messages: [], mode: "general", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), isPinned: false } as ChatSession);
   const lastMessage = activeSession && Array.isArray(activeSession.messages) && activeSession.messages.length > 0
     ? activeSession.messages[activeSession.messages.length - 1]
     : undefined;

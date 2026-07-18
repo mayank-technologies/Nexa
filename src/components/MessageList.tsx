@@ -3,7 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Copy,
@@ -29,6 +31,14 @@ import {
   Trash2,
   Maximize2,
   Minimize2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  FileText,
+  BookOpen,
 } from "lucide-react";
 import { Message, GroundingSource, NexaEngineId } from "../types";
 import { EngineBadge } from "./EngineBadge";
@@ -75,6 +85,7 @@ export function MessageList({
   const [showMoreActionsId, setShowMoreActionsId] = useState<string | null>(null);
   const [feedbackToastId, setFeedbackToastId] = useState<string | null>(null);
   const [activeSpeechId, setActiveSpeechId] = useState<string | null>(null);
+  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
 
   // Auto-clear feedback toast after 3 seconds
   useEffect(() => {
@@ -316,10 +327,9 @@ export function MessageList({
                 {/* 5. Custom parsed text body (supports bolding headers bullet checks etc.) */}
                 {!msg.quiz && !msg.factCheck && !msg.researchReport && (
                   <div className="space-y-3 prose prose-sm max-w-none dark:prose-invert" id="nexa-rich-text-container">
-                    {parseCustomMarkdown(
-                      isGenerating && idx === messages.length - 1
-                        ? msg.content + "▍"
-                        : msg.content
+                    {parseCustomMarkdown(msg.content)}
+                    {isGenerating && idx === messages.length - 1 && (
+                      <span className="inline-block w-1.5 h-3.5 bg-slate-900 dark:bg-white ml-0.5 animate-cursor-blink align-middle rounded-xs" />
                     )}
                   </div>
                 )}
@@ -353,26 +363,164 @@ export function MessageList({
             )}
 
             {/* Citations/Grounding Sources bibliography if present */}
-            {isModel && msg.sources && msg.sources.length > 0 && (
-              <div className="border-t border-slate-150/10 dark:border-slate-805/30 pt-4 mt-4 text-left space-y-2 select-none">
-                <h6 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 cursor-pointer">
-                  <Globe2 className="w-3.5 h-3.5" /> Checked Citations Sources ({msg.sources.length})
-                </h6>
-                <div className="flex flex-wrap gap-2">
-                  {msg.sources.map((src, idx) => (
-                    <a
-                      key={idx}
-                      href={src.uri}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] text-indigo-500 hover:text-white bg-indigo-500/10 hover:bg-indigo-500 border border-indigo-500/15 rounded-xl transition-all font-medium"
+            {isModel && (
+              (() => {
+                const isSearchExpected = activeEngine === "research" || activeEngine === "factcheck" || (msg.content && (msg.content.toLowerCase().includes("search") || msg.content.toLowerCase().includes("grounding")));
+                const hasSources = msg.sources && msg.sources.length > 0;
+                
+                if (!hasSources && !isSearchExpected) return null;
+                
+                const isExpanded = expandedSources[msg.id] !== false; // default to expanded
+                
+                return (
+                  <div className="border-t border-slate-150/10 dark:border-slate-805/30 pt-4 mt-4 text-left select-none space-y-3">
+                    <div 
+                      className="flex items-center justify-between cursor-pointer group"
+                      onClick={() => setExpandedSources(prev => ({ ...prev, [msg.id]: !isExpanded }))}
                     >
-                      <span className="font-bold shrink-0">{idx + 1}.</span>
-                      <span className="truncate max-w-[160px]">{src.title}</span>
-                    </a>
-                  ))}
-                </div>
-              </div>
+                      <h6 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <Globe2 className="w-3.5 h-3.5 text-indigo-500 dark:text-indigo-400 group-hover:animate-pulse" /> 
+                        {hasSources ? `Sources used to answer (${msg.sources.length})` : 'Sources Check'}
+                      </h6>
+                      <button className="flex items-center gap-1 text-[10px] font-semibold text-indigo-500 hover:text-indigo-600 dark:text-indigo-400 dark:hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/15 px-2 py-0.5 rounded-md transition-all">
+                        {isExpanded ? (
+                          <>
+                            Hide details <ChevronUp className="w-3 h-3" />
+                          </>
+                        ) : (
+                          <>
+                            Show details <ChevronDown className="w-3 h-3" />
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {!hasSources && isSearchExpected ? (
+                      <div className="border border-amber-500/15 bg-amber-500/5 rounded-xl p-3 text-slate-600 dark:text-slate-300 text-xs flex items-start gap-2.5">
+                        <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-slate-700 dark:text-slate-200">No reliable public source was found for this information.</p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                            We searched official documentation, government, and educational databases but couldn't verify a definitive public reference.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* 1. COMPACT COLLAPSED VIEW (Row of cards) */}
+                        {!isExpanded ? (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            {msg.sources!.map((src, idx) => {
+                              const domain = getDomain(src.uri);
+                              const { website } = getWebsiteNameAndPublisher(src.uri, src.title);
+                              return (
+                                <a
+                                  key={idx}
+                                  href={src.uri}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="flex items-center gap-2 p-2 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-slate-800/40 dark:hover:bg-slate-800 border border-slate-150/10 dark:border-slate-805/30 transition-all text-left min-w-0"
+                                >
+                                  <div className="w-5 h-5 rounded-md bg-white dark:bg-slate-900 flex items-center justify-center border border-slate-100 dark:border-slate-800 shrink-0 text-[10px] font-bold text-indigo-500 dark:text-indigo-400">
+                                    {idx + 1}
+                                  </div>
+                                  <img 
+                                    src={`https://www.google.com/s2/favicons?sz=64&domain=${domain}`} 
+                                    alt="" 
+                                    className="w-3.5 h-3.5 rounded-sm shrink-0"
+                                    onError={(e) => {
+                                      (e.target as HTMLElement).style.display = 'none';
+                                    }}
+                                  />
+                                  <div className="min-w-0">
+                                    <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 truncate leading-none">
+                                      {website}
+                                    </p>
+                                    <p className="text-[9px] text-slate-400 truncate mt-0.5 leading-none">
+                                      {domain}
+                                    </p>
+                                  </div>
+                                  <ExternalLink className="w-2.5 h-2.5 text-slate-400 shrink-0 ml-auto" />
+                                </a>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          /* 2. EXPANDED DETAILED VIEW (Rich list cards) */
+                          <div className="space-y-2">
+                            {msg.sources!.map((src, idx) => {
+                              const domain = getDomain(src.uri);
+                              const { website, publisher } = getWebsiteNameAndPublisher(src.uri, src.title);
+                              const pubDate = extractDate(src.uri, src.title);
+                              return (
+                                <div 
+                                  key={idx}
+                                  className="p-3.5 rounded-2xl bg-slate-50 hover:bg-slate-100/80 dark:bg-slate-800/20 dark:hover:bg-slate-800/50 border border-slate-150/10 dark:border-slate-805/20 transition-all space-y-2"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-5 h-5 rounded-md bg-indigo-500/10 text-indigo-500 dark:bg-indigo-500/20 dark:text-indigo-400 flex items-center justify-center text-[10px] font-bold shrink-0">
+                                        {idx + 1}
+                                      </div>
+                                      <img 
+                                        src={`https://www.google.com/s2/favicons?sz=64&domain=${domain}`} 
+                                        alt="" 
+                                        className="w-4 h-4 rounded-sm shrink-0"
+                                        onError={(e) => {
+                                          (e.target as HTMLElement).style.display = 'none';
+                                        }}
+                                      />
+                                      <span className="text-xs font-bold text-slate-700 dark:text-slate-200">{website}</span>
+                                      <span className="text-[10px] text-slate-400 font-mono">({domain})</span>
+                                    </div>
+                                    <a
+                                      href={src.uri}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[10px] font-semibold text-slate-500 hover:text-indigo-500 dark:text-slate-400 dark:hover:text-indigo-400 border border-slate-150/10 dark:border-slate-805/10 transition-all shadow-sm shrink-0"
+                                    >
+                                      Visit site <ExternalLink className="w-2.5 h-2.5" />
+                                    </a>
+                                  </div>
+
+                                  <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-100 leading-snug">
+                                    {src.title}
+                                  </h4>
+
+                                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                                    {publisher && (
+                                      <span>
+                                        <span className="font-medium text-slate-500 dark:text-slate-400">Publisher:</span> {publisher}
+                                      </span>
+                                    )}
+                                    {pubDate && (
+                                      <span className="flex items-center gap-1">
+                                        <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+                                        <span className="font-medium text-slate-500 dark:text-slate-400">Published:</span> {pubDate}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="pt-1.5 border-t border-dashed border-slate-150/5 dark:border-slate-805/5 truncate">
+                                    <a 
+                                      href={src.uri}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-[10px] text-indigo-500 hover:underline font-mono"
+                                    >
+                                      {src.uri}
+                                    </a>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })()
             )}
 
             {/* Quick Actions Row */}
@@ -758,161 +906,343 @@ export function MessageList({
 function parseCustomMarkdown(content: string) {
   if (!content) return null;
 
-  const lines = content.split("\n");
-
-  let inCodeBlock = false;
-  let codeSnippet: string[] = [];
-  let codeLang = "";
-
-  return lines.map((line, idx) => {
-    const trimmedLine = line.trim();
-
-    // 1. Code Block boundary check
-    if (trimmedLine.startsWith("```")) {
-      if (inCodeBlock) {
-        // Close block
-        inCodeBlock = false;
-        const completeCode = codeSnippet.join("\n");
-        codeSnippet = [];
-        return (
-          <div key={idx} className="my-4 bg-slate-900 dark:bg-black text-slate-100 rounded-2xl p-5 border border-slate-800 shadow-lg font-mono text-[11px] overflow-x-auto text-left relative">
-            <div className="flex justify-between items-center text-[9px] font-extrabold text-slate-500 uppercase tracking-widest border-b border-slate-805/50 pb-2 mb-3 select-none leading-none">
-              <span>{codeLang || "code segment"}</span>
-              <button
-                onClick={() => navigator.clipboard.writeText(completeCode)}
-                className="hover:text-white font-semibold transition-colors"
-              >
-                Copy Code
-              </button>
-            </div>
-            <pre className="p-0 m-0 leading-relaxed font-mono select-text">{completeCode}</pre>
-          </div>
-        );
-      } else {
-        // Start block
-        inCodeBlock = true;
-        codeLang = trimmedLine.replace("```", "").trim();
-        return null;
-      }
-    }
-
-    if (inCodeBlock) {
-      codeSnippet.push(line);
-      return null;
-    }
-
-    // 2. Headings
-    if (trimmedLine.startsWith("###")) {
-      return (
-        <h4 key={idx} className="text-sm font-extrabold text-[#14213D] dark:text-white mt-4 mb-2 first:mt-0 font-sans tracking-tight">
-          {trimmedLine.replace("###", "").trim()}
-        </h4>
-      );
-    }
-    if (trimmedLine.startsWith("##")) {
-      return (
-        <h3 key={idx} className="text-base font-black text-[#14213D] dark:text-white mt-5 mb-2 first:mt-0 font-sans tracking-tight border-b border-slate-100 dark:border-slate-800 pb-1">
-          {trimmedLine.replace("##", "").trim()}
-        </h3>
-      );
-    }
-    if (trimmedLine.startsWith("#")) {
-      return (
-        <h2 key={idx} className="text-lg font-black text-[#14213D] dark:text-white mt-6 mb-3 first:mt-0 font-sans tracking-tight">
-          {trimmedLine.replace("#", "").trim()}
-        </h2>
-      );
-    }
-
-    // 3. Bullet list items
-    if (trimmedLine.startsWith("*") || trimmedLine.startsWith("-")) {
-      const bulletContent = trimmedLine.substring(1).trim();
-      return (
-        <div key={idx} className="flex items-start gap-2.5 my-1.5 pl-2 leading-relaxed">
-          <div className="w-1.5 h-1.5 rounded-full bg-[#C96A3D] mt-2 shrink-0 select-none" />
-          <p className="text-xs text-slate-700 dark:text-slate-200 mt-0 flex-1 font-normal select-text">
-            {parseInlineStyles(bulletContent)}
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        table: ({ children }) => <SortableTable>{children}</SortableTable>,
+        h1: ({ children }) => (
+          <h2 className="text-lg font-black text-[#14213D] dark:text-white mt-6 mb-3 first:mt-0 font-sans tracking-tight">
+            {children}
+          </h2>
+        ),
+        h2: ({ children }) => (
+          <h3 className="text-base font-black text-[#14213D] dark:text-white mt-5 mb-2 first:mt-0 font-sans tracking-tight border-b border-slate-150/45 dark:border-slate-800 pb-1">
+            {children}
+          </h3>
+        ),
+        h3: ({ children }) => (
+          <h4 className="text-sm font-extrabold text-[#14213D] dark:text-white mt-4 mb-2 first:mt-0 font-sans tracking-tight">
+            {children}
+          </h4>
+        ),
+        h4: ({ children }) => (
+          <h5 className="text-xs font-bold text-[#14213D] dark:text-white mt-3 mb-1 first:mt-0 font-sans tracking-tight">
+            {children}
+          </h5>
+        ),
+        ul: ({ children }) => (
+          <ul className="list-disc pl-5 my-2.5 space-y-1.5 text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+            {children}
+          </ul>
+        ),
+        ol: ({ children }) => (
+          <ol className="list-decimal pl-5 my-2.5 space-y-1.5 text-xs text-slate-700 dark:text-slate-200 leading-relaxed">
+            {children}
+          </ol>
+        ),
+        li: ({ children, ...props }) => (
+          <li {...props} className="marker:text-[#C96A3D]">
+            {children}
+          </li>
+        ),
+        input: ({ ...props }) => {
+          if (props.type === "checkbox") {
+            return (
+              <input
+                {...props}
+                className="rounded border-slate-300 dark:border-slate-700 text-[#C96A3D] focus:ring-[#C96A3D] mr-1.5 h-3.5 w-3.5 accent-[#C96A3D]"
+              />
+            );
+          }
+          return <input {...props} />;
+        },
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-4 border-[#C96A3D] pl-4 py-1.5 my-3 bg-slate-50 dark:bg-slate-900/40 text-slate-650 dark:text-slate-350 rounded-r-lg italic">
+            {children}
+          </blockquote>
+        ),
+        strong: ({ children }) => (
+          <strong className="font-extrabold text-[#14213D] dark:text-white">
+            {children}
+          </strong>
+        ),
+        em: ({ children }) => (
+          <em className="italic text-slate-800 dark:text-slate-100">
+            {children}
+          </em>
+        ),
+        p: ({ children }) => (
+          <p className="text-xs text-slate-705 dark:text-slate-200 leading-relaxed font-normal my-1.5 break-words">
+            {children}
           </p>
-        </div>
-      );
-    }
+        ),
+        code({ className, children, ...props }) {
+          const match = /language-(\w+)/.exec(className || "");
+          const codeVal = String(children).replace(/\n$/, "");
+          const isInline = !className;
 
-    // 4. Numbered list items
-    const numRegex = /^(\d+)\.\s+(.*)$/;
-    if (numRegex.test(trimmedLine)) {
-      const match = trimmedLine.match(numRegex);
-      if (match) {
-        const num = match[1];
-        const text = match[2];
-        return (
-          <div key={idx} className="flex items-start gap-2.5 my-1.5 pl-2 leading-relaxed">
-            <span className="font-black text-[#C96A3D] font-mono shrink-0 select-none">{num}.</span>
-            <p className="text-xs text-slate-700 dark:text-slate-200 mt-0 flex-1 font-normal select-text">
-              {parseInlineStyles(text)}
-            </p>
-          </div>
-        );
-      }
-    }
+          if (!isInline && (match || codeVal.includes("\n"))) {
+            return (
+              <CodeBlockContainer code={codeVal} lang={match ? match[1] : ""} />
+            );
+          }
 
-    // 5. Empty spacer lines
-    if (!trimmedLine) {
-      return <div key={idx} className="h-2 select-none" />;
-    }
-
-    // 6. Regular paragraphs
-    return (
-      <p key={idx} className="text-xs text-slate-705 dark:text-slate-200 leading-relaxed font-normal select-text">
-        {parseInlineStyles(line)}
-      </p>
-    );
-  });
+          return (
+            <code
+              className="bg-slate-100 dark:bg-slate-850 text-[#C96A3D] dark:text-[#C96A3D] font-mono text-[10px] px-1.5 py-0.5 rounded-md font-semibold select-text"
+              {...props}
+            >
+              {children}
+            </code>
+          );
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 }
 
-// Inline parser handling strong bold structures **text** and inline variable backticks `var`
-function parseInlineStyles(text: string) {
-  if (!text) return "";
+// Separate component for copyable code blocks that manages copy state locally
+function CodeBlockContainer({ code, lang }: { code: string; lang: string; key?: string }) {
+  const [copied, setCopied] = useState(false);
 
-  // Tokenize by inline markers
-  // Supports dynamic splits easily
-  const strongRegex = /\*\*(.*?)\*\*/g;
-  const backtickRegex = /`(.*?)`/g;
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
-  let parts: Array<{ type: "text" | "bold" | "code"; value: string }> = [];
-  
-  // Minimal recursive inline chunking
-  let currentStr = text;
-  
-  // We can do a simpler rendering by converting HTML/React elements directly
-  // However, simple split mapping is completely robust and type safe for code and strong bold blocks
-  const segments = text.split(/(\*\*.*?\*\*|`.*?`|▍)/g);
-
-  return segments.map((seg, idx) => {
-    if (seg === "▍") {
-      return (
-        <span
-          key={idx}
-          className="inline-block w-1.5 h-3.5 bg-black dark:bg-white ml-0.5 animate-cursor-blink align-middle rounded-xs"
-        />
-      );
-    }
-    if (seg.startsWith("**") && seg.endsWith("**")) {
-      return (
-        <strong key={idx} className="font-extrabold text-[#14213D] dark:text-white">
-          {seg.replace(/\*\*/g, "")}
-        </strong>
-      );
-    }
-    if (seg.startsWith("`") && seg.endsWith("`")) {
-      return (
-        <code
-          key={idx}
-          className="bg-slate-100 dark:bg-slate-800 text-[#C96A3D] dark:text-[#C96A3D] font-mono text-[10px] px-1.5 py-0.5 rounded-md font-semibold select-text"
+  return (
+    <div className="my-4 bg-slate-900 dark:bg-[#0c0f16] text-slate-100 rounded-2xl border border-slate-800 shadow-md font-mono text-[11px] overflow-hidden">
+      {/* Code Header Bar with language identifier and copy button */}
+      <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 bg-slate-950/70 px-4 py-2.5 select-none leading-none border-b border-slate-850">
+        <span className="uppercase tracking-wider text-slate-500 font-mono">{lang || "code"}</span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1.5 hover:text-white transition-all cursor-pointer font-bold text-[10px]"
+          type="button"
         >
-          {seg.replace(/`/g, "")}
-        </code>
-      );
+          {copied ? (
+            <>
+              <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span className="text-emerald-500">Copied!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5 shrink-0" />
+              <span>Copy Code</span>
+            </>
+          )}
+        </button>
+      </div>
+      {/* Code Body with Horizontal Scrollbar & No Wrapping */}
+      <pre className="p-4.5 m-0 overflow-x-auto whitespace-pre leading-relaxed select-text font-mono text-[11px] scrollbar-thin scrollbar-thumb-slate-800">
+        {code}
+      </pre>
+    </div>
+  );
+}
+
+// Helper to recursively extract text from React nodes for sorting comparisons
+function getNodeText(node: any): string {
+  if (!node) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(getNodeText).join("");
+  if (node.props && node.props.children) return getNodeText(node.props.children);
+  return "";
+}
+
+// A feature-rich sorting table component that intercepts Markdown elements
+function SortableTable({ children }: { children: React.ReactNode }) {
+  const [sortConfig, setSortConfig] = useState<{ key: number; direction: "asc" | "desc" } | null>(null);
+
+  const childrenElements = React.Children.toArray(children).filter(React.isValidElement);
+
+  const thead: any = childrenElements.find(
+    (c: any) => typeof c.type === "string" && c.type.toLowerCase() === "thead"
+  );
+  const tbody: any = childrenElements.find(
+    (c: any) => typeof c.type === "string" && c.type.toLowerCase() === "tbody"
+  );
+
+  if (!thead || !tbody) {
+    return (
+      <div className="markdown-table-wrapper scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+        <table className="markdown-table">{children}</table>
+      </div>
+    );
+  }
+
+  const theadRows = React.Children.toArray(thead.props.children).filter(React.isValidElement);
+  const mainHeaderRow: any = theadRows[0];
+  if (!mainHeaderRow) {
+    return (
+      <div className="markdown-table-wrapper scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+        <table className="markdown-table">{children}</table>
+      </div>
+    );
+  }
+
+  const headerCells = React.Children.toArray(mainHeaderRow.props.children).filter(React.isValidElement);
+  const bodyRows = React.Children.toArray(tbody.props.children).filter(React.isValidElement);
+
+  // Sort rows based on active sort column and direction
+  const sortedRows = [...bodyRows];
+  if (sortConfig !== null) {
+    sortedRows.sort((a: any, b: any) => {
+      const aCells = React.Children.toArray(a.props.children).filter(React.isValidElement);
+      const bCells = React.Children.toArray(b.props.children).filter(React.isValidElement);
+
+      const aCell = aCells[sortConfig.key];
+      const bCell = bCells[sortConfig.key];
+
+      const aText = getNodeText(aCell).toLowerCase().trim();
+      const bText = getNodeText(bCell).toLowerCase().trim();
+
+      // Check for numeric sorting
+      const aNum = parseFloat(aText.replace(/[^\d.-]/g, ""));
+      const bNum = parseFloat(bText.replace(/[^\d.-]/g, ""));
+
+      if (!isNaN(aNum) && !isNaN(bNum)) {
+        return sortConfig.direction === "asc" ? aNum - bNum : bNum - aNum;
+      }
+
+      return sortConfig.direction === "asc"
+        ? aText.localeCompare(bText, undefined, { numeric: true, sensitivity: "base" })
+        : bText.localeCompare(aText, undefined, { numeric: true, sensitivity: "base" });
+    });
+  }
+
+  const handleSort = (index: number) => {
+    let direction: "asc" | "desc" = "asc";
+    if (sortConfig && sortConfig.key === index && sortConfig.direction === "asc") {
+      direction = "desc";
     }
-    return seg;
-  });
+    setSortConfig({ key: index, direction });
+  };
+
+  // Clone standard table header cells to make them clickable and render sort icons
+  const renderedHeaderRow = React.cloneElement(mainHeaderRow, {},
+    headerCells.map((th: any, idx: number) => {
+      const isSorted = sortConfig?.key === idx;
+      const sortDir = sortConfig?.direction;
+      return React.cloneElement(th, {
+        key: idx,
+        onClick: () => handleSort(idx),
+        className: `${th.props.className || ""} cursor-pointer select-none group hover:bg-slate-100/70 dark:hover:bg-slate-900/60 transition-colors`,
+        children: (
+          <div className="flex items-center justify-between gap-1.5 py-1">
+            <span className="flex-1">{th.props.children}</span>
+            <span className="shrink-0 text-slate-400 dark:text-slate-500 group-hover:text-[#C96A3D] dark:group-hover:text-[#C96A3D] transition-colors">
+              {isSorted ? (
+                sortDir === "asc" ? (
+                  <ArrowUp className="w-3.5 h-3.5 text-[#C96A3D] inline" />
+                ) : (
+                  <ArrowDown className="w-3.5 h-3.5 text-[#C96A3D] inline" />
+                )
+              ) : (
+                <ArrowUpDown className="w-3.5 h-3.5 opacity-30 group-hover:opacity-100 transition-opacity inline" />
+              )}
+            </span>
+          </div>
+        )
+      });
+    })
+  );
+
+  return (
+    <div className="markdown-table-wrapper scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
+      <table className="markdown-table">
+        <thead>
+          {theadRows.map((row: any, idx: number) =>
+            idx === 0 ? renderedHeaderRow : row
+          )}
+        </thead>
+        <tbody>
+          {sortedRows}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ----------------------------------------------------
+// HELPER FUNCTIONS FOR UNIVERSAL LINK & SOURCES PARSING
+// ----------------------------------------------------
+function getDomain(urlStr: string): string {
+  try {
+    const url = new URL(urlStr);
+    return url.hostname.replace("www.", "");
+  } catch (e) {
+    return "";
+  }
+}
+
+function getWebsiteNameAndPublisher(urlStr: string, title?: string): { website: string; publisher: string } {
+  try {
+    const url = new URL(urlStr);
+    const domain = url.hostname.replace("www.", "").toLowerCase();
+    
+    // Mapping well-known domains to Website and Publisher
+    if (domain.includes("wikipedia.org")) return { website: "Wikipedia", publisher: "Wikimedia Foundation" };
+    if (domain.includes("github.com")) return { website: "GitHub", publisher: "GitHub, Inc." };
+    if (domain.includes("learn.microsoft.com")) return { website: "Microsoft Learn", publisher: "Microsoft" };
+    if (domain.includes("developer.mozilla.org") || domain.includes("mdn")) return { website: "MDN Web Docs", publisher: "Mozilla" };
+    if (domain.includes("python.org")) return { website: "Python Docs", publisher: "Python Software Foundation" };
+    if (domain.includes("react.dev") || domain.includes("reactjs.org")) return { website: "React Docs", publisher: "Meta Open Source" };
+    
+    if (domain.includes("openai.com")) return { website: "OpenAI", publisher: "OpenAI" };
+    if (domain.includes("google.com")) return { website: "Google AI", publisher: "Google" };
+    
+    if (domain.includes("who.int")) return { website: "WHO", publisher: "World Health Organization" };
+    if (domain.includes("nih.gov")) return { website: "NIH", publisher: "National Institutes of Health" };
+    if (domain.includes("nhs.uk")) return { website: "NHS", publisher: "National Health Service" };
+    if (domain.includes("cdc.gov")) return { website: "CDC", publisher: "Centers for Disease Control and Prevention" };
+    
+    // Fallbacks
+    const parts = domain.split(".");
+    let defaultName = parts[0];
+    if (defaultName.length <= 4 && parts[1]) {
+      defaultName = parts[1];
+    }
+    const capitalized = defaultName.charAt(0).toUpperCase() + defaultName.slice(1);
+    return { website: capitalized, publisher: capitalized };
+  } catch (e) {
+    return { website: "Web Source", publisher: "Web Publisher" };
+  }
+}
+
+function extractDate(urlStr: string, title?: string): string | undefined {
+  try {
+    const url = new URL(urlStr);
+    const path = url.pathname;
+    
+    // Match /2025/07/15/ or /2025-07-15 or similar
+    const dateMatch = path.match(/\/(\d{4})[/-](\d{2})[/-](\d{2})/);
+    if (dateMatch) {
+      return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`;
+    }
+    const yearMonthMatch = path.match(/\/(\d{4})[/-](\d{2})/);
+    if (yearMonthMatch) {
+      return `${yearMonthMatch[1]}-${yearMonthMatch[2]}`;
+    }
+    const yearMatch = path.match(/\/(\d{4})\//);
+    if (yearMatch) {
+      const year = parseInt(yearMatch[1], 10);
+      if (year >= 1990 && year <= 2027) {
+        return `${year}`;
+      }
+    }
+  } catch (e) {}
+
+  if (title) {
+    const titleMatch = title.match(/\b(19\d{2}|20[0-2]\d)\b/);
+    if (titleMatch) {
+      return titleMatch[1];
+    }
+  }
+
+  return undefined;
 }

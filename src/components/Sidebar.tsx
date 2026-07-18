@@ -560,16 +560,29 @@ export function Sidebar({
               </p>
             </div>
           </div>
-          <button
-            onClick={() => {
-              onOpenAuth();
-              onCloseMobile?.();
-            }}
-            className="flex items-center gap-1.5 py-2 px-3 bg-[#14213D] dark:bg-white hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] text-white dark:text-[#14213D] dark:hover:text-white text-[11px] font-bold rounded-xl shadow-3xs cursor-pointer transition-all active:scale-95"
-          >
-            <LogIn className="w-3.5 h-3.5 shrink-0" />
-            <span>Sign In</span>
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => {
+                onOpenSettings?.();
+                onCloseMobile?.();
+              }}
+              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
+              title="Open Settings"
+              id="sidebar-footer-settings-btn-guest"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => {
+                onOpenAuth();
+                onCloseMobile?.();
+              }}
+              className="flex items-center gap-1.5 py-2 px-3 bg-[#14213D] dark:bg-white hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] text-white dark:text-[#14213D] dark:hover:text-white text-[11px] font-bold rounded-xl shadow-3xs cursor-pointer transition-all active:scale-95"
+            >
+              <LogIn className="w-3.5 h-3.5 shrink-0" />
+              <span>Sign In</span>
+            </button>
+          </div>
         </div>
       ) : (
         /* Logged-In User Profile bottom footer */

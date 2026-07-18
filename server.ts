@@ -135,6 +135,260 @@ function routeTask(
   return "core";
 }
 
+// Universal Link Analyzer Helper to parse and scrape metadata/content from public URLs
+async function fetchUrlMetadataAndContent(url: string): Promise<{
+  url: string;
+  type: string;
+  title?: string;
+  description?: string;
+  bodyText?: string;
+  isPrivateOrError?: boolean;
+  errorMessage?: string;
+  pdfData?: { mimeType: string; data: string };
+  gitHubData?: any;
+}> {
+  console.info(`[Nexa Link Analyzer] Analyzing URL: ${url}`);
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+    const pathname = urlObj.pathname;
+
+    // 1. Google Docs, Sheets, Slides
+    if (hostname.includes("docs.google.com")) {
+      if (pathname.includes("/document/d/")) {
+        const docIdMatch = pathname.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
+        if (docIdMatch) {
+          const docId = docIdMatch[1];
+          const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+          const res = await fetch(exportUrl, { signal: AbortSignal.timeout(4000) });
+          if (res.ok) {
+            const text = await res.text();
+            return {
+              url,
+              type: "google-doc",
+              title: "Google Document",
+              bodyText: text.substring(0, 15000),
+            };
+          }
+        }
+      } else if (pathname.includes("/spreadsheets/d/")) {
+        const sheetIdMatch = pathname.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+        if (sheetIdMatch) {
+          const sheetId = sheetIdMatch[1];
+          const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+          const res = await fetch(exportUrl, { signal: AbortSignal.timeout(4000) });
+          if (res.ok) {
+            const csv = await res.text();
+            return {
+              url,
+              type: "google-sheet",
+              title: "Google Sheet",
+              bodyText: csv.substring(0, 15000),
+            };
+          }
+        }
+      } else if (pathname.includes("/presentation/d/")) {
+        const slideIdMatch = pathname.match(/\/presentation\/d\/([a-zA-Z0-9-_]+)/);
+        if (slideIdMatch) {
+          const slideId = slideIdMatch[1];
+          const exportUrl = `https://docs.google.com/presentation/d/${slideId}/export/pdf`;
+          const res = await fetch(exportUrl, { signal: AbortSignal.timeout(6000) });
+          if (res.ok) {
+            const arrayBuffer = await res.arrayBuffer();
+            const base64 = Buffer.from(arrayBuffer).toString("base64");
+            return {
+              url,
+              type: "google-slide",
+              title: "Google Slide (PDF Export)",
+              pdfData: { mimeType: "application/pdf", data: base64 }
+            };
+          }
+        }
+      }
+    }
+
+    // 2. GitHub Repositories
+    if (hostname === "github.com" || hostname === "www.github.com") {
+      const parts = pathname.split("/").filter(Boolean);
+      if (parts.length >= 2) {
+        const owner = parts[0];
+        const repo = parts[1];
+        const gitHubApiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+        let repoData: any = null;
+        let readmeText = "";
+
+        try {
+          const apiRes = await fetch(gitHubApiUrl, {
+            headers: { "User-Agent": "Nexa-Link-Analyzer" },
+            signal: AbortSignal.timeout(3000),
+          });
+          if (apiRes.ok) {
+            repoData = await apiRes.json();
+          }
+        } catch (e) {
+          console.error("[Nexa Link Analyzer] GitHub API error:", e);
+        }
+
+        try {
+          const readmeRes = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/README.md`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          if (readmeRes.ok) {
+            readmeText = await readmeRes.text();
+          } else {
+            const readmeResMaster = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/master/README.md`, {
+              signal: AbortSignal.timeout(3000)
+            });
+            if (readmeResMaster.ok) {
+              readmeText = await readmeResMaster.text();
+            }
+          }
+        } catch (e) {
+          console.error("[Nexa Link Analyzer] GitHub README error:", e);
+        }
+
+        return {
+          url,
+          type: "github-repo",
+          title: repoData ? repoData.full_name : `${owner}/${repo}`,
+          description: repoData ? repoData.description : "GitHub repository",
+          gitHubData: repoData,
+          bodyText: readmeText ? readmeText.substring(0, 15000) : "No README available or fetched."
+        };
+      }
+    }
+
+    // 3. YouTube videos
+    if (hostname.includes("youtube.com") || hostname.includes("youtu.be")) {
+      let videoId = "";
+      if (hostname.includes("youtu.be")) {
+        videoId = pathname.split("/").filter(Boolean)[0] || "";
+      } else {
+        const params = urlObj.searchParams;
+        videoId = params.get("v") || "";
+      }
+      return {
+        url,
+        type: "youtube-video",
+        title: `YouTube Video (ID: ${videoId})`,
+        bodyText: `This is a YouTube video with ID ${videoId}. Please search the web or grounding channels to get details, reviews, summary, or transcripts for this video if possible.`,
+      };
+    }
+
+    // 4. PDF Files
+    if (pathname.endsWith(".pdf") || url.toLowerCase().includes(".pdf")) {
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        if (contentType.includes("pdf") || pathname.endsWith(".pdf")) {
+          const contentLength = parseInt(res.headers.get("content-length") || "0", 10);
+          if (contentLength > 12 * 1024 * 1024) {
+            return {
+              url,
+              type: "pdf-file-large",
+              title: pathname.split("/").pop() || "PDF Document",
+              isPrivateOrError: true,
+              errorMessage: "PDF file is too large (>12MB) for direct server processing."
+            };
+          }
+          const arrayBuffer = await res.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString("base64");
+          return {
+            url,
+            type: "pdf-file",
+            title: pathname.split("/").pop() || "PDF Document",
+            pdfData: { mimeType: "application/pdf", data: base64 }
+          };
+        }
+      }
+    }
+
+    // 5. Standard webpages, blogs, news, Amazon/Flipkart/Spotify, etc.
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+      },
+      signal: AbortSignal.timeout(4500)
+    });
+
+    if (!res.ok) {
+      return {
+        url,
+        type: "webpage-inaccessible",
+        isPrivateOrError: true,
+        errorMessage: `HTTP response status ${res.status}`,
+      };
+    }
+
+    const contentType = res.headers.get("content-type") || "";
+    if (contentType.includes("application/pdf")) {
+      const arrayBuffer = await res.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      return {
+        url,
+        type: "pdf-file",
+        title: "PDF Document",
+        pdfData: { mimeType: "application/pdf", data: base64 }
+      };
+    }
+
+    if (contentType.includes("html") || contentType.includes("xml") || contentType.includes("text")) {
+      const html = await res.text();
+      let pageTitle = "";
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      if (titleMatch) {
+        pageTitle = titleMatch[1].trim();
+      }
+
+      let pageDesc = "";
+      const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([\s\S]*?)["']/i) || 
+                        html.match(/<meta[^>]*content=["']([\s\S]*?)["'][^>]*name=["']description["']/i) ||
+                        html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/i);
+      if (descMatch) {
+        pageDesc = descMatch[1].trim();
+      }
+
+      let bodyHtml = "";
+      const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      if (bodyMatch) {
+        bodyHtml = bodyMatch[1];
+      } else {
+        bodyHtml = html;
+      }
+
+      bodyHtml = bodyHtml.replace(/<script[^>]*>([\s\S]*?)<\/script>/gi, "");
+      bodyHtml = bodyHtml.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, "");
+      let textContent = bodyHtml.replace(/<[^>]+>/g, " ");
+      textContent = textContent.replace(/\s+/g, " ").trim();
+
+      return {
+        url,
+        type: hostname.includes("amazon") || hostname.includes("flipkart") ? "e-commerce" : "standard-webpage",
+        title: pageTitle || hostname,
+        description: pageDesc,
+        bodyText: textContent.substring(0, 10000),
+      };
+    }
+
+    return {
+      url,
+      type: "static-file",
+      title: pathname.split("/").pop() || hostname,
+      bodyText: `Static asset of type: ${contentType}`
+    };
+
+  } catch (err: any) {
+    console.error(`[Nexa Link Analyzer] Fetch exception for ${url}:`, err);
+    return {
+      url,
+      type: "webpage-error",
+      isPrivateOrError: true,
+      errorMessage: err.message || "Timeout or network unreachable"
+    };
+  }
+}
+
 
 async function startServer() {
   const app = express();
@@ -848,9 +1102,56 @@ async function startServer() {
       }
 
       const activeMessage = messages[messages.length - 1];
-      const userPrompt = activeMessage.content;
+      const userPrompt = activeMessage.content || "";
       const attachment = activeMessage.attachment;
       const hasImage = !!(attachment && attachment.type === "image");
+
+      // Smart URL detection & Link analysis
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const detectedUrls = Array.from(new Set(userPrompt.match(urlRegex) || [])) as string[];
+      const hasUrls = detectedUrls.length > 0;
+
+      let linkAnalyzerContext = "";
+      let pdfParts: any[] = [];
+
+      if (hasUrls) {
+        console.info(`[Nexa Core Server] URL detected in user prompt. Starting Universal Link Analysis...`);
+        const analysisResults = await Promise.all(
+          detectedUrls.map(url => fetchUrlMetadataAndContent(url))
+        );
+
+        const nonPdfResults = analysisResults.filter(r => !r.pdfData);
+        if (nonPdfResults.length > 0) {
+          linkAnalyzerContext = `\n\n[NEXA UNIVERSAL LINK ANALYZER - RAW CONTENT & METADATA FEED]
+The user is requesting an analysis of one or more URLs. Below is the parsed, server-side content & metadata for the requested link(s). Use these raw details, combined with Google Search grounding, to fulfill the request.
+
+${nonPdfResults.map((res, i) => `
+---
+LINK #${i + 1}: ${res.url}
+TYPE: ${res.type}
+TITLE: ${res.title || "Unknown Title"}
+DESCRIPTION: ${res.description || "No description available."}
+${res.gitHubData ? `GITHUB DETAILS:
+Stars: ${res.gitHubData.stargazers_count} | Forks: ${res.gitHubData.forks_count} | Open Issues: ${res.gitHubData.open_issues_count}
+Languages: ${res.gitHubData.language || "N/A"}
+License: ${res.gitHubData.license?.name || "None"}` : ""}
+${res.bodyText ? `BODY TEXT CONTENT (Truncated):
+${res.bodyText.substring(0, 8000)}` : ""}
+${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMessage}). Rely strictly on Google Search Grounding to research and verify details of this URL.` : ""}
+---`).join("\n")}
+`;
+        }
+
+        const pdfResults = analysisResults.filter(r => !!r.pdfData);
+        pdfResults.forEach(r => {
+          pdfParts.push({
+            inlineData: {
+              mimeType: r.pdfData!.mimeType,
+              data: r.pdfData!.data
+            }
+          });
+        });
+      }
 
       // Smart Route classification
       const engineId = routeTask(userPrompt, mode, hasImage);
@@ -860,6 +1161,24 @@ async function startServer() {
 
       // Setup System Instructions and configs depending on engine and mode
       let systemInstruction = "You are Nexa Core - an intelligent, helpful, highly premium, trustworthy AI chatbot designed with ultimate professional craftsmanship. You express answers in beautiful markdown with rich structure. Do not output any loading bars, neon effects or system-internal trace lines. IMPORTANT: ONLY if the user explicitly asks about who created you, built you, made you, or who your founder is, should you respond simply and clearly that you were created by Mayank (or in appropriate dialect/language like 'मुझे मयंक ने बनाया है' or 'Mayank ne banaya hai'). NEVER volunteer this information or mention your creator unless directly and explicitly asked about it first. CRITICAL: Always respond/reply to the user in the EXACT same language, dialect, or conversational slang that the user used to write their message (e.g., if the user asks in Hindi, Hinglish, Haryanvi, Spanish, etc., you MUST reply in that exact same tongue and tone).";
+
+      if (hasUrls) {
+        systemInstruction += "\n\nUNIVERSAL LINK ANALYZER SYSTEM MODULE:\n" +
+          "You have been activated as the Nexa Universal Link Analyzer. For every link provided by the user, perform a comprehensive, intelligent, high-fidelity analysis. Do NOT use lazy placeholders. " +
+          "Provide the following structured sections (use emojis, headings, bullet points, and tables beautifully):\n" +
+          "1. 🌐 LINK OVERVIEW: Title, URL, Content Type, Domain Reputation.\n" +
+          "2. 📝 EXECUTIVE SUMMARY: A concise summary of the page/content.\n" +
+          "3. 🔍 DETAILED BREAKDOWN: In-depth, comprehensive explanation of the content.\n" +
+          "4. 💡 KEY POINTS & IMPORTANT FACTS: Extraction of key facts, tables, headings, and crucial data.\n" +
+          "5. ⚖️ PROS & CONS: Balanced evaluation (when applicable).\n" +
+          "6. 🛠️ TECHNICAL ANALYSIS (if applicable): For GitHub, identify programming languages, frameworks, and project structure. For code files, analyze logic.\n" +
+          "7. 🛡️ SECURITY & TRUST ASSESSMENT: Check for phishing, scams, suspicious domains, fake websites, or login walls. Analyze the domain/URL safety.\n" +
+          "8. 🚀 SEO & METADATA ANALYSIS: For websites, analyze SEO tags, performance hints, and indexability.\n" +
+          "9. 🔮 AI-GENERATED RECOMMENDATIONS & FINAL CONCLUSION: Actionable ideas, logical next steps, and wrap-up.\n" +
+          "\n" +
+          "If multiple links are provided, you MUST compare them together side-by-side using a clean Markdown table with headers, highlighting their main differences, purposes, and ratings.\n" +
+          "Answer any follow-up questions about these links with high accuracy using the preserved context.";
+      }
 
       if (personalizationContext) {
         systemInstruction += `\nRemember this user persona/instructions: ${personalizationContext}`;
@@ -876,9 +1195,34 @@ async function startServer() {
         systemInstruction += pastChatsSummary;
       }
 
-      // Configure tools - enable Google Search grounding for real-time mode, Deep Research, or Fact Checker
-      const useSearch = mode === "research" || mode === "factcheck" || userPrompt.toLowerCase().includes("search") || userPrompt.toLowerCase().includes("live") || userPrompt.toLowerCase().includes("news") || userPrompt.toLowerCase().includes("current");
+      // Configure tools - enable Google Search grounding for real-time mode, Deep Research, Fact Checker, or when URLs are present
+      const useSearch = mode === "research" || mode === "factcheck" || hasUrls || userPrompt.toLowerCase().includes("search") || userPrompt.toLowerCase().includes("live") || userPrompt.toLowerCase().includes("news") || userPrompt.toLowerCase().includes("current");
       const tools = useSearch ? [{ googleSearch: {} }] : undefined;
+
+      if (useSearch) {
+        systemInstruction += "\n\n🌐 CITED ANSWERS & GROUNDED WEB SEARCH MODULE:\n" +
+          "When answering, you must strictly base your responses on factual, reliable search results. You must adhere to the following directives:\n" +
+          "1. PRIORITIZE HIGH-TRUST SOURCES:\n" +
+          "   - Prioritize official documentation over personal blogs.\n" +
+          "   - Prioritize government (.gov), university (.edu), academic research papers, and official corporate websites.\n" +
+          "   - For programming, prioritize official documentations, GitHub repos, MDN, Microsoft Learn, Python Docs, React Docs, and other standard SDK guides.\n" +
+          "   - For medical topics, prioritize official institutions like WHO, NIH, NHS, CDC, and established medical organization sites.\n" +
+          "   - For finance topics, prioritize government treasuries, official central banks, and established financial regulatory bodies.\n" +
+          "   - For legal topics, prioritize official legislative portals and government judiciaries.\n" +
+          "2. NO FABRICATION:\n" +
+          "   - Never generate fake, guessed, or fabricated sources or URLs. Only cite links that are directly returned in the search results or provided in user inputs.\n" +
+          "   - If no reliable public source or information exists for this query in the search results, explicitly state: 'No reliable public source was found for this information.'\n" +
+          "3. IN-TEXT CITATIONS:\n" +
+          "   - Support your claims by adding clear numbered in-text citations like [1], [2], etc., corresponding to the reliable source indexes.\n" +
+          "4. END-OF-TEXT SOURCES SECTION:\n" +
+          "   - At the absolute end of your response text, append a clearly titled section: '### Sources' (or in the language used, e.g. '### स्रोत' for Hindi / Hinglish).\n" +
+          "   - List each cited source using its index number, Website Name, Article/Page Title, Clickable URL, Publisher (if available), and Publication date (if available) as detailed below:\n" +
+          "     Example:\n" +
+          "     1. OpenAI – GPT Documentation  \n" +
+          "        https://platform.openai.com/docs  \n" +
+          "        Publisher: OpenAI | Date: 2024\n" +
+          "     *(Make sure they are fully populated using authentic metadata. If any field like publisher or date is unavailable, omit that specific field rather than guessing)*.";
+      }
 
       // Construct request parts (handling potential image/document attachments safely)
       let contents: any[] = [];
@@ -932,8 +1276,21 @@ async function startServer() {
         }
       });
 
-      // Choose speed-optimized model: gemini-3.1-flash-lite resolves under 1 second for standard chats
-      const modelName = (mode === "research" || mode === "factcheck" || mode === "quiz")
+      // Inject server-side Link Analysis results if URLs are present in the active query
+      if (hasUrls && contents.length > 0) {
+        const lastContent = contents[contents.length - 1];
+        if (lastContent.role === "user") {
+          if (linkAnalyzerContext) {
+            lastContent.parts.push({ text: linkAnalyzerContext });
+          }
+          if (pdfParts.length > 0) {
+            lastContent.parts.push(...pdfParts);
+          }
+        }
+      }
+
+      // Choose speed-optimized model: gemini-3.5-flash handles link analysis and complex content better
+      const modelName = (mode === "research" || mode === "factcheck" || mode === "quiz" || hasUrls)
         ? "gemini-3.5-flash"
         : "gemini-3.1-flash-lite";
 
@@ -1150,7 +1507,16 @@ async function startServer() {
 
       // Call standard generateContent
       if (systemInstruction) {
-        systemInstruction += "\nAlways use suitable and warm emojis throughout your response to make it look highly expressive, welcoming, interactive, and beautifully designed. Place relevant emojis at key moments, headers, lists, and inside paragraphs where appropriate.";
+        // Appending response formatting rules as requested by user
+        systemInstruction += "\n\nRESPONSE FORMATTING DIRECTIVES:\n" +
+          "1. Agar user bole 'copy paste format me do', 'copyable format', 'code block me do', 'copy karne layak do', ya similar phrases, to response hamesha Markdown code block (```) ke andar hi do, bina kisi extra greeting ya explanations ke (ONLY the requested content should be inside the code block so the user can copy with one click).\n" +
+          "2. Agar user specifically bole 'sirf copy paste format', to extra explanations, introductory text, or concluding text bilkul mat do. Bilkul clean code block me content do.\n" +
+          "3. Bullet lists, numbered lists, headings, bold, italic, or blockquotes ke liye proper clean Markdown standards follow karo.\n" +
+          "4. Kisi bhi block of code, SQL queries, HTML, CSS, JSON, CSV, or prompts ko hamesha code blocks (```language ... ```) me render karo with proper syntax highlighting.\n" +
+          "5. Agar user table maange, to standard cleanly formatted and aligned Markdown tables ka use karo, dynamic column layouts use karo aur line-breaks break mat karo.\n" +
+          "6. Plain text use tabhi karo jab user explicitly plain text maange.";
+
+        systemInstruction += "\nAlways use suitable and warm emojis throughout your response (unless copying format or code block format is requested) to make it look highly expressive, welcoming, interactive, and beautifully designed. Place relevant emojis at key moments, headers, lists, and inside paragraphs where appropriate.";
         systemInstruction += "\nCRITICAL LANGUAGE DIRECTIVE: Always detect and respond in the EXACT language, dialect, or conversational slang that the user has used in their last message. If the user writes in English, reply in English. If the user writes in Hinglish (Hindi written in Latin script, e.g. 'nexa ab bhi hindi mai...', 'kaise ho', 'kya chalra hai', 'theek h'), you MUST write your entire response inside standard Hinglish (Latin alphabets) with similar colloquial slang. If they use pure Devnagari Hindi (हिन्दी), reply in pure Devnagari Hindi. Never auto-translate or respond in a different language/script combination than what the user used. Keep consistency with the user's chosen script and tongue.";
       }
 

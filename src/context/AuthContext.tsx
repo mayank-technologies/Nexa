@@ -207,7 +207,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (newlyUnlocked.length > 0 && onBadgeUnlocked) {
-        onBadgeUnlocked(newlyUnlocked[0]);
+        setTimeout(() => {
+          onBadgeUnlocked(newlyUnlocked[0]);
+        }, 0);
       }
 
       return {

@@ -88,7 +88,9 @@ export function MessageList({
 
   // Cancel active speech on list change or unmounting
   useEffect(() => {
+    console.log("[Nexa Debug] [MessageList Mount] MessageList component has mounted. Active messages count:", messages?.length, "activeEngine:", activeEngine);
     return () => {
+      console.log("[Nexa Debug] [MessageList Unmount] MessageList component has unmounted.");
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }

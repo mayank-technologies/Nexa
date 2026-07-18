@@ -30,7 +30,8 @@ import {
   ShieldCheck,
   CheckCircle,
   Clock,
-  UserCheck
+  UserCheck,
+  LogIn
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { UserProfile } from "../types";
@@ -42,9 +43,10 @@ interface PremiumModalProps {
   onClose: () => void;
   user: UserProfile;
   source: "header" | "sidebar" | "unknown";
+  onOpenAuth?: () => void;
 }
 
-export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProps) {
+export function PremiumModal({ isOpen, onClose, user, source, onOpenAuth }: PremiumModalProps) {
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [waitlistStatus, setWaitlistStatus] = useState<"idle" | "joined" | "already_registered" | "error" | "left_success">("idle");
@@ -564,6 +566,28 @@ export function PremiumModal({ isOpen, onClose, user, source }: PremiumModalProp
           {/* 5. WAITLIST SUBSCRIPTION FORM & SUCCESS ENGINE */}
           <div className="max-w-md mx-auto text-center bg-slate-50 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-800 p-6 sm:p-8 rounded-3xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-20 h-20 bg-amber-500/5 rounded-full blur-xl pointer-events-none" />
+
+            {user?.isGuest && (
+              <div className="absolute inset-0 bg-white/95 dark:bg-[#0f172a]/95 backdrop-blur-[2px] z-10 flex flex-col items-center justify-center p-6 text-center">
+                <span className="text-3xl mb-2 animate-bounce">✨</span>
+                <h4 className="text-sm font-extrabold text-slate-800 dark:text-white">Sign in to use this feature</h4>
+                <p className="text-xs text-slate-400 mt-1 mb-4 max-w-xs">
+                  Joining the Premium waitlist requires a registered account.
+                </p>
+                {onOpenAuth && (
+                  <button
+                    onClick={() => {
+                      onOpenAuth();
+                      onClose();
+                    }}
+                    className="flex items-center gap-1.5 py-2 px-4 bg-[#C96A3D] text-white text-xs font-bold rounded-xl shadow-sm hover:bg-[#b0582d] transition-all cursor-pointer active:scale-95"
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    <span>Sign In</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             <AnimatePresence mode="wait">
               {waitlistStatus === "joined" || waitlistStatus === "already_registered" ? (

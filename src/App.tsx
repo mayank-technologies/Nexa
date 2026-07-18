@@ -37,7 +37,9 @@ import {
   MoreVertical,
   ThumbsUp,
   AlertTriangle,
-  Square
+  Square,
+  Check,
+  Copy
 } from "lucide-react";
 import {
   ChatSession,
@@ -608,8 +610,21 @@ export default function App() {
 
   // Controls Chat thread inputs
   const [inputPrompt, setInputPrompt] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoadingState] = useState(false);
+  const [isGenerating, setIsGeneratingState] = useState(false);
+
+  const isLoadingRef = useRef(false);
+  const isGeneratingRef = useRef(false);
+
+  const setIsLoading = (val: boolean) => {
+    isLoadingRef.current = val;
+    setIsLoadingState(val);
+  };
+
+  const setIsGenerating = (val: boolean) => {
+    isGeneratingRef.current = val;
+    setIsGeneratingState(val);
+  };
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamIntervalRef = useRef<any>(null);
   const [attachment, setAttachment] = useState<any>(null);
@@ -618,6 +633,7 @@ export default function App() {
   const [quizTopic, setQuizTopic] = useState("");
   const [quizDifficulty, setQuizDifficulty] = useState<"easy" | "medium" | "hard">("medium");
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [isCopiedAll, setIsCopiedAll] = useState(false);
 
   // Admin Dashboard Monitoring States (Live Metrics)
   const [adminMetrics, setAdminMetrics] = useState<AdminMetrics>(() => {
@@ -680,6 +696,26 @@ export default function App() {
   const chatsUnsubscribeRef = useRef<(() => void) | null>(null);
   const messagesUnsubscribeRef = useRef<(() => void) | null>(null);
 
+  const activeSessionIdRef = useRef(activeSessionId);
+  const sessionsRef = useRef(sessions);
+
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+
+  useEffect(() => {
+    console.log("[Nexa Debug] [selectedConversationId Change] activeSessionId (selectedConversationId) changed from:", activeSessionIdRef.current || "empty", "to:", activeSessionId || "empty");
+    activeSessionIdRef.current = activeSessionId;
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    console.log("[Nexa Debug] [Navigation Event] View changed to:", currentView);
+  }, [currentView]);
+
+  useEffect(() => {
+    console.log("[Nexa Debug] [Navigation Event] Active mode changed to:", activeMode);
+  }, [activeMode]);
+
   const syncChatSummaryToSupabase = async (chat: ChatSession) => {
     if (user && !user.isGuest && user.uid) {
       try {
@@ -692,12 +728,12 @@ export default function App() {
     }
   };
 
-  const syncMessageToSupabase = async (chatId: string, message: Message) => {
+  const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
     if (user && !user.isGuest && user.uid) {
       try {
-        // Synchronize directly to Supabase
+        // Synchronize directly to Supabase (using imported syncMessageToSupabase function)
         await syncMessageToSupabase(chatId, message);
-        console.log("[Nexa Client] Synced message to Supabase:", message.id);
+        console.log("[Nexa Client] Synced message to Supabase via imported client helper:", message.id);
       } catch (e) {
         console.error("Failed to sync message to Supabase:", e);
       }
@@ -788,11 +824,24 @@ export default function App() {
       clearGuestCache();
 
       const loadChats = async () => {
+        if (isLoadingRef.current || isGeneratingRef.current) {
+          console.log("[Nexa Client] Skip loadChats during active stream (start).");
+          return;
+        }
         try {
           const summaries = await fetchChatsFromSupabase(user.email || "");
           
+          if (isLoadingRef.current || isGeneratingRef.current) {
+            console.log("[Nexa Client] Skip loadChats during active stream (post-fetch).");
+            return;
+          }
+
           if (summaries.length === 0) {
-            console.log("[Nexa Client] [LOG] Supabase chats is empty. Seeding default starter chat.");
+            if (sessionsRef.current.length > 0) {
+              console.log("[Nexa Client] summaries is empty, but local sessions exist. Skipping seeding default chat.");
+              return;
+            }
+            console.log("[Nexa Client] [LOG] Supabase chats is empty and no local sessions exist. Seeding default starter chat.");
             const defaultId = `session-${Date.now()}`;
             const defaultChat: ChatSession = {
               id: defaultId,
@@ -807,6 +856,8 @@ export default function App() {
               messages: [],
             };
             await syncChatToSupabase(defaultChat, user.email || "");
+            setSessions([defaultChat]);
+            setActiveSessionId(defaultId);
             return;
           }
 
@@ -820,15 +871,35 @@ export default function App() {
             return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
           });
 
-          setSessions(summaries);
+          setSessions((prevSessions) => {
+            if (isLoadingRef.current || isGeneratingRef.current) {
+              return prevSessions;
+            }
+            const merged = summaries.map((summary) => {
+              const existing = prevSessions.find((s) => s.id === summary.id);
+              return {
+                ...summary,
+                messages: existing && existing.messages.length > 0 ? existing.messages : summary.messages,
+              };
+            });
+
+            const localOnly = prevSessions.filter(
+              (s) => !summaries.some((sum) => sum.id === s.id)
+            );
+
+            return [...localOnly, ...merged];
+          });
 
           // Ensure activeSessionId is set to a valid session
           setActiveSessionId((currentId) => {
-            if (summaries.some((s) => s.id === currentId)) {
+            if (isLoadingRef.current || isGeneratingRef.current) {
+              return currentId;
+            }
+            if (summaries.some((s) => s.id === currentId) || (currentId && currentId.startsWith("session-"))) {
               return currentId;
             }
             const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${user.uid}`);
-            if (cachedActiveId && summaries.some((s) => s.id === cachedActiveId)) {
+            if (cachedActiveId && (summaries.some((s) => s.id === cachedActiveId) || cachedActiveId.startsWith("session-"))) {
               return cachedActiveId;
             }
             return summaries.length > 0 ? summaries[0].id : "";
@@ -926,8 +997,17 @@ export default function App() {
       console.log("[Nexa Client] Subscribing to Supabase messages for chat:", activeSessionId);
       
       const loadMessages = async () => {
+        if (isLoadingRef.current || isGeneratingRef.current) {
+          console.log("[Nexa Client] Skip loadMessages during active stream (start).");
+          return;
+        }
         try {
           const fetchedMessages = await fetchMessagesFromSupabase(activeSessionId);
+
+          if (isLoadingRef.current || isGeneratingRef.current) {
+            console.log("[Nexa Client] Skip loadMessages during active stream (post-fetch).");
+            return;
+          }
 
           // Chronological sorting of messages
           fetchedMessages.sort((a, b) => {
@@ -938,11 +1018,29 @@ export default function App() {
             return getNum(a.id) - getNum(b.id);
           });
 
-          setSessions((prevSessions) =>
-            prevSessions.map((s) => {
+          setSessions((prevSessions) => {
+            if (isLoadingRef.current || isGeneratingRef.current) {
+              console.log("[Nexa Client] Skip setSessions inside loadMessages during active stream.");
+              return prevSessions;
+            }
+            return prevSessions.map((s) => {
               if (s.id === activeSessionId) {
+                // Safeguard against overwriting local messages with an empty/stale list from Supabase
+                if (fetchedMessages.length < s.messages.length) {
+                  console.warn(
+                    `[Nexa Client] [loadMessages] Prevented overwriting messages for ${s.id}. ` +
+                    `Local messages count: ${s.messages.length}, Supabase fetched count: ${fetchedMessages.length}`
+                  );
+                  return s;
+                }
+
                 // Check if changes are genuine before triggering state update
                 if (JSON.stringify(s.messages) !== JSON.stringify(fetchedMessages)) {
+                  console.log(
+                    `[Nexa Client] [loadMessages] Updating messages for ${s.id} from Supabase. ` +
+                    `Local count: ${s.messages.length}, Supabase count: ${fetchedMessages.length}`
+                    + (fetchedMessages.length > 0 ? `, Last fetched role: ${fetchedMessages[fetchedMessages.length - 1].role}` : "")
+                  );
                   return {
                     ...s,
                     messages: fetchedMessages,
@@ -950,8 +1048,8 @@ export default function App() {
                 }
               }
               return s;
-            })
-          );
+            });
+          });
         } catch (error) {
           console.error("Messages fetch error:", error);
         }
@@ -1133,6 +1231,7 @@ export default function App() {
 
   // Chat Session management controls
   const handleNewSession = (mode: ChatSession["mode"] = "general") => {
+    console.log("[Nexa Debug] [createConversation] handleNewSession called with mode:", mode);
     const newId = `session-${Date.now()}`;
     const newChat: ChatSession = {
       id: newId,
@@ -1151,6 +1250,7 @@ export default function App() {
       messages: [],
       isPinned: false,
       mode: mode,
+      userEmail: user && !user.isGuest ? user.email || "" : undefined,
     };
 
     setSessions((prev) => [newChat, ...prev]);
@@ -1285,7 +1385,17 @@ export default function App() {
         console.log("[Nexa Client] Restored chat session in Supabase:", id);
         
         const activeSummaries = await fetchChatsFromSupabase(user.email || "");
-        setSessions(activeSummaries);
+        setSessions(() => {
+          return activeSummaries.map((summary) => {
+            if (summary.id === id && chatToRestore) {
+              return {
+                ...summary,
+                messages: chatToRestore.messages || [],
+              };
+            }
+            return summary;
+          });
+        });
         
         setActiveSessionId(id);
         setCurrentView("chat");
@@ -1665,7 +1775,7 @@ export default function App() {
           triggerVoiceIfNeeded(finalMsg);
 
           // Sync complete message to Supabase
-          syncMessageToSupabase(activeSessionId, finalMsg);
+          syncMessageSummaryToSupabase(activeSessionId, finalMsg);
           syncChatSummaryToSupabase({
             ...activeSession,
             updatedAt: new Date().toISOString()
@@ -1708,7 +1818,7 @@ export default function App() {
               engineId: "core",
             };
             // Sync error message and chat summary to Supabase
-            syncMessageToSupabase(activeSessionId, updatedMsgs[idx]);
+            syncMessageSummaryToSupabase(activeSessionId, updatedMsgs[idx]);
             syncChatSummaryToSupabase({
               ...s,
               updatedAt: new Date().toISOString()
@@ -1724,6 +1834,29 @@ export default function App() {
       );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Copy full conversation thread to clipboard
+  const handleCopyAll = () => {
+    if (!activeSession || !activeSession.messages || activeSession.messages.length === 0) return;
+
+    const formattedThread = activeSession.messages
+      .map((msg) => {
+        const sender = msg.role === "user" ? (user?.fullName || "User Account") : "Nexa Intelligence";
+        return `[${sender}] (${msg.timestamp}):\n${msg.content}`;
+      })
+      .join("\n\n----------------------------------------\n\n");
+
+    const fullContent = `Conversation Title: ${activeSession.title}\nMode: ${activeSession.mode}\n========================================\n\n${formattedThread}\n\n========================================\nGenerated via Nexa Intelligence`;
+
+    try {
+      navigator.clipboard.writeText(fullContent);
+      setIsCopiedAll(true);
+      playUiSound("success");
+      setTimeout(() => setIsCopiedAll(false), 2000);
+    } catch (e) {
+      console.error("Failed to copy conversation thread:", e);
     }
   };
 
@@ -1820,8 +1953,8 @@ export default function App() {
     updatedMsgs = [...updatedMsgs.slice(0, idx + 1), placeholderAssistantMsg];
 
     // Sync edited user message and placeholder assistant message immediately to Supabase
-    syncMessageToSupabase(activeSessionId, updatedMsgs[idx]);
-    syncMessageToSupabase(activeSessionId, placeholderAssistantMsg);
+    syncMessageSummaryToSupabase(activeSessionId, updatedMsgs[idx]);
+    syncMessageSummaryToSupabase(activeSessionId, placeholderAssistantMsg);
 
     if (user && !user.isGuest && user.uid) {
       // Delete obsolete trailing messages from Supabase
@@ -1941,7 +2074,7 @@ export default function App() {
           triggerVoiceIfNeeded(finalMsg);
 
           // Sync the completed assistant message to Supabase
-          syncMessageToSupabase(activeSessionId, finalMsg);
+          syncMessageSummaryToSupabase(activeSessionId, finalMsg);
           syncChatSummaryToSupabase({
             ...activeSession,
             updatedAt: new Date().toISOString()
@@ -1985,7 +2118,7 @@ export default function App() {
                 engineId: "core",
               };
               // Sync error message to Supabase
-              syncMessageToSupabase(activeSessionId, currentMsgs[aIdx]);
+              syncMessageSummaryToSupabase(activeSessionId, currentMsgs[aIdx]);
               syncChatSummaryToSupabase({
                 ...s,
                 updatedAt: new Date().toISOString()
@@ -2017,7 +2150,7 @@ export default function App() {
           const updatedMsgs = s.messages.map((m) => {
             if (m.id === msgId) {
               const updated = { ...m, reaction: reaction || undefined };
-              syncMessageToSupabase(activeSessionId, updated);
+              syncMessageSummaryToSupabase(activeSessionId, updated);
               return updated;
             }
             return m;
@@ -2210,7 +2343,7 @@ export default function App() {
       if (currentSess && currentSess.messages && currentSess.messages.length > 0) {
         const lastMsg = currentSess.messages[currentSess.messages.length - 1];
         if (lastMsg && lastMsg.role === "assistant") {
-          syncMessageToSupabase(activeSessionId, lastMsg);
+          syncMessageSummaryToSupabase(activeSessionId, lastMsg);
           syncChatSummaryToSupabase({
             ...currentSess,
             updatedAt: new Date().toISOString()
@@ -2225,6 +2358,8 @@ export default function App() {
   const handleChatSubmit = async (customPrompt?: string, customAttachment?: any) => {
     const promptToSend = customPrompt || inputPrompt;
     if (!promptToSend.trim() && !customAttachment) return;
+
+    console.log("[Nexa Debug] [Send Message] Conversation ID before Send:", activeSessionId);
 
     if (voiceModeActiveRef.current) {
       setVoiceState("processing");
@@ -2250,7 +2385,8 @@ export default function App() {
     const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : activeSession.title;
     
     // Save user message immediately to Supabase subcollection & update parent metadata
-    syncMessageToSupabase(activeSessionId, newUserMsg);
+    syncMessageSummaryToSupabase(activeSessionId, newUserMsg);
+    console.log("[Nexa Debug] [Send Message] Conversation ID after Send:", activeSessionId);
     
     const updatedParentChat: ChatSession = {
       ...activeSession,
@@ -2362,17 +2498,21 @@ export default function App() {
         clearInterval(streamIntervalRef.current);
       }
 
+      console.log("[Nexa Debug] [Streaming Start] Initiating streaming for Conversation ID:", activeSessionId);
+
       streamIntervalRef.current = setInterval(() => {
         if (currentTokenIdx >= tokens.length) {
           clearInterval(streamIntervalRef.current);
           streamIntervalRef.current = null;
           setIsGenerating(false);
 
+          console.log("[Nexa Debug] [Stream Finished] Conversation ID after stream finishes:", activeSessionId, "Full content length:", fullContent.length);
+
           const finalMsg = { ...newAssistantMsg, content: fullContent };
           triggerVoiceIfNeeded(finalMsg);
 
           // Sync complete message to Supabase
-          syncMessageToSupabase(activeSessionId, finalMsg);
+          syncMessageSummaryToSupabase(activeSessionId, finalMsg);
           const finalParentChat: ChatSession = {
             ...updatedParentChat,
             updatedAt: new Date().toISOString()
@@ -2387,6 +2527,9 @@ export default function App() {
           for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
             currentText += tokens[currentTokenIdx];
             currentTokenIdx++;
+          }
+          if (currentTokenIdx % 10 === 0 || currentTokenIdx === 1) {
+            console.log("[Nexa Debug] [Streaming] Conversation ID while streaming:", activeSessionId, "Current text length:", currentText.length);
           }
           updateMessageContent(assistantMsgId, currentText);
         }
@@ -2431,7 +2574,7 @@ export default function App() {
       };
 
       // Sync error response to Supabase & update parent
-      syncMessageToSupabase(activeSessionId, errorMsg);
+      syncMessageSummaryToSupabase(activeSessionId, errorMsg);
       const finalParentChatError: ChatSession = {
         ...updatedParentChat,
         updatedAt: new Date().toISOString()
@@ -2697,22 +2840,58 @@ export default function App() {
               </div>
             ) : (
               // Message Logs list feeds
-              <div className="flex-1 overflow-y-auto pb-28 md:pb-4 pr-1 scrollbar-thin">
-                <MessageList
-                  messages={activeSession.messages}
-                  activeEngine={activeSession.selectedEngineId || "core"}
-                  onAction={handleMessageAction}
-                  onEditPrompt={handleEditPromptMessage}
-                  onReact={handleMessageReaction}
-                  isLoading={isLoading}
-                  isGenerating={isGenerating}
-                  onCompleteQuiz={handleCompleteQuiz}
-                  userName={user.fullName}
-                  isFocusMode={isFocusMode}
-                  onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
-                />
-                {/* Scroll bottom node spacer */}
-                <div ref={messageEndRef} />
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+                {/* Chat Thread Header */}
+                <div className="flex items-center justify-between py-2.5 px-4 mb-3 rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md shrink-0">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-2 h-2 rounded-full bg-[#C96A3D] shrink-0 animate-pulse" />
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-black text-slate-800 dark:text-white truncate max-w-[200px] sm:max-w-xs md:max-w-md">
+                        {activeSession.title}
+                      </h4>
+                      <p className="text-[10px] text-slate-400 font-bold capitalize mt-0.5">
+                        {activeSession.mode} Workspace
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={handleCopyAll}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-white/40 dark:bg-slate-900/30 hover:border-[#C96A3D] dark:hover:border-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900/80 text-[10px] font-black text-slate-600 dark:text-slate-300 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] cursor-pointer transition-all active:scale-95 shadow-2xs"
+                      title="Copy all conversation content"
+                    >
+                      {isCopiedAll ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span>Copied Thread!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 shrink-0" />
+                          <span>Copy All</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto pb-28 md:pb-4 pr-1 scrollbar-thin">
+                  <MessageList
+                    messages={activeSession.messages}
+                    activeEngine={activeSession.selectedEngineId || "core"}
+                    onAction={handleMessageAction}
+                    onEditPrompt={handleEditPromptMessage}
+                    onReact={handleMessageReaction}
+                    isLoading={isLoading}
+                    isGenerating={isGenerating}
+                    onCompleteQuiz={handleCompleteQuiz}
+                    userName={user.fullName}
+                    isFocusMode={isFocusMode}
+                    onToggleFocusMode={() => setIsFocusMode(!isFocusMode)}
+                  />
+                  {/* Scroll bottom node spacer */}
+                  <div ref={messageEndRef} />
+                </div>
               </div>
             )}
           </div>
@@ -3220,6 +3399,7 @@ export default function App() {
           setShowSettings(false);
           setIsFeedbackOpen(true);
         }}
+        onOpenAuth={() => setShowAuth(true)}
       />
 
       {/* Premium Waitlist Modal */}
@@ -3228,6 +3408,7 @@ export default function App() {
         onClose={() => setShowPremium(false)}
         user={user}
         source={premiumSource}
+        onOpenAuth={() => setShowAuth(true)}
       />
 
       {/* Camera Capture Modal */}

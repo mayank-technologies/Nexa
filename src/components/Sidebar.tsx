@@ -30,6 +30,8 @@ import {
   Share2,
   PanelLeftClose,
   PanelLeftOpen,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "motion/react";
 import { ChatSession, UserProfile } from "../types";
@@ -90,6 +92,8 @@ export function Sidebar({
   const [editTitle, setEditTitle] = useState("");
 
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [isRecentChatsExpanded, setIsRecentChatsExpanded] = useState(true);
+  const [isRecentlyDeletedExpanded, setIsRecentlyDeletedExpanded] = useState(true);
   const touchStartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Lazy loading state for infinite scrolling
@@ -408,14 +412,18 @@ export function Sidebar({
       id="nexa-control-sidebar"
     >
       {/* Sidebar Header: Logo, Start New Chat & Search (Fixed at the top) */}
-      <div className={`p-4 border-b border-slate-100 dark:border-slate-800/80 shrink-0 flex flex-col ${isCollapsed ? "items-center gap-4 pb-3" : "space-y-3"}`}>
-        <div className={`flex w-full items-center ${isCollapsed ? "justify-center" : "justify-between"} pb-1`}>
+      <div className={`p-4 border-b border-slate-100 dark:border-slate-800/80 shrink-0 flex flex-col ${isCollapsed ? "items-center gap-4 pb-3" : "gap-3"}`}>
+        <div className={`flex w-full items-center ${isCollapsed ? "flex-col gap-4 justify-center" : "justify-between"}`}>
           {!isCollapsed ? (
             <>
+              {/* Logo */}
               <div className="flex items-center gap-2">
                 <Logo size={28} showText={true} textClass="text-base font-black text-[#14213D] dark:text-white" animate={false} />
               </div>
+              
+              {/* Redesigned Header Toolbar */}
               <div className="flex items-center gap-1">
+                {/* 1. Toggle Collapse */}
                 {onToggleCollapse && (
                   <button
                     onClick={onToggleCollapse}
@@ -425,10 +433,36 @@ export function Sidebar({
                     <PanelLeftClose className="w-4.5 h-4.5" />
                   </button>
                 )}
+                
+                {/* 2. Search Icon (toggles search box) */}
+                <button
+                  onClick={() => setIsSearchOpen(!isSearchOpen)}
+                  className={`p-1.5 rounded-xl transition-all cursor-pointer ${
+                    isSearchOpen 
+                      ? "text-[#C96A3D] bg-[#C96A3D]/10" 
+                      : "text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900"
+                  }`}
+                  title="Search Conversations"
+                >
+                  <Search className="w-4.5 h-4.5" />
+                </button>
+
+                {/* 3. New Chat Button */}
+                <button
+                  onClick={() => {
+                    onNewSession(activeMode);
+                    onCloseMobile?.();
+                  }}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                  title={`New ${activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}`}
+                >
+                  <Plus className="w-4.5 h-4.5" />
+                </button>
+                
                 {isMobileOpen && (
                   <button
                     onClick={onCloseMobile}
-                    className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                    className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer ml-1"
                     title="Close Menu"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -438,233 +472,275 @@ export function Sidebar({
             </>
           ) : (
             <div className="flex flex-col items-center gap-4">
+              {/* Logo Icon Only */}
               <Logo size={28} showText={false} animate={false} />
-              {onToggleCollapse && (
+              
+              {/* Toolbar in Collapsed Mode */}
+              <div className="flex flex-col items-center gap-3">
+                {/* 1. Toggle Expand */}
+                {onToggleCollapse && (
+                  <button
+                    onClick={onToggleCollapse}
+                    className="p-2 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
+                    title="Expand Sidebar"
+                  >
+                    <PanelLeftOpen className="w-5 h-5" />
+                  </button>
+                )}
+                
+                {/* 2. Search Icon (opens & expands sidebar) */}
                 <button
-                  onClick={onToggleCollapse}
+                  onClick={() => {
+                    onToggleCollapse?.();
+                    setIsSearchOpen(true);
+                  }}
                   className="p-2 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
-                  title="Expand Sidebar"
+                  title="Search Chats"
                 >
-                  <PanelLeftOpen className="w-5 h-5" />
+                  <Search className="w-5 h-5" />
                 </button>
-              )}
+
+                {/* 3. New Chat Button */}
+                <button
+                  onClick={() => {
+                    onNewSession(activeMode);
+                  }}
+                  className="p-2 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
+                  title="New Chat"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* Start New Chat Button */}
-        <button
-          onClick={() => {
-            onNewSession(activeMode);
-            onCloseMobile?.();
-          }}
-          className={`flex items-center justify-center bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white font-bold transition-all shadow-md hover:shadow-lg cursor-pointer ${
-            isCollapsed 
-              ? "w-11 h-11 rounded-xl" 
-              : "w-full py-3 px-4 rounded-2xl text-xs gap-2"
-          }`}
-          title={`Start New ${activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}`}
-        >
-          <Plus className="w-4 h-4 shrink-0" />
-          {!isCollapsed && (
-            <span>Start New {activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}</span>
-          )}
-        </button>
-
-        {/* Quick Search Button / Input */}
-        {!isCollapsed ? (
-          !isSearchOpen ? (
-            <button
-              onClick={() => setIsSearchOpen(true)}
-              className="w-full flex items-center justify-between text-xs py-2.5 px-3.5 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40 text-slate-400 hover:text-[#C96A3D] hover:border-slate-300 dark:hover:border-slate-700/80 dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900/60 transition-all cursor-pointer shadow-3xs"
-              title="Search Recent Conversations"
-            >
-              <div className="flex items-center gap-2">
-                <Search className="w-3.5 h-3.5 text-slate-400" />
-                <span>Search recent chats...</span>
-              </div>
-            </button>
-          ) : (
-            <div className="relative flex items-center gap-2 animate-fade-in-down">
-              <div className="relative flex-1">
-                <input
-                  type="text"
-                  autoFocus
-                  placeholder="Search conversations..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full text-xs py-2.5 pl-9 pr-12 rounded-xl border border-[#C96A3D] dark:border-[#C96A3D] bg-white dark:bg-slate-900 outline-none text-[#14213D] dark:text-white transition-all focus:ring-2 focus:ring-[#C96A3D]/20 font-medium"
-                />
-                <Search className="absolute left-3 top-3 text-[#C96A3D] w-3.5 h-3.5" />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-[10px] tracking-wide"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              <button
-                onClick={() => {
-                  setIsSearchOpen(false);
-                  setSearchQuery("");
-                }}
-                className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-950/40 bg-slate-55 dark:bg-slate-900 transition-colors cursor-pointer"
-                title="Close Search"
+        {/* Search box with smooth transition */}
+        {!isCollapsed && (
+          <AnimatePresence>
+            {isSearchOpen && (
+              <motion.div
+                initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                animate={{ height: "auto", opacity: 1, marginTop: 4 }}
+                exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden w-full"
               >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )
-        ) : (
-          <button
-            onClick={() => {
-              onToggleCollapse?.();
-              setIsSearchOpen(true);
-            }}
-            className="w-11 h-11 flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-800/85 bg-slate-50/50 dark:bg-slate-900/40 text-slate-400 hover:text-[#C96A3D] hover:border-slate-300 dark:hover:border-slate-700 hover:bg-white dark:hover:bg-slate-900/60 transition-all cursor-pointer shadow-3xs active:scale-95"
-            title="Search Chats"
-          >
-            <Search className="w-4 h-4 text-slate-400" />
-          </button>
+                <div className="relative flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="Search conversations..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full text-xs py-2 pl-8 pr-12 rounded-xl border border-[#C96A3D]/30 dark:border-[#C96A3D]/30 bg-slate-50/50 dark:bg-slate-900/40 focus:border-[#C96A3D] focus:ring-1 focus:ring-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-all font-medium h-9"
+                    />
+                    <Search className="absolute left-2.5 top-3 text-[#C96A3D] w-3.5 h-3.5" />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-3.5 top-2.5 text-slate-400 hover:text-slate-650 dark:hover:text-slate-200 font-bold text-[10px] tracking-wide cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         )}
       </div>
 
       {/* Primary Scrollable Workspace Section (One continuous scroll container) */}
       <div 
-        className={`flex-1 min-h-0 overflow-y-auto ${isCollapsed ? "px-2 py-4 space-y-4" : "p-4 space-y-5"} flex flex-col items-center`}
+        className={`flex-1 min-h-0 overflow-y-auto w-full ${isCollapsed ? "px-2 py-4 space-y-4" : "p-4 space-y-5"} flex flex-col`}
         onScroll={handleScroll}
         style={{ scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}
       >
-        
-        {/* A: Pinned Chats section */}
-        {pinnedChats.length > 0 && (
-          <div className="space-y-2 w-full">
-            {!isCollapsed ? (
-              <div className="flex justify-between items-center">
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-[#C96A3D] flex items-center gap-1.5">
-                  <Pin className="w-3.5 h-3.5 text-[#C96A3D] fill-[#C96A3D]/15 rotate-45 shrink-0" />
-                  <span>Pinned Chats</span>
-                </h4>
-                <span className="text-[9px] font-extrabold text-[#C96A3D] font-mono bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full shrink-0">
-                  {pinnedChats.length}
+        {!isCollapsed ? (
+          <>
+            {/* 1. Collapsible Recent Chats */}
+            <div className="space-y-2 w-full">
+              <button
+                onClick={() => setIsRecentChatsExpanded(!isRecentChatsExpanded)}
+                className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 hover:text-slate-650 dark:hover:text-slate-300 transition-colors py-1 cursor-pointer select-none outline-none"
+              >
+                <div className="flex items-center gap-1.5">
+                  {isRecentChatsExpanded ? (
+                    <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>Recent Chats</span>
+                </div>
+                <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
+                  {pinnedChats.length + unpinnedChats.length}
                 </span>
+              </button>
+
+              <AnimatePresence initial={false}>
+                {isRecentChatsExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden space-y-4 w-full"
+                  >
+                    {/* A: Pinned Chats section */}
+                    {pinnedChats.length > 0 && (
+                      <div className="space-y-1.5 w-full pl-1">
+                        <div className="flex justify-between items-center px-1">
+                          <h5 className="text-[9px] font-black uppercase tracking-widest text-[#C96A3D] flex items-center gap-1">
+                            <Pin className="w-3 h-3 text-[#C96A3D] fill-[#C96A3D]/15 rotate-45 shrink-0" />
+                            <span>Pinned</span>
+                          </h5>
+                        </div>
+
+                        <Reorder.Group
+                          axis="y"
+                          values={pinnedChats}
+                          onReorder={handleReorderPinned}
+                          className="space-y-1 w-full"
+                        >
+                          {pinnedChats.map((session) => (
+                            <Reorder.Item
+                              key={session.id}
+                              value={session}
+                              dragListener={!searchQuery.trim()}
+                              className="outline-none w-full"
+                              style={{ position: "relative" }}
+                            >
+                              {renderChatItem(session, true)}
+                            </Reorder.Item>
+                          ))}
+                        </Reorder.Group>
+                      </div>
+                    )}
+
+                    {/* B: Grouped Conversations */}
+                    {activeGroups.length > 0 ? (
+                      activeGroups.map((group) => (
+                        <div key={group.title} className="space-y-1.5 w-full pl-1">
+                          <div className="flex justify-between items-center px-1">
+                            <h5 className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                              {group.title}
+                            </h5>
+                          </div>
+
+                          <div className="space-y-1.5 w-full">
+                            {group.chats.map((session) => (
+                              <div key={session.id} className="w-full">
+                                {renderChatItem(session, false)}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      unpinnedChats.length === 0 && (
+                        <p className="text-[11px] text-slate-400 italic text-left p-2">
+                          No conversations found.
+                        </p>
+                      )
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* 2. Collapsible Recently Deleted (Placed just under Recent Chats) */}
+            <div className="space-y-2 w-full pt-2 border-t border-slate-100 dark:border-slate-800/40">
+              <button
+                onClick={() => setIsRecentlyDeletedExpanded(!isRecentlyDeletedExpanded)}
+                className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 hover:text-slate-650 dark:hover:text-slate-300 transition-colors py-1 cursor-pointer select-none outline-none"
+              >
+                <div className="flex items-center gap-1.5">
+                  {isRecentlyDeletedExpanded ? (
+                    <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>Recently Deleted</span>
+                </div>
+              </button>
+
+              <AnimatePresence initial={false}>
+                {isRecentlyDeletedExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden w-full"
+                  >
+                    <button
+                      onClick={() => {
+                        onSelectRecentlyDeleted?.();
+                        onCloseMobile?.();
+                      }}
+                      className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-semibold select-none transition-all duration-200 cursor-pointer ${
+                        isRecentlyDeletedActive
+                          ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
+                          : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
+                      }`}
+                    >
+                      <Trash2 className={`w-3.5 h-3.5 shrink-0 ${isRecentlyDeletedActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
+                      <span>View Deleted Logs</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          </>
+        ) : (
+          /* Collapsed Icons Only mode: direct list of icons stacked vertically */
+          <div className="flex flex-col items-center gap-3 w-full">
+            {/* Pinned items */}
+            {pinnedChats.map((session) => (
+              <div key={session.id} className="w-full flex justify-center">
+                {renderChatItem(session, true)}
               </div>
-            ) : (
-              <div className="border-t border-slate-100 dark:border-slate-800/80 my-2 w-full flex justify-center">
-                <Pin className="w-3.5 h-3.5 text-[#C96A3D] rotate-45 opacity-60" />
-              </div>
+            ))}
+
+            {/* Separator if both pinned and unpinned exist */}
+            {pinnedChats.length > 0 && unpinnedChats.length > 0 && (
+              <div className="w-8 border-t border-slate-100 dark:border-slate-800/60 my-1" />
             )}
 
-            <Reorder.Group
-              axis="y"
-              values={pinnedChats}
-              onReorder={handleReorderPinned}
-              className="space-y-1.5 w-full"
-            >
-              <AnimatePresence initial={false}>
-                {pinnedChats.map((session) => (
-                  <Reorder.Item
-                    key={session.id}
-                    value={session}
-                    dragListener={!searchQuery.trim() && !isCollapsed}
-                    className="outline-none w-full"
-                    style={{ position: "relative" }}
-                  >
-                    {renderChatItem(session, true)}
-                  </Reorder.Item>
-                ))}
-              </AnimatePresence>
-            </Reorder.Group>
-          </div>
-        )}
-
-        {/* B: Grouped Conversations (Continuous List with Today, Yesterday, Last 7 days, Older) */}
-        {activeGroups.length > 0 ? (
-          activeGroups.map((group) => (
-            <div key={group.title} className="space-y-2 pt-1 w-full">
-              {!isCollapsed ? (
-                <div className="flex justify-between items-center">
-                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                    {group.title}
-                  </h4>
-                  <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
-                    {group.chats.length}
-                  </span>
-                </div>
-              ) : (
-                <div className="border-t border-slate-100 dark:border-slate-800/40 my-3 w-full shrink-0" />
-              )}
-
-              <div className={`space-y-1.5 w-full ${isCollapsed ? "" : "pr-1"}`}>
-                <AnimatePresence initial={false}>
-                  {group.chats.map((session) => (
-                    <motion.div
-                      key={session.id}
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="w-full"
-                    >
-                      {renderChatItem(session, false)}
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
+            {/* Unpinned items */}
+            {unpinnedChats.slice(0, visibleCount).map((session) => (
+              <div key={session.id} className="w-full flex justify-center">
+                {renderChatItem(session, false)}
               </div>
-            </div>
-          ))
-        ) : (
-          unpinnedChats.length === 0 && (
-            <div className="space-y-2 pt-1 w-full text-center">
-              {!isCollapsed && (
-                <>
-                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500 text-left">
-                    Recent Conversations
-                  </h4>
-                  <p className="text-[11px] text-slate-400 italic text-left p-2">
-                    No matching logs found.
-                  </p>
-                </>
-              )}
-            </div>
-          )
-        )}
+            ))}
 
-        {/* Recently Deleted Button (placed below chats list and above footer settings) */}
-        <div className={`mt-auto pt-4 border-t border-slate-100 dark:border-slate-800/80 w-full flex justify-center`}>
-          <button
-            onClick={() => {
-              onSelectRecentlyDeleted?.();
-              onCloseMobile?.();
-            }}
-            className={`flex items-center select-none transition-all duration-200 cursor-pointer ${
-              isCollapsed 
-                ? `w-11 h-11 justify-center rounded-xl relative group/deleted border ${
-                    isRecentlyDeletedActive 
-                      ? "border-[#C96A3D]/25 bg-[#C96A3D]/10 text-[#C96A3D]" 
-                      : "border-transparent text-slate-400 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700"
-                  }`
-                : `w-full gap-2.5 p-2.5 rounded-xl border text-xs font-semibold ${
-                    isRecentlyDeletedActive
-                      ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
-                      : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
-                  }`
-            }`}
-          >
-            <Trash2 className={`w-3.5 h-3.5 shrink-0 ${isRecentlyDeletedActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
-            {!isCollapsed && <span>Recently Deleted</span>}
+            {/* Recently Deleted icon separator */}
+            <div className="w-8 border-t border-slate-100 dark:border-slate-800/60 my-2" />
 
-            {isCollapsed && (
+            {/* Recently Deleted button */}
+            <button
+              onClick={() => {
+                onSelectRecentlyDeleted?.();
+                onCloseMobile?.();
+              }}
+              className={`flex items-center justify-center select-none transition-all duration-200 cursor-pointer w-11 h-11 rounded-xl relative group/deleted border ${
+                isRecentlyDeletedActive 
+                  ? "border-[#C96A3D]/25 bg-[#C96A3D]/10 text-[#C96A3D]" 
+                  : "border-transparent text-slate-400 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700"
+              }`}
+              title="Recently Deleted"
+            >
+              <Trash2 className={`w-4 h-4 shrink-0 ${isRecentlyDeletedActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
               <div className="absolute left-[54px] top-1/2 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/deleted:opacity-100 group-hover/deleted:scale-100 group-hover/deleted:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
                 <span className="font-extrabold text-slate-100">Recently Deleted</span>
                 <div className="absolute right-full top-1/2 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
               </div>
-            )}
-          </button>
-        </div>
-
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Guest Mode Sign-In / Account footer */}

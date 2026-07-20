@@ -2793,7 +2793,7 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* 2. Side Panel Desktop (Stable always visible on larger viewports) */}
-        <div className={`hidden md:flex ${isSidebarCollapsed ? "md:w-[76px]" : "md:w-80"} h-full flex-col border-r border-slate-100 dark:border-slate-800 shrink-0 select-none overflow-hidden bg-white dark:bg-[#0c1222] transition-all duration-300 ease-in-out ${isFocusMode ? "md:!hidden" : ""}`}>
+        <div className={`hidden md:flex ${isSidebarCollapsed ? "md:w-16" : "md:w-80"} h-full flex-col border-r border-slate-100 dark:border-slate-800 shrink-0 select-none overflow-hidden bg-white dark:bg-[#0c1222] transition-all duration-300 ease-in-out ${isFocusMode ? "md:!hidden" : ""}`}>
           <Sidebar
             sessions={sessions}
             activeSessionId={activeSessionId}

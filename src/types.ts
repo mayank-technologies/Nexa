@@ -122,6 +122,7 @@ export interface AppSettings {
   voiceAutoPlay?: boolean;
   voiceSpeed?: number;
   voiceLanguage?: string;
+  renderingSpeed?: "slow" | "normal" | "fast" | "turbo" | "instant";
 }
 
 export interface AdminMetrics {

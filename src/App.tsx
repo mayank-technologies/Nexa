@@ -550,6 +550,7 @@ export default function App() {
           voiceAutoPlay: true, 
           voiceSpeed: 1.0, 
           voiceLanguage: "en-US", 
+          renderingSpeed: "turbo",
           ...parsed 
         };
       }
@@ -571,6 +572,7 @@ export default function App() {
       voiceAutoPlay: true,
       voiceSpeed: 1.0,
       voiceLanguage: "en-US",
+      renderingSpeed: "turbo",
     };
   });
 
@@ -1757,38 +1759,74 @@ export default function App() {
 
       // Start tokenized streaming
       const fullContent = data.content || "";
-      const tokens = fullContent.split(/(\s+)/);
-      let currentTokenIdx = 0;
-      let currentText = "";
+      const speedSetting = settingsRef.current.renderingSpeed || "turbo";
 
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-      }
+      if (speedSetting === "instant") {
+        updateMessageContent(msgId, fullContent);
+        setIsGenerating(false);
+        const finalMsg = { ...updatedMsg, content: fullContent };
+        triggerVoiceIfNeeded(finalMsg);
+        syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+        syncChatSummaryToSupabase({
+          ...activeSession,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        const tokens = fullContent.split(/(\s+)/);
+        let currentTokenIdx = 0;
+        let currentText = "";
 
-      streamIntervalRef.current = setInterval(() => {
-        if (currentTokenIdx >= tokens.length) {
+        if (streamIntervalRef.current) {
           clearInterval(streamIntervalRef.current);
-          streamIntervalRef.current = null;
-          setIsGenerating(false);
-
-          const finalMsg = { ...updatedMsg, content: fullContent };
-          triggerVoiceIfNeeded(finalMsg);
-
-          // Sync complete message to Supabase
-          syncMessageSummaryToSupabase(activeSessionId, finalMsg);
-          syncChatSummaryToSupabase({
-            ...activeSession,
-            updatedAt: new Date().toISOString()
-          });
-        } else {
-          const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
-          for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
-            currentText += tokens[currentTokenIdx];
-            currentTokenIdx++;
-          }
-          updateMessageContent(msgId, currentText);
         }
-      }, 20);
+
+        let intervalMs = 20;
+        let divisor = 80;
+        let minTokens = 1;
+
+        if (speedSetting === "slow") {
+          intervalMs = 30;
+          divisor = 100;
+          minTokens = 1;
+        } else if (speedSetting === "normal") {
+          intervalMs = 20;
+          divisor = 60;
+          minTokens = 1;
+        } else if (speedSetting === "fast") {
+          intervalMs = 12;
+          divisor = 30;
+          minTokens = 2;
+        } else if (speedSetting === "turbo") {
+          intervalMs = 8;
+          divisor = 12;
+          minTokens = 4;
+        }
+
+        streamIntervalRef.current = setInterval(() => {
+          if (currentTokenIdx >= tokens.length) {
+            clearInterval(streamIntervalRef.current);
+            streamIntervalRef.current = null;
+            setIsGenerating(false);
+
+            const finalMsg = { ...updatedMsg, content: fullContent };
+            triggerVoiceIfNeeded(finalMsg);
+
+            // Sync complete message to Supabase
+            syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+            syncChatSummaryToSupabase({
+              ...activeSession,
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            const tokensToAppend = Math.max(minTokens, Math.ceil((tokens.length - currentTokenIdx) / divisor));
+            for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
+              currentText += tokens[currentTokenIdx];
+              currentTokenIdx++;
+            }
+            updateMessageContent(msgId, currentText);
+          }
+        }, intervalMs);
+      }
 
       // Track routing updates inside Admin Metric streams
       const routeId = data.engineId || "core";
@@ -2056,38 +2094,74 @@ export default function App() {
 
       // Start tokenized streaming
       const fullContent = data.content || "";
-      const tokens = fullContent.split(/(\s+)/);
-      let currentTokenIdx = 0;
-      let currentText = "";
+      const speedSetting = settingsRef.current.renderingSpeed || "turbo";
 
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-      }
+      if (speedSetting === "instant") {
+        updateMessageContent(assistantId, fullContent);
+        setIsGenerating(false);
+        const finalMsg = { ...updatedMsg, content: fullContent };
+        triggerVoiceIfNeeded(finalMsg);
+        syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+        syncChatSummaryToSupabase({
+          ...activeSession,
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        const tokens = fullContent.split(/(\s+)/);
+        let currentTokenIdx = 0;
+        let currentText = "";
 
-      streamIntervalRef.current = setInterval(() => {
-        if (currentTokenIdx >= tokens.length) {
+        if (streamIntervalRef.current) {
           clearInterval(streamIntervalRef.current);
-          streamIntervalRef.current = null;
-          setIsGenerating(false);
-
-          const finalMsg = { ...updatedMsg, content: fullContent };
-          triggerVoiceIfNeeded(finalMsg);
-
-          // Sync the completed assistant message to Supabase
-          syncMessageSummaryToSupabase(activeSessionId, finalMsg);
-          syncChatSummaryToSupabase({
-            ...activeSession,
-            updatedAt: new Date().toISOString()
-          });
-        } else {
-          const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
-          for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
-            currentText += tokens[currentTokenIdx];
-            currentTokenIdx++;
-          }
-          updateMessageContent(assistantId, currentText);
         }
-      }, 20);
+
+        let intervalMs = 20;
+        let divisor = 80;
+        let minTokens = 1;
+
+        if (speedSetting === "slow") {
+          intervalMs = 30;
+          divisor = 100;
+          minTokens = 1;
+        } else if (speedSetting === "normal") {
+          intervalMs = 20;
+          divisor = 60;
+          minTokens = 1;
+        } else if (speedSetting === "fast") {
+          intervalMs = 12;
+          divisor = 30;
+          minTokens = 2;
+        } else if (speedSetting === "turbo") {
+          intervalMs = 8;
+          divisor = 12;
+          minTokens = 4;
+        }
+
+        streamIntervalRef.current = setInterval(() => {
+          if (currentTokenIdx >= tokens.length) {
+            clearInterval(streamIntervalRef.current);
+            streamIntervalRef.current = null;
+            setIsGenerating(false);
+
+            const finalMsg = { ...updatedMsg, content: fullContent };
+            triggerVoiceIfNeeded(finalMsg);
+
+            // Sync the completed assistant message to Supabase
+            syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+            syncChatSummaryToSupabase({
+              ...activeSession,
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            const tokensToAppend = Math.max(minTokens, Math.ceil((tokens.length - currentTokenIdx) / divisor));
+            for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
+              currentText += tokens[currentTokenIdx];
+              currentTokenIdx++;
+            }
+            updateMessageContent(assistantId, currentText);
+          }
+        }, intervalMs);
+      }
 
       const routeId = data.engineId || "core";
       setAdminMetrics((prev) => ({
@@ -2490,50 +2564,90 @@ export default function App() {
 
       // Start tokenized streaming
       const fullContent = data.content || "";
-      const tokens = fullContent.split(/(\s+)/);
-      let currentTokenIdx = 0;
-      let currentText = "";
+      const speedSetting = settingsRef.current.renderingSpeed || "turbo";
 
-      if (streamIntervalRef.current) {
-        clearInterval(streamIntervalRef.current);
-      }
-
-      console.log("[Nexa Debug] [Streaming Start] Initiating streaming for Conversation ID:", activeSessionId);
-
-      streamIntervalRef.current = setInterval(() => {
-        if (currentTokenIdx >= tokens.length) {
-          clearInterval(streamIntervalRef.current);
-          streamIntervalRef.current = null;
-          setIsGenerating(false);
-
-          console.log("[Nexa Debug] [Stream Finished] Conversation ID after stream finishes:", activeSessionId, "Full content length:", fullContent.length);
-
-          const finalMsg = { ...newAssistantMsg, content: fullContent };
-          triggerVoiceIfNeeded(finalMsg);
-
-          // Sync complete message to Supabase
-          syncMessageSummaryToSupabase(activeSessionId, finalMsg);
-          const finalParentChat: ChatSession = {
-            ...updatedParentChat,
-            updatedAt: new Date().toISOString()
-          };
-          syncChatSummaryToSupabase(finalParentChat);
-
-          if (isFirstAssistantResponse) {
-            generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
-          }
-        } else {
-          const tokensToAppend = Math.max(1, Math.ceil((tokens.length - currentTokenIdx) / 80));
-          for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
-            currentText += tokens[currentTokenIdx];
-            currentTokenIdx++;
-          }
-          if (currentTokenIdx % 10 === 0 || currentTokenIdx === 1) {
-            console.log("[Nexa Debug] [Streaming] Conversation ID while streaming:", activeSessionId, "Current text length:", currentText.length);
-          }
-          updateMessageContent(assistantMsgId, currentText);
+      if (speedSetting === "instant") {
+        updateMessageContent(assistantMsgId, fullContent);
+        setIsGenerating(false);
+        const finalMsg = { ...newAssistantMsg, content: fullContent };
+        triggerVoiceIfNeeded(finalMsg);
+        syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+        const finalParentChat: ChatSession = {
+          ...updatedParentChat,
+          updatedAt: new Date().toISOString()
+        };
+        syncChatSummaryToSupabase(finalParentChat);
+        if (isFirstAssistantResponse) {
+          generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
         }
-      }, 20);
+      } else {
+        const tokens = fullContent.split(/(\s+)/);
+        let currentTokenIdx = 0;
+        let currentText = "";
+
+        if (streamIntervalRef.current) {
+          clearInterval(streamIntervalRef.current);
+        }
+
+        console.log("[Nexa Debug] [Streaming Start] Initiating streaming for Conversation ID:", activeSessionId);
+
+        let intervalMs = 20;
+        let divisor = 80;
+        let minTokens = 1;
+
+        if (speedSetting === "slow") {
+          intervalMs = 30;
+          divisor = 100;
+          minTokens = 1;
+        } else if (speedSetting === "normal") {
+          intervalMs = 20;
+          divisor = 60;
+          minTokens = 1;
+        } else if (speedSetting === "fast") {
+          intervalMs = 12;
+          divisor = 30;
+          minTokens = 2;
+        } else if (speedSetting === "turbo") {
+          intervalMs = 8;
+          divisor = 12;
+          minTokens = 4;
+        }
+
+        streamIntervalRef.current = setInterval(() => {
+          if (currentTokenIdx >= tokens.length) {
+            clearInterval(streamIntervalRef.current);
+            streamIntervalRef.current = null;
+            setIsGenerating(false);
+
+            console.log("[Nexa Debug] [Stream Finished] Conversation ID after stream finishes:", activeSessionId, "Full content length:", fullContent.length);
+
+            const finalMsg = { ...newAssistantMsg, content: fullContent };
+            triggerVoiceIfNeeded(finalMsg);
+
+            // Sync complete message to Supabase
+            syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+            const finalParentChat: ChatSession = {
+              ...updatedParentChat,
+              updatedAt: new Date().toISOString()
+            };
+            syncChatSummaryToSupabase(finalParentChat);
+
+            if (isFirstAssistantResponse) {
+              generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
+            }
+          } else {
+            const tokensToAppend = Math.max(minTokens, Math.ceil((tokens.length - currentTokenIdx) / divisor));
+            for (let i = 0; i < tokensToAppend && currentTokenIdx < tokens.length; i++) {
+              currentText += tokens[currentTokenIdx];
+              currentTokenIdx++;
+            }
+            if (currentTokenIdx % 10 === 0 || currentTokenIdx === 1) {
+              console.log("[Nexa Debug] [Streaming] Conversation ID while streaming:", activeSessionId, "Current text length:", currentText.length);
+            }
+            updateMessageContent(assistantMsgId, currentText);
+          }
+        }, intervalMs);
+      }
 
       // Track routing updates inside Admin Metric streams
       const routeId = data.engineId || "core";

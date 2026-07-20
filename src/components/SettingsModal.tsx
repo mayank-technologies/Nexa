@@ -323,6 +323,24 @@ export function SettingsModal({
                         className="w-4 h-4 accent-[#C96A3D] cursor-pointer"
                       />
                     </div>
+
+                    <div className="flex items-center justify-between p-2.5 bg-white/50 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-850 rounded-xl">
+                      <div className="flex items-center gap-2">
+                        <Sliders className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="text-xs font-semibold text-[#14213D] dark:text-slate-200">Response Speed</span>
+                      </div>
+                      <select
+                        value={settings.renderingSpeed || "turbo"}
+                        onChange={(e) => onUpdateSettings({ renderingSpeed: e.target.value as any })}
+                        className="text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1 text-[#14213D] dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[#C96A3D] cursor-pointer"
+                      >
+                        <option value="slow">Slow (Typewriter)</option>
+                        <option value="normal">Normal</option>
+                        <option value="fast">Fast</option>
+                        <option value="turbo">Turbo (ChatGPT Speed)</option>
+                        <option value="instant">Instant (No delay)</option>
+                      </select>
+                    </div>
                   </div>
 
                   {/* Device Privileges Sub-list */}

@@ -226,6 +226,25 @@ export default function App() {
   const [showPremium, setShowPremium] = useState(false);
   const [premiumSource, setPremiumSource] = useState<"header" | "sidebar" | "unknown">("unknown");
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return safeStorage.getItem("nexa-sidebar-collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed((prev) => {
+      const newVal = !prev;
+      try {
+        safeStorage.setItem("nexa-sidebar-collapsed", newVal ? "true" : "false");
+      } catch (e) {
+        console.error("Failed to persist sidebar collapse state", e);
+      }
+      return newVal;
+    });
+  };
   const [dragActive, setDragActive] = useState(false);
   const [showUploadOptions, setShowUploadOptions] = useState(false);
   const [showInputMoreActions, setShowInputMoreActions] = useState(false);
@@ -2774,12 +2793,14 @@ export default function App() {
       <div className="flex flex-1 overflow-hidden relative">
         
         {/* 2. Side Panel Desktop (Stable always visible on larger viewports) */}
-        <div className={`hidden md:flex md:w-80 h-full flex-col border-r border-slate-100 dark:border-slate-800 shrink-0 select-none overflow-hidden bg-white dark:bg-[#0c1222] ${isFocusMode ? "md:!hidden" : ""}`}>
+        <div className={`hidden md:flex ${isSidebarCollapsed ? "md:w-[76px]" : "md:w-80"} h-full flex-col border-r border-slate-100 dark:border-slate-800 shrink-0 select-none overflow-hidden bg-white dark:bg-[#0c1222] transition-all duration-300 ease-in-out ${isFocusMode ? "md:!hidden" : ""}`}>
           <Sidebar
             sessions={sessions}
             activeSessionId={activeSessionId}
             activeMode={activeMode}
             user={user}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={handleToggleSidebarCollapse}
             onSelectSession={(id) => {
               setActiveSessionId(id);
               setCurrentView("chat");

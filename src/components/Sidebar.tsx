@@ -28,6 +28,8 @@ import {
   LogIn,
   MoreVertical,
   Share2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "motion/react";
 import { ChatSession, UserProfile } from "../types";
@@ -54,6 +56,8 @@ interface SidebarProps {
   onOpenFeedback?: () => void;
   onSelectRecentlyDeleted?: () => void;
   isRecentlyDeletedActive?: boolean;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 export function Sidebar({
@@ -77,6 +81,8 @@ export function Sidebar({
   onOpenFeedback,
   onSelectRecentlyDeleted,
   isRecentlyDeletedActive = false,
+  isCollapsed = false,
+  onToggleCollapse,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -232,6 +238,44 @@ export function Sidebar({
     const isActive = session.id === activeSessionId;
     const isEditing = editingId === session.id;
 
+    if (isCollapsed) {
+      return (
+        <div
+          className={`group/session w-full flex items-center justify-center p-2.5 rounded-xl border text-xs font-semibold select-none transition-all duration-200 relative ${
+            isActive
+              ? "border-[#C96A3D]/25 bg-[#C96A3D]/10 text-[#C96A3D]"
+              : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
+          }`}
+          onTouchStart={(e) => handleTouchStart(e, session.id)}
+          onTouchEnd={handleTouchEnd}
+          onTouchMove={handleTouchMove}
+        >
+          <button
+            onClick={() => {
+              onSelectSession(session.id);
+              onCloseMobile?.();
+            }}
+            className="flex items-center justify-center cursor-pointer outline-none select-none"
+            title={session.title}
+          >
+            <MessageSquare className={`w-4 h-4 shrink-0 ${isPinnedItem ? "text-[#C96A3D]" : "text-slate-400"}`} />
+          </button>
+
+          {/* Premium Tooltip */}
+          <div className="absolute left-[54px] top-1/2 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/session:opacity-100 group-hover/session:scale-100 group-hover/session:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap">
+            <div className="flex flex-col gap-0.5 text-left">
+              <span className="font-extrabold text-slate-100">{session.title}</span>
+              <span className="text-[9px] text-slate-400 font-normal">
+                {new Date(session.updatedAt).toLocaleDateString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+            {/* Tiny arrow */}
+            <div className="absolute right-full top-1/2 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         className={`group/session w-full flex items-center justify-between p-2 rounded-xl border text-xs font-semibold select-none transition-all duration-200 relative ${
@@ -360,117 +404,172 @@ export function Sidebar({
 
   return (
     <aside
-      className="flex flex-col w-full h-full bg-white dark:bg-[#0c1222] select-none overflow-hidden"
+      className={`flex flex-col w-full h-full bg-white dark:bg-[#0c1222] select-none overflow-hidden transition-all duration-300`}
       id="nexa-control-sidebar"
     >
       {/* Sidebar Header: Logo, Start New Chat & Search (Fixed at the top) */}
-      <div className="p-4 border-b border-slate-100 dark:border-slate-800/80 space-y-3 shrink-0">
-        <div className="flex items-center justify-between pb-1">
-          <div className="flex items-center gap-2">
-            <Logo size={28} showText={true} textClass="text-base font-black text-[#14213D] dark:text-white" animate={false} />
-          </div>
-          {isMobileOpen && (
-            <button
-              onClick={onCloseMobile}
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
-              title="Close Menu"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+      <div className={`p-4 border-b border-slate-100 dark:border-slate-800/80 shrink-0 flex flex-col ${isCollapsed ? "items-center gap-4 pb-3" : "space-y-3"}`}>
+        <div className={`flex w-full items-center ${isCollapsed ? "justify-center" : "justify-between"} pb-1`}>
+          {!isCollapsed ? (
+            <>
+              <div className="flex items-center gap-2">
+                <Logo size={28} showText={true} textClass="text-base font-black text-[#14213D] dark:text-white" animate={false} />
+              </div>
+              <div className="flex items-center gap-1">
+                {onToggleCollapse && (
+                  <button
+                    onClick={onToggleCollapse}
+                    className="p-1.5 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                    title="Collapse Sidebar"
+                  >
+                    <PanelLeftClose className="w-4.5 h-4.5" />
+                  </button>
+                )}
+                {isMobileOpen && (
+                  <button
+                    onClick={onCloseMobile}
+                    className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer"
+                    title="Close Menu"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <Logo size={28} showText={false} animate={false} />
+              {onToggleCollapse && (
+                <button
+                  onClick={onToggleCollapse}
+                  className="p-2 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
+                  title="Expand Sidebar"
+                >
+                  <PanelLeftOpen className="w-5 h-5" />
+                </button>
+              )}
+            </div>
           )}
         </div>
 
+        {/* Start New Chat Button */}
         <button
           onClick={() => {
             onNewSession(activeMode);
             onCloseMobile?.();
           }}
-          className="w-full flex items-center justify-center gap-2 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white font-bold py-3 px-4 rounded-2xl text-xs transition-all shadow-md hover:shadow-lg cursor-pointer"
+          className={`flex items-center justify-center bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white font-bold transition-all shadow-md hover:shadow-lg cursor-pointer ${
+            isCollapsed 
+              ? "w-11 h-11 rounded-xl" 
+              : "w-full py-3 px-4 rounded-2xl text-xs gap-2"
+          }`}
+          title={`Start New ${activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}`}
         >
-          <Plus className="w-4 h-4" />
-          Start New {activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}
+          <Plus className="w-4 h-4 shrink-0" />
+          {!isCollapsed && (
+            <span>Start New {activeMode === "general" ? "Chat" : activeMode === "research" ? "Research" : "Workspace"}</span>
+          )}
         </button>
 
         {/* Quick Search Button / Input */}
-        {!isSearchOpen ? (
-          <button
-            onClick={() => setIsSearchOpen(true)}
-            className="w-full flex items-center justify-between text-xs py-2.5 px-3.5 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40 text-slate-400 hover:text-[#C96A3D] hover:border-slate-300 dark:hover:border-slate-700/80 dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900/60 transition-all cursor-pointer shadow-3xs"
-            title="Search Recent Conversations"
-          >
-            <div className="flex items-center gap-2">
-              <Search className="w-3.5 h-3.5 text-slate-400" />
-              <span>Search recent chats...</span>
-            </div>
-          </button>
-        ) : (
-          <div className="relative flex items-center gap-2 animate-fade-in-down">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                autoFocus
-                placeholder="Search conversations..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full text-xs py-2.5 pl-9 pr-12 rounded-xl border border-[#C96A3D] dark:border-[#C96A3D] bg-white dark:bg-slate-900 outline-none text-[#14213D] dark:text-white transition-all focus:ring-2 focus:ring-[#C96A3D]/20 font-medium"
-              />
-              <Search className="absolute left-3 top-3 text-[#C96A3D] w-3.5 h-3.5" />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-[10px] tracking-wide"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+        {!isCollapsed ? (
+          !isSearchOpen ? (
             <button
-              onClick={() => {
-                setIsSearchOpen(false);
-                setSearchQuery("");
-              }}
-              className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-950/40 bg-slate-55 dark:bg-slate-900 transition-colors cursor-pointer"
-              title="Close Search"
+              onClick={() => setIsSearchOpen(true)}
+              className="w-full flex items-center justify-between text-xs py-2.5 px-3.5 rounded-xl border border-slate-200 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/40 text-slate-400 hover:text-[#C96A3D] hover:border-slate-300 dark:hover:border-slate-700/80 dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900/60 transition-all cursor-pointer shadow-3xs"
+              title="Search Recent Conversations"
             >
-              <X className="w-4 h-4" />
+              <div className="flex items-center gap-2">
+                <Search className="w-3.5 h-3.5 text-slate-400" />
+                <span>Search recent chats...</span>
+              </div>
             </button>
-          </div>
+          ) : (
+            <div className="relative flex items-center gap-2 animate-fade-in-down">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="Search conversations..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full text-xs py-2.5 pl-9 pr-12 rounded-xl border border-[#C96A3D] dark:border-[#C96A3D] bg-white dark:bg-slate-900 outline-none text-[#14213D] dark:text-white transition-all focus:ring-2 focus:ring-[#C96A3D]/20 font-medium"
+                />
+                <Search className="absolute left-3 top-3 text-[#C96A3D] w-3.5 h-3.5" />
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-bold text-[10px] tracking-wide"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setIsSearchOpen(false);
+                  setSearchQuery("");
+                }}
+                className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-rose-500 hover:border-rose-200 dark:hover:border-rose-950/40 bg-slate-55 dark:bg-slate-900 transition-colors cursor-pointer"
+                title="Close Search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )
+        ) : (
+          <button
+            onClick={() => {
+              onToggleCollapse?.();
+              setIsSearchOpen(true);
+            }}
+            className="w-11 h-11 flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-800/85 bg-slate-50/50 dark:bg-slate-900/40 text-slate-400 hover:text-[#C96A3D] hover:border-slate-300 dark:hover:border-slate-700 hover:bg-white dark:hover:bg-slate-900/60 transition-all cursor-pointer shadow-3xs active:scale-95"
+            title="Search Chats"
+          >
+            <Search className="w-4 h-4 text-slate-400" />
+          </button>
         )}
       </div>
 
       {/* Primary Scrollable Workspace Section (One continuous scroll container) */}
       <div 
-        className="flex-1 min-h-0 overflow-y-auto p-4 space-y-5 flex flex-col"
+        className={`flex-1 min-h-0 overflow-y-auto ${isCollapsed ? "px-2 py-4 space-y-4" : "p-4 space-y-5"} flex flex-col items-center`}
         onScroll={handleScroll}
         style={{ scrollBehavior: "smooth", WebkitOverflowScrolling: "touch" }}
       >
         
         {/* A: Pinned Chats section */}
         {pinnedChats.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex justify-between items-center">
-              <h4 className="text-[10px] font-black uppercase tracking-widest text-[#C96A3D] flex items-center gap-1.5">
-                <Pin className="w-3.5 h-3.5 text-[#C96A3D] fill-[#C96A3D]/15 rotate-45 shrink-0" />
-                <span>Pinned Chats</span>
-              </h4>
-              <span className="text-[9px] font-extrabold text-[#C96A3D] font-mono bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full shrink-0">
-                {pinnedChats.length}
-              </span>
-            </div>
+          <div className="space-y-2 w-full">
+            {!isCollapsed ? (
+              <div className="flex justify-between items-center">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-[#C96A3D] flex items-center gap-1.5">
+                  <Pin className="w-3.5 h-3.5 text-[#C96A3D] fill-[#C96A3D]/15 rotate-45 shrink-0" />
+                  <span>Pinned Chats</span>
+                </h4>
+                <span className="text-[9px] font-extrabold text-[#C96A3D] font-mono bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full shrink-0">
+                  {pinnedChats.length}
+                </span>
+              </div>
+            ) : (
+              <div className="border-t border-slate-100 dark:border-slate-800/80 my-2 w-full flex justify-center">
+                <Pin className="w-3.5 h-3.5 text-[#C96A3D] rotate-45 opacity-60" />
+              </div>
+            )}
 
             <Reorder.Group
               axis="y"
               values={pinnedChats}
               onReorder={handleReorderPinned}
-              className="space-y-1.5"
+              className="space-y-1.5 w-full"
             >
               <AnimatePresence initial={false}>
                 {pinnedChats.map((session) => (
                   <Reorder.Item
                     key={session.id}
                     value={session}
-                    dragListener={!searchQuery.trim()}
-                    className="outline-none"
+                    dragListener={!searchQuery.trim() && !isCollapsed}
+                    className="outline-none w-full"
                     style={{ position: "relative" }}
                   >
                     {renderChatItem(session, true)}
@@ -484,17 +583,21 @@ export function Sidebar({
         {/* B: Grouped Conversations (Continuous List with Today, Yesterday, Last 7 days, Older) */}
         {activeGroups.length > 0 ? (
           activeGroups.map((group) => (
-            <div key={group.title} className="space-y-2 pt-1">
-              <div className="flex justify-between items-center">
-                <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  {group.title}
-                </h4>
-                <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
-                  {group.chats.length}
-                </span>
-              </div>
+            <div key={group.title} className="space-y-2 pt-1 w-full">
+              {!isCollapsed ? (
+                <div className="flex justify-between items-center">
+                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                    {group.title}
+                  </h4>
+                  <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
+                    {group.chats.length}
+                  </span>
+                </div>
+              ) : (
+                <div className="border-t border-slate-100 dark:border-slate-800/40 my-3 w-full shrink-0" />
+              )}
 
-              <div className="space-y-1.5 pr-1">
+              <div className={`space-y-1.5 w-full ${isCollapsed ? "" : "pr-1"}`}>
                 <AnimatePresence initial={false}>
                   {group.chats.map((session) => (
                     <motion.div
@@ -503,6 +606,7 @@ export function Sidebar({
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
                       transition={{ duration: 0.2 }}
+                      className="w-full"
                     >
                       {renderChatItem(session, false)}
                     </motion.div>
@@ -513,32 +617,51 @@ export function Sidebar({
           ))
         ) : (
           unpinnedChats.length === 0 && (
-            <div className="space-y-2 pt-1">
-              <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                Recent Conversations
-              </h4>
-              <p className="text-[11px] text-slate-400 italic text-left p-2">
-                No matching logs found.
-              </p>
+            <div className="space-y-2 pt-1 w-full text-center">
+              {!isCollapsed && (
+                <>
+                  <h4 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500 text-left">
+                    Recent Conversations
+                  </h4>
+                  <p className="text-[11px] text-slate-400 italic text-left p-2">
+                    No matching logs found.
+                  </p>
+                </>
+              )}
             </div>
           )
         )}
 
         {/* Recently Deleted Button (placed below chats list and above footer settings) */}
-        <div className="mt-auto pt-4 border-t border-slate-100 dark:border-slate-800/80">
+        <div className={`mt-auto pt-4 border-t border-slate-100 dark:border-slate-800/80 w-full flex justify-center`}>
           <button
             onClick={() => {
               onSelectRecentlyDeleted?.();
               onCloseMobile?.();
             }}
-            className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-semibold select-none transition-all duration-200 cursor-pointer ${
-              isRecentlyDeletedActive
-                ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
-                : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
+            className={`flex items-center select-none transition-all duration-200 cursor-pointer ${
+              isCollapsed 
+                ? `w-11 h-11 justify-center rounded-xl relative group/deleted border ${
+                    isRecentlyDeletedActive 
+                      ? "border-[#C96A3D]/25 bg-[#C96A3D]/10 text-[#C96A3D]" 
+                      : "border-transparent text-slate-400 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700"
+                  }`
+                : `w-full gap-2.5 p-2.5 rounded-xl border text-xs font-semibold ${
+                    isRecentlyDeletedActive
+                      ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
+                      : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
+                  }`
             }`}
           >
             <Trash2 className={`w-3.5 h-3.5 shrink-0 ${isRecentlyDeletedActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
-            <span>Recently Deleted</span>
+            {!isCollapsed && <span>Recently Deleted</span>}
+
+            {isCollapsed && (
+              <div className="absolute left-[54px] top-1/2 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/deleted:opacity-100 group-hover/deleted:scale-100 group-hover/deleted:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
+                <span className="font-extrabold text-slate-100">Recently Deleted</span>
+                <div className="absolute right-full top-1/2 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
+              </div>
+            )}
           </button>
         </div>
 
@@ -546,101 +669,202 @@ export function Sidebar({
 
       {/* Guest Mode Sign-In / Account footer */}
       {user.isGuest ? (
-        <div className="p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-3 text-xs shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            <div className="w-9 h-9 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm">
-              G
+        <div className={`p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex ${isCollapsed ? "flex-col items-center gap-4" : "items-center justify-between gap-3"} text-xs shrink-0`}>
+          {isCollapsed ? (
+            <div className="relative group/user flex flex-col gap-3 items-center">
+              <button
+                onClick={() => {
+                  onOpenAuth();
+                  onCloseMobile?.();
+                }}
+                className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm cursor-pointer hover:bg-[#C96A3D]/10 hover:text-[#C96A3D] transition-colors"
+                title="Sign In"
+              >
+                G
+              </button>
+              
+              <button
+                onClick={() => {
+                  onOpenSettings?.();
+                  onCloseMobile?.();
+                }}
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] hover:border-[#C96A3D]/30 hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
+                title="Open Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+
+              <div className="absolute left-[54px] top-4 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/user:opacity-100 group-hover/user:scale-100 group-hover/user:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
+                <div className="flex flex-col">
+                  <span className="font-extrabold text-slate-100">Guest User</span>
+                  <span className="text-[9px] text-slate-400">Sign in to sync logs</span>
+                </div>
+                <div className="absolute right-full top-[24px] -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
+              </div>
             </div>
-            <div className="text-left min-w-0 flex-1 leading-snug">
-              <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
-                Guest User
-              </h5>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate font-mono">
-                Sign in to sync logs
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => {
-                onOpenSettings?.();
-                onCloseMobile?.();
-              }}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
-              title="Open Settings"
-              id="sidebar-footer-settings-btn-guest"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => {
-                onOpenAuth();
-                onCloseMobile?.();
-              }}
-              className="flex items-center gap-1.5 py-2 px-3 bg-[#14213D] dark:bg-white hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] text-white dark:text-[#14213D] dark:hover:text-white text-[11px] font-bold rounded-xl shadow-3xs cursor-pointer transition-all active:scale-95"
-            >
-              <LogIn className="w-3.5 h-3.5 shrink-0" />
-              <span>Sign In</span>
-            </button>
-          </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="w-9 h-9 rounded-2xl bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm">
+                  G
+                </div>
+                <div className="text-left min-w-0 flex-1 leading-snug">
+                  <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
+                    Guest User
+                  </h5>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate font-mono">
+                    Sign in to sync logs
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  onClick={() => {
+                    onOpenSettings?.();
+                    onCloseMobile?.();
+                  }}
+                  className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
+                  title="Open Settings"
+                  id="sidebar-footer-settings-btn-guest"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    onOpenAuth();
+                    onCloseMobile?.();
+                  }}
+                  className="flex items-center gap-1.5 py-2 px-3 bg-[#14213D] dark:bg-white hover:bg-[#C96A3D] dark:hover:bg-[#C96A3D] text-white dark:text-[#14213D] dark:hover:text-white text-[11px] font-bold rounded-xl shadow-3xs cursor-pointer transition-all active:scale-95"
+                >
+                  <LogIn className="w-3.5 h-3.5 shrink-0" />
+                  <span>Sign In</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ) : (
         /* Logged-In User Profile bottom footer */
-        <div className="p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex items-center justify-between gap-3 text-xs shrink-0" id="nexa-sidebar-footer">
-          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-            {user.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.fullName}
-                className="w-9 h-9 rounded-2xl object-cover shrink-0 select-none border border-slate-200 dark:border-slate-800 shadow-3xs"
-              />
-            ) : (
-              <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm">
-                {user.fullName ? user.fullName[0].toUpperCase() : "N"}
-              </div>
-            )}
-            <div className="text-left min-w-0 flex-1 leading-snug">
-              <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
-                {user.fullName}
-              </h5>
-              <p className="text-[10px] text-slate-450 dark:text-slate-450 truncate font-normal" title={user.email}>
-                {user.email}
-              </p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="text-[9px] font-black text-[#C96A3D] bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full inline-block font-mono">
-                  {user.gamification?.points || 0} XP
-                </span>
-              </div>
-            </div>
-          </div>
+        <div className={`p-4 border-t border-slate-150 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 flex ${isCollapsed ? "flex-col items-center gap-3" : "items-center justify-between gap-3"} text-xs shrink-0`} id="nexa-sidebar-footer">
+          {isCollapsed ? (
+            <div className="relative group/user flex flex-col gap-3.5 items-center">
+              {user.avatarUrl ? (
+                <img
+                  src={user.avatarUrl}
+                  alt={user.fullName}
+                  className="w-10 h-10 rounded-xl object-cover shrink-0 select-none border border-slate-200 dark:border-slate-800 shadow-3xs cursor-pointer"
+                  onClick={() => {
+                    onOpenSettings?.();
+                    onCloseMobile?.();
+                  }}
+                />
+              ) : (
+                <div 
+                  className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm cursor-pointer"
+                  onClick={() => {
+                    onOpenSettings?.();
+                    onCloseMobile?.();
+                  }}
+                >
+                  {user.fullName ? user.fullName[0].toUpperCase() : "N"}
+                </div>
+              )}
 
-          {/* Settings and logout buttons next to Gmail email */}
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={() => {
-                onOpenSettings?.();
-                onCloseMobile?.();
-              }}
-              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
-              title="Open Settings"
-              id="sidebar-footer-settings-btn"
-            >
-              <Settings className="w-4 h-4" />
-            </button>
-            {onLogout && (
               <button
                 onClick={() => {
-                  onLogout();
+                  onOpenSettings?.();
                   onCloseMobile?.();
                 }}
-                className="p-2 rounded-xl border border-transparent hover:border-slate-200 dark:hover:border-slate-800 text-slate-400 hover:text-rose-500 hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer"
-                title="Sign Out"
-                id="sidebar-footer-logout-btn"
+                className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
+                title="Open Settings"
+                id="sidebar-footer-settings-btn"
               >
-                <LogOut className="w-4 h-4" />
+                <Settings className="w-4 h-4" />
               </button>
-            )}
-          </div>
+
+              {onLogout && (
+                <button
+                  onClick={() => {
+                    onLogout();
+                    onCloseMobile?.();
+                  }}
+                  className="p-2 rounded-xl border border-transparent hover:border-slate-200 dark:hover:border-slate-800 text-slate-400 hover:text-rose-500 hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer"
+                  title="Sign Out"
+                  id="sidebar-footer-logout-btn"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
+
+              <div className="absolute left-[54px] top-5 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/user:opacity-100 group-hover/user:scale-100 group-hover/user:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-extrabold text-slate-100">{user.fullName}</span>
+                  <span className="text-[10px] text-slate-400 font-normal">{user.email}</span>
+                  <span className="text-[9px] font-black text-[#C96A3D] bg-[#C96A3D]/20 px-1.5 py-0.5 rounded-md inline-block font-mono mt-1 text-center">
+                    {user.gamification?.points || 0} XP
+                  </span>
+                </div>
+                <div className="absolute right-full top-5 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                {user.avatarUrl ? (
+                  <img
+                    src={user.avatarUrl}
+                    alt={user.fullName}
+                    className="w-9 h-9 rounded-2xl object-cover shrink-0 select-none border border-slate-200 dark:border-slate-800 shadow-3xs"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center font-bold text-sm shrink-0 select-none shadow-sm">
+                    {user.fullName ? user.fullName[0].toUpperCase() : "N"}
+                  </div>
+                )}
+                <div className="text-left min-w-0 flex-1 leading-snug">
+                  <h5 className="font-extrabold text-slate-800 dark:text-slate-100 truncate text-[11.5px]">
+                    {user.fullName}
+                  </h5>
+                  <p className="text-[10px] text-slate-450 dark:text-slate-450 truncate font-normal" title={user.email}>
+                    {user.email}
+                  </p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[9px] font-black text-[#C96A3D] bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full inline-block font-mono">
+                      {user.gamification?.points || 0} XP
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Settings and logout buttons next to Gmail email */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => {
+                    onOpenSettings?.();
+                    onCloseMobile?.();
+                  }}
+                  className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer shadow-3xs"
+                  title="Open Settings"
+                  id="sidebar-footer-settings-btn"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+                {onLogout && (
+                  <button
+                    onClick={() => {
+                      onLogout();
+                      onCloseMobile?.();
+                    }}
+                    className="p-2 rounded-xl border border-transparent hover:border-slate-200 dark:hover:border-slate-800 text-slate-400 hover:text-rose-500 hover:bg-white dark:hover:bg-slate-900 transition-all cursor-pointer"
+                    title="Sign Out"
+                    id="sidebar-footer-logout-btn"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </aside>

@@ -61,6 +61,8 @@ export interface Message {
     textPreview?: string;
   };
   reaction?: string;
+  senderName?: string;
+  senderEmail?: string;
 }
 
 export interface ChatSession {

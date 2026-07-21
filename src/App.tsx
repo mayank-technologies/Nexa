@@ -69,6 +69,10 @@ import { PermissionsModal } from "./components/PermissionsModal";
 import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
 import { RecentlyDeleted } from "./components/RecentlyDeleted";
+import { ShareModal } from "./components/ShareModal";
+import { JoinModal } from "./components/JoinModal";
+import { ArchiveView } from "./components/ArchiveView";
+import { ConversationHeaderMenu } from "./components/ConversationHeaderMenu";
 import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
 import { safeStorage, copyToClipboard } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
@@ -521,7 +525,7 @@ export default function App() {
   }, []);
 
   const [deletedSessions, setDeletedSessions] = useState<ChatSession[]>([]);
-  const [currentView, setCurrentView] = useState<"chat" | "recently_deleted">("chat");
+  const [currentView, setCurrentView] = useState<"chat" | "recently_deleted" | "archive">("chat");
   const [isDeletedLoading, setIsDeletedLoading] = useState(false);
   const [undoToast, setUndoToast] = useState<{
     message: string;
@@ -627,6 +631,23 @@ export default function App() {
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
 
+  // --- REAL-TIME COLLABORATIVE SHARED CONVERSATIONS STATES ---
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareModalSessionId, setShareModalSessionId] = useState<string | null>(null);
+  const [shareConfig, setShareConfig] = useState<any>(null);
+  const [isShareLoading, setIsShareLoading] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinTokenInput, setJoinTokenInput] = useState("");
+  const [isJoiningLoading, setIsJoiningLoading] = useState(false);
+
+  // Real-time states
+  const [isSharedSession, setIsSharedSession] = useState(false);
+  const [sharedRole, setSharedRole] = useState<'owner' | 'editor' | 'viewer' | null>(null);
+  const [sharedParticipants, setSharedParticipants] = useState<any[]>([]);
+  const wsRef = useRef<WebSocket | null>(null);
+  const [userIsTyping, setUserIsTyping] = useState(false);
+  const typingTimeoutRef = useRef<any>(null);
+
   const [activeSessionId, setActiveSessionId] = useState<string>("");
 
   // Controls Chat thread inputs
@@ -709,6 +730,34 @@ export default function App() {
   });
 
 
+
+  const handleUserTyping = () => {
+    if (!isSharedSession || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+    if (!userIsTyping) {
+      setUserIsTyping(true);
+      wsRef.current.send(JSON.stringify({
+        type: "typing",
+        chatId: activeSessionId,
+        isTyping: true
+      }));
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: "typing",
+          chatId: activeSessionId,
+          isTyping: false
+        }));
+      }
+      setUserIsTyping(false);
+    }, 2000);
+  };
 
   // References to auto-scroll messages
   const messageEndRef = useRef<HTMLDivElement | null>(null);
@@ -1088,6 +1137,170 @@ export default function App() {
       }
     };
   }, [activeSessionId, user?.uid, user?.email, user?.isGuest]);
+
+  // --- WebSocket & Real-Time Sharing Coordination Effect ---
+  useEffect(() => {
+    if (!activeSessionId || !user || user.isGuest) {
+      setIsSharedSession(false);
+      setSharedRole(null);
+      setSharedParticipants([]);
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      return;
+    }
+
+    let isSubscribed = true;
+    let ws: WebSocket | null = null;
+
+    const checkSharingAndConnect = async () => {
+      try {
+        const res = await fetch(`/api/share/info/${activeSessionId}?email=${user.email || ""}`);
+        const data = await res.json();
+        
+        if (!isSubscribed) return;
+
+        if (data.success && data.isShared && data.config?.isSharingActive) {
+          setIsSharedSession(true);
+          const config = data.config;
+          const userEmail = (user.email || "").toLowerCase().trim();
+          
+          let role: 'owner' | 'editor' | 'viewer' = 'viewer';
+          if (config.ownerEmail === userEmail) {
+            role = 'owner';
+          } else {
+            const p = config.participants?.find((part: any) => part.email === userEmail);
+            if (p) {
+              role = p.role;
+            } else if (config.defaultPermission === "chat") {
+              role = 'editor';
+            }
+          }
+          setSharedRole(role);
+          setSharedParticipants(config.participants || []);
+
+          // Fetch latest shared session messages to ensure synchronization
+          const sessionRes = await fetch(`/api/share/session/${activeSessionId}?email=${user.email || ""}`);
+          const sessionData = await sessionRes.json();
+          if (sessionData.success && sessionData.session && isSubscribed) {
+            setSessions((prev) =>
+              prev.map((s) => {
+                if (s.id === activeSessionId) {
+                  return {
+                    ...s,
+                    title: sessionData.session.title || s.title,
+                    messages: sessionData.session.messages || [],
+                  };
+                }
+                return s;
+              })
+            );
+          }
+
+          // Connect to WebSocket
+          if (wsRef.current) {
+            wsRef.current.close();
+          }
+
+          const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+          const wsUrl = `${protocol}//${window.location.host}`;
+          ws = new WebSocket(wsUrl);
+          wsRef.current = ws;
+
+          ws.onopen = () => {
+            console.log("[Nexa WS client] Connected successfully to share room:", activeSessionId);
+            ws?.send(
+              JSON.stringify({
+                type: "join-room",
+                chatId: activeSessionId,
+                user: {
+                  email: user.email,
+                  fullName: user.fullName,
+                },
+              })
+            );
+          };
+
+          ws.onmessage = (event) => {
+            try {
+              const payload = JSON.parse(event.data);
+              console.log("[Nexa WS client] Message received:", payload);
+              
+              if (payload.type === "presence-update") {
+                if (isSubscribed) {
+                  setSharedParticipants(payload.participants || []);
+                }
+              } else if (payload.type === "message-sync") {
+                if (isSubscribed) {
+                  const message = payload.message;
+                  setSessions((prev) =>
+                    prev.map((s) => {
+                      if (s.id === activeSessionId) {
+                        const exists = s.messages.some((m) => m.id === message.id);
+                        let updatedMsgs;
+                        if (exists) {
+                          updatedMsgs = s.messages.map((m) => m.id === message.id ? message : m);
+                        } else {
+                          updatedMsgs = [...s.messages, message];
+                        }
+                        return {
+                          ...s,
+                          messages: updatedMsgs,
+                          updatedAt: new Date().toISOString(),
+                        };
+                      }
+                      return s;
+                    })
+                  );
+                }
+              } else if (payload.type === "notification") {
+                console.info("[Nexa Collaboration Info]", payload.message);
+              } else if (payload.type === "revoked") {
+                alert(payload.message || "This sharing session was revoked by the owner.");
+                setIsSharedSession(false);
+                setSharedRole(null);
+                ws?.close();
+              }
+            } catch (err) {
+              console.error("[Nexa WS client] Error parsing event data:", err);
+            }
+          };
+
+          ws.onclose = () => {
+            console.log("[Nexa WS client] Socket closed for room:", activeSessionId);
+          };
+
+          ws.onerror = (err) => {
+            console.error("[Nexa WS client] Socket error occurred:", err);
+          };
+
+        } else {
+          setIsSharedSession(false);
+          setSharedRole(null);
+          setSharedParticipants([]);
+          if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+          }
+        }
+      } catch (err) {
+        console.error("Error updating sharing metadata:", err);
+      }
+    };
+
+    checkSharingAndConnect();
+
+    return () => {
+      isSubscribed = false;
+      if (ws) {
+        ws.close();
+      }
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+    };
+  }, [activeSessionId, user]);
 
   useEffect(() => {
     console.log("[Nexa Restorations Debug] [settings update] Settings state updated:", settings);
@@ -1561,6 +1774,117 @@ export default function App() {
         return s;
       })
     );
+  };
+
+  const handleToggleArchive = (id: string) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id === id) {
+          const isArchived = !(s as any).isArchived;
+          const updatedChat = {
+            ...s,
+            isArchived,
+            updatedAt: new Date().toISOString(),
+          };
+          syncChatSummaryToSupabase(updatedChat);
+          
+          setCustomToast({
+            title: isArchived ? "Chat Archived" : "Chat Restored",
+            message: isArchived 
+              ? `"${s.title}" has been moved to your archive.` 
+              : `"${s.title}" has been restored to your recent chats.`,
+            type: "success",
+          });
+          
+          return updatedChat;
+        }
+        return s;
+      })
+    );
+    
+    // If the archived chat is currently active, switch to the first remaining active chat
+    setTimeout(() => {
+      setSessions((currentSessions) => {
+        const active = currentSessions.find((s) => s.id === activeSessionId);
+        if (active && (active as any).isArchived) {
+          const remainingActive = currentSessions.filter((s) => !(s as any).isArchived);
+          if (remainingActive.length > 0) {
+            setActiveSessionId(remainingActive[0].id);
+            setActiveMode(remainingActive[0].mode || "general");
+          } else {
+            // Create fresh session if no active sessions remain
+            handleNewSession("general");
+          }
+        }
+        return currentSessions;
+      });
+    }, 50);
+  };
+
+  const handleToggleFavorite = (id: string) => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id === id) {
+          const isFavorite = !(s as any).isFavorite;
+          const updatedChat = {
+            ...s,
+            isFavorite,
+            updatedAt: new Date().toISOString(),
+          };
+          syncChatSummaryToSupabase(updatedChat);
+          
+          setCustomToast({
+            title: isFavorite ? "Added to Favorites" : "Removed from Favorites",
+            message: isFavorite 
+              ? `"${s.title}" is now starred.` 
+              : `"${s.title}" has been removed from favorites.`,
+            type: "success",
+          });
+          
+          return updatedChat;
+        }
+        return s;
+      })
+    );
+  };
+
+  const handleDuplicateSession = (id: string) => {
+    const original = sessions.find((s) => s.id === id);
+    if (!original) return;
+    
+    const duplicateId = `session-${Date.now()}`;
+    const duplicate: ChatSession = {
+      ...original,
+      id: duplicateId,
+      title: `${original.title} (Copy)`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isPinned: false,
+      isDeleted: false,
+    };
+    (duplicate as any).isArchived = false;
+    (duplicate as any).isFavorite = false;
+    
+    setSessions((prev) => [duplicate, ...prev]);
+    setActiveSessionId(duplicateId);
+    setActiveMode(duplicate.mode || "general");
+    setCurrentView("chat");
+    
+    syncChatSummaryToSupabase(duplicate);
+    
+    // Duplicate messages in db too
+    original.messages.forEach((msg) => {
+      if (user && !user.isGuest && user.uid) {
+        syncMessageToSupabase(duplicateId, msg);
+      }
+    });
+
+    setCustomToast({
+      title: "Conversation Duplicated",
+      message: `"${original.title}" duplicated successfully.`,
+      type: "success",
+    });
+    playUiSound("success");
   };
 
   const handlePinSession = (id: string) => {
@@ -2479,6 +2803,13 @@ export default function App() {
     
     // Save user message immediately to Supabase subcollection & update parent metadata
     syncMessageSummaryToSupabase(activeSessionId, newUserMsg);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "message-sync",
+        chatId: activeSessionId,
+        message: newUserMsg
+      }));
+    }
     console.log("[Nexa Debug] [Send Message] Conversation ID after Send:", activeSessionId);
     
     const updatedParentChat: ChatSession = {
@@ -2591,6 +2922,13 @@ export default function App() {
         const finalMsg = { ...newAssistantMsg, content: fullContent };
         triggerVoiceIfNeeded(finalMsg);
         syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: "message-sync",
+            chatId: activeSessionId,
+            message: finalMsg
+          }));
+        }
         const finalParentChat: ChatSession = {
           ...updatedParentChat,
           updatedAt: new Date().toISOString()
@@ -2645,6 +2983,13 @@ export default function App() {
 
             // Sync complete message to Supabase
             syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: "message-sync",
+                chatId: activeSessionId,
+                message: finalMsg
+              }));
+            }
             const finalParentChat: ChatSession = {
               ...updatedParentChat,
               updatedAt: new Date().toISOString()
@@ -2825,6 +3170,15 @@ export default function App() {
             onOpenFeedback={() => setIsFeedbackOpen(true)}
             onSelectRecentlyDeleted={() => setCurrentView("recently_deleted")}
             isRecentlyDeletedActive={currentView === "recently_deleted"}
+            onSelectArchive={() => setCurrentView("archive")}
+            isArchiveActive={currentView === "archive"}
+            onOpenShare={(id) => {
+              setActiveSessionId(id);
+              setShowShareModal(true);
+            }}
+            onOpenJoinCollaboration={() => {
+              setShowJoinModal(true);
+            }}
           />
         </div>
 
@@ -2884,6 +3238,18 @@ export default function App() {
                     setIsMobileSidebarOpen(false);
                   }}
                   isRecentlyDeletedActive={currentView === "recently_deleted"}
+                  onSelectArchive={() => {
+                    setCurrentView("archive");
+                    setIsMobileSidebarOpen(false);
+                  }}
+                  isArchiveActive={currentView === "archive"}
+                  onOpenShare={(id) => {
+                    setActiveSessionId(id);
+                    setShowShareModal(true);
+                  }}
+                  onOpenJoinCollaboration={() => {
+                    setShowJoinModal(true);
+                  }}
                 />
               </motion.div>
             </>
@@ -2918,6 +3284,18 @@ export default function App() {
               onDeleteForever={handleDeleteSessionForever}
               onEmptyAll={handleEmptyAllRecentlyDeleted}
               onClose={() => setCurrentView("chat")}
+            />
+          ) : currentView === "archive" ? (
+            <ArchiveView
+              user={user || { fullName: "Guest User", email: "guest@nexa.ai" } as UserProfile}
+              archivedSessions={sessions.filter((s) => (s as any).isArchived)}
+              onRestore={(id) => handleToggleArchive(id)}
+              onDelete={(id) => handleDeleteSession(id)}
+              onClose={() => setCurrentView("chat")}
+              onSelectSession={(id) => {
+                setActiveSessionId(id);
+                setCurrentView("chat");
+              }}
             />
           ) : (
             <>
@@ -2977,7 +3355,7 @@ export default function App() {
               // Message Logs list feeds
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                 {/* Chat Thread Header */}
-                <div className="flex items-center justify-between py-2.5 px-4 mb-3 rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md shrink-0">
+                <div className="flex items-center justify-between py-2.5 px-4 mb-3 rounded-2xl border border-slate-200/60 dark:border-slate-800/80 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md shrink-0 relative z-30">
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-2 h-2 rounded-full bg-[#C96A3D] shrink-0 animate-pulse" />
                     <div className="min-w-0">
@@ -3007,6 +3385,23 @@ export default function App() {
                         </>
                       )}
                     </button>
+
+                    <ConversationHeaderMenu
+                      activeSession={activeSession}
+                      isSharedSession={isSharedSession}
+                      sharedRole={sharedRole}
+                      sharedParticipants={sharedParticipants}
+                      onPinToggle={handlePinSession}
+                      onOpenShare={(id) => {
+                        setActiveSessionId(id);
+                        setShowShareModal(true);
+                      }}
+                      onArchiveToggle={handleToggleArchive}
+                      onDeleteToggle={handleDeleteSession}
+                      onFavoriteToggle={handleToggleFavorite}
+                      onRenameSession={handleRenameSession}
+                      onDuplicateSession={handleDuplicateSession}
+                    />
                   </div>
                 </div>
 
@@ -3085,6 +3480,24 @@ export default function App() {
               </div>
             )}
 
+            {/* Typing indicators */}
+            {isSharedSession && sharedParticipants.filter(p => p.email !== user.email && p.isTyping).length > 0 && (
+              <div className="text-[10px] font-bold text-[#C96A3D] dark:text-[#C96A3D]/95 px-2 pb-1.5 flex items-center gap-1.5 animate-pulse">
+                <span className="flex gap-1 items-center">
+                  <span className="w-1 h-1 rounded-full bg-[#C96A3D] animate-bounce" style={{ animationDelay: "0ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-[#C96A3D] animate-bounce" style={{ animationDelay: "150ms" }} />
+                  <span className="w-1 h-1 rounded-full bg-[#C96A3D] animate-bounce" style={{ animationDelay: "300ms" }} />
+                </span>
+                <span>
+                  {sharedParticipants
+                    .filter(p => p.email !== user.email && p.isTyping)
+                    .map(p => p.name || p.email.split("@")[0])
+                    .join(", ")}{" "}
+                  {sharedParticipants.filter(p => p.email !== user.email && p.isTyping).length === 1 ? "is typing..." : "are typing..."}
+                </span>
+              </div>
+            )}
+
             {/* Text input controller box */}
             <form
               onSubmit={(e) => {
@@ -3115,8 +3528,9 @@ export default function App() {
                 <button
                   id="nexa-plus-button"
                   type="button"
+                  disabled={isSharedSession && sharedRole === 'viewer'}
                   onClick={() => setShowUploadOptions(!showUploadOptions)}
-                  className="p-2 text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+                  className="p-2 text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-xl transition-colors cursor-pointer flex items-center justify-center disabled:opacity-30 disabled:cursor-not-allowed"
                   title="Attach File (+)"
                 >
                   <Plus className={`w-5 h-5 transition-transform duration-200 ${showUploadOptions ? "rotate-45 text-[#C96A3D]" : ""}`} />
@@ -3420,15 +3834,21 @@ export default function App() {
               <textarea
                 id="nexa-chat-input"
                 value={inputPrompt}
-                onChange={(e) => setInputPrompt(e.target.value)}
+                onChange={(e) => {
+                  setInputPrompt(e.target.value);
+                  handleUserTyping();
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     handleChatSubmit();
                   }
                 }}
+                disabled={isSharedSession && sharedRole === 'viewer'}
                 placeholder={
-                  activeMode === "general"
+                  isSharedSession && sharedRole === 'viewer'
+                    ? "You have View Only access to this shared conversation."
+                    : activeMode === "general"
                     ? "Ask Nexa anything..."
                     : activeMode === "research"
                     ? "Specify search topic for Deep Research reports..."
@@ -3437,7 +3857,7 @@ export default function App() {
                     : "Enter writing details..."
                 }
                 rows={1}
-                className="flex-1 text-xs py-2 px-3 bg-transparent outline-none max-h-36 resize-none text-[#14213D] dark:text-white placeholder:text-slate-400 font-normal m-0"
+                className="flex-1 text-xs py-2 px-3 bg-transparent outline-none max-h-36 resize-none text-[#14213D] dark:text-white placeholder:text-slate-400 font-normal m-0 disabled:opacity-60 disabled:cursor-not-allowed"
               />
 
               <AnimatePresence mode="wait">
@@ -3463,7 +3883,7 @@ export default function App() {
                     exit={{ opacity: 0, scale: 0.8 }}
                     transition={{ duration: 0.15 }}
                     type="submit"
-                    disabled={(!inputPrompt.trim() && !attachment)}
+                    disabled={(!inputPrompt.trim() && !attachment) || (isSharedSession && sharedRole === 'viewer')}
                     className="p-2.5 bg-[#14213D] hover:bg-[#C96A3D] dark:bg-slate-100 dark:hover:bg-[#C96A3D] dark:hover:text-white dark:text-[#14213D] text-white rounded-xl transition-all hover:scale-105 shrink-0 disabled:opacity-40 disabled:hover:scale-100 cursor-pointer flex items-center justify-center"
                     title="Send Message"
                   >
@@ -3731,6 +4151,28 @@ export default function App() {
         isOpen={isFeedbackOpen}
         onClose={() => setIsFeedbackOpen(false)}
         user={user}
+      />
+
+      {/* Real-time Collaborative Shared Conversations Modals */}
+      <ShareModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        chatId={activeSessionId}
+        userEmail={user?.email || "guest@nexa.ai"}
+        userName={user?.fullName || "Guest Collaborator"}
+      />
+
+      <JoinModal
+        isOpen={showJoinModal}
+        onClose={() => setShowJoinModal(false)}
+        userEmail={user?.email || "guest@nexa.ai"}
+        userName={user?.fullName || "Guest Collaborator"}
+        onJoinSuccess={async (chatId) => {
+          // Trigger the App to switch to the joined conversation
+          setActiveSessionId(chatId);
+          setCurrentView("chat");
+          playUiSound("success");
+        }}
       />
 
       {/* Vercel Analytics tracking tag */}

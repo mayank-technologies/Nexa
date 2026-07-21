@@ -239,8 +239,19 @@ export function MessageList({
                   </div>
                 )}
                 <div>
-                  <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight">
-                    {isModel ? "Nexa Intelligence" : (userName || "User Account")}
+                  <h5 className="text-xs font-black text-[#14213D] dark:text-white capitalize leading-tight flex items-center gap-1.5">
+                    {isModel ? (
+                      "Nexa Intelligence"
+                    ) : (
+                      <>
+                        <span>{msg.senderName || userName || "User Account"}</span>
+                        {msg.senderEmail && (
+                          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-slate-550 border border-slate-200 dark:border-slate-800 px-1 rounded bg-slate-50 dark:bg-slate-900/50">
+                            {msg.senderEmail.split("@")[0]}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </h5>
                   <div className="flex items-center gap-1 mt-0.5 text-[9px] text-slate-400 font-semibold font-mono">
                     <Clock className="w-3 h-3 shrink-0" />

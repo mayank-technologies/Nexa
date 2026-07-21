@@ -32,6 +32,9 @@ import {
   PanelLeftOpen,
   ChevronDown,
   ChevronRight,
+  Users,
+  Link,
+  Archive,
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "motion/react";
 import { ChatSession, UserProfile } from "../types";
@@ -59,8 +62,12 @@ interface SidebarProps {
   onOpenFeedback?: () => void;
   onSelectRecentlyDeleted?: () => void;
   isRecentlyDeletedActive?: boolean;
+  onSelectArchive?: () => void;
+  isArchiveActive?: boolean;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
+  onOpenShare?: (sessionId: string) => void;
+  onOpenJoinCollaboration?: () => void;
 }
 
 export function Sidebar({
@@ -84,8 +91,12 @@ export function Sidebar({
   onOpenFeedback,
   onSelectRecentlyDeleted,
   isRecentlyDeletedActive = false,
+  onSelectArchive,
+  isArchiveActive = false,
   isCollapsed = false,
   onToggleCollapse,
+  onOpenShare,
+  onOpenJoinCollaboration,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -95,6 +106,7 @@ export function Sidebar({
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [isRecentChatsExpanded, setIsRecentChatsExpanded] = useState(true);
   const [isRecentlyDeletedExpanded, setIsRecentlyDeletedExpanded] = useState(true);
+  const [isArchiveExpanded, setIsArchiveExpanded] = useState(true);
   const touchStartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Lazy loading state for infinite scrolling
@@ -118,9 +130,13 @@ export function Sidebar({
 
   const handleShareSession = (session: ChatSession) => {
     try {
-      const shareUrl = `${window.location.origin}/share/thread/${session.id}`;
-      copyToClipboard(shareUrl);
-      alert("Shareable chat link copied to clipboard successfully!");
+      if (onOpenShare) {
+        onOpenShare(session.id);
+      } else {
+        const shareUrl = `${window.location.origin}/share/thread/${session.id}`;
+        copyToClipboard(shareUrl);
+        alert("Shareable chat link copied to clipboard successfully!");
+      }
     } catch (e) {
       console.error(e);
     }
@@ -174,11 +190,11 @@ export function Sidebar({
   });
 
   const pinnedChats = filteredSessions
-    .filter((s) => s.isPinned)
+    .filter((s) => s.isPinned && !(s as any).isArchived)
     .sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0));
 
   const unpinnedChats = filteredSessions
-    .filter((s) => !s.isPinned)
+    .filter((s) => !s.isPinned && !(s as any).isArchived)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   // Date-based grouping helpers
@@ -511,6 +527,17 @@ export function Sidebar({
                 >
                   <Plus className="w-5 h-5" />
                 </button>
+
+                {/* 4. Join Collaboration (Icon in collapsed view) */}
+                {onOpenJoinCollaboration && (
+                  <button
+                    onClick={onOpenJoinCollaboration}
+                    className="p-2 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
+                    title="Join Collaboration"
+                  >
+                    <Users className="w-5 h-5" />
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -551,6 +578,16 @@ export function Sidebar({
               </motion.div>
             )}
           </AnimatePresence>
+        )}
+
+        {!isCollapsed && onOpenJoinCollaboration && (
+          <button
+            onClick={onOpenJoinCollaboration}
+            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#C96A3D]/10 hover:bg-[#C96A3D]/20 text-[#C96A3D] rounded-xl border border-[#C96A3D]/20 text-xs font-black transition-all active:scale-98 cursor-pointer shadow-3xs"
+          >
+            <span>🔑</span>
+            <span>Join Shared Chat</span>
+          </button>
         )}
       </div>
 
@@ -695,6 +732,53 @@ export function Sidebar({
                 )}
               </AnimatePresence>
             </div>
+
+            {/* 3. Collapsible Archived Chats (Placed under Recently Deleted) */}
+            <div className="space-y-2 w-full pt-2 border-t border-slate-100 dark:border-slate-800/40">
+              <button
+                onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
+                className="w-full flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 hover:text-slate-650 dark:hover:text-slate-300 transition-colors py-1 cursor-pointer select-none outline-none"
+              >
+                <div className="flex items-center gap-1.5">
+                  {isArchiveExpanded ? (
+                    <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>Archive</span>
+                </div>
+                <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
+                  {sessions.filter(s => (s as any).isArchived).length}
+                </span>
+              </button>
+
+              <AnimatePresence initial={false}>
+                {isArchiveExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden w-full"
+                  >
+                    <button
+                      onClick={() => {
+                        onSelectArchive?.();
+                        onCloseMobile?.();
+                      }}
+                      className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border text-xs font-semibold select-none transition-all duration-200 cursor-pointer ${
+                        isArchiveActive
+                          ? "border-[#C96A3D]/20 bg-[#C96A3D]/5 text-[#C96A3D]"
+                          : "border-transparent text-slate-500 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700 dark:hover:text-slate-300"
+                      }`}
+                    >
+                      <Archive className={`w-3.5 h-3.5 shrink-0 ${isArchiveActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
+                      <span>View Archived Chats</span>
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </>
         ) : (
           /* Collapsed Icons Only mode: direct list of icons stacked vertically */
@@ -737,6 +821,29 @@ export function Sidebar({
               <Trash2 className={`w-4 h-4 shrink-0 ${isRecentlyDeletedActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
               <div className="absolute left-[54px] top-1/2 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/deleted:opacity-100 group-hover/deleted:scale-100 group-hover/deleted:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
                 <span className="font-extrabold text-slate-100">Recently Deleted</span>
+                <div className="absolute right-full top-1/2 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
+              </div>
+            </button>
+
+            {/* Archived Chats icon separator */}
+            <div className="w-8 border-t border-slate-100 dark:border-slate-800/60 my-2" />
+
+            {/* Archived Chats button */}
+            <button
+              onClick={() => {
+                onSelectArchive?.();
+                onCloseMobile?.();
+              }}
+              className={`flex items-center justify-center select-none transition-all duration-200 cursor-pointer w-11 h-11 rounded-xl relative group/archive border ${
+                isArchiveActive 
+                  ? "border-[#C96A3D]/25 bg-[#C96A3D]/10 text-[#C96A3D]" 
+                  : "border-transparent text-slate-400 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-slate-700"
+              }`}
+              title="Archived Chats"
+            >
+              <Archive className={`w-4 h-4 shrink-0 ${isArchiveActive ? "text-[#C96A3D]" : "text-slate-400"}`} />
+              <div className="absolute left-[54px] top-1/2 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/archive:opacity-100 group-hover/archive:scale-100 group-hover/archive:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
+                <span className="font-extrabold text-slate-100">Archived Chats</span>
                 <div className="absolute right-full top-1/2 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
               </div>
             </button>

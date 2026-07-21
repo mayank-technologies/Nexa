@@ -10,6 +10,7 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
+import { WebSocketServer, WebSocket } from "ws";
 
 dotenv.config();
 
@@ -418,6 +419,29 @@ async function startServer() {
       fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf8");
     } catch (e) {
       console.error("Failed to write to user database:", e);
+    }
+  };
+
+  // --- SHARED CHATS DATABASE SETUP ---
+  const SHARED_DB_PATH = path.join(process.cwd(), "shared_chats_db.json");
+
+  const readSharedDB = () => {
+    try {
+      if (fs.existsSync(SHARED_DB_PATH)) {
+        const fileContent = fs.readFileSync(SHARED_DB_PATH, "utf8");
+        return JSON.parse(fileContent);
+      }
+    } catch (e) {
+      console.error("Failed to read shared chats database:", e);
+    }
+    return {};
+  };
+
+  const writeSharedDB = (data: any) => {
+    try {
+      fs.writeFileSync(SHARED_DB_PATH, JSON.stringify(data, null, 2), "utf8");
+    } catch (e) {
+      console.error("Failed to write to shared chats database:", e);
     }
   };
 
@@ -1602,6 +1626,594 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
     }
   });
 
+  // --- SHARED CONVERSATIONS ENDPOINTS ---
+
+  // --- BRUTE FORCE PROTECTION & ACCESS CODE GENERATION ---
+  const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
+
+  function generateAccessCode(): string {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // Readable, secure uppercase chars
+    const randomSegment = (len: number) => {
+      let s = "";
+      for (let i = 0; i < len; i++) {
+        s += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return s;
+    };
+    
+    // Choose randomly from user-requested patterns: NXA-4K7P-9Q, CHAT-8M2X, NXA-AB12CD
+    const formats = [
+      () => `NXA-${randomSegment(4)}-${randomSegment(2)}`,
+      () => `CHAT-${randomSegment(4)}`,
+      () => `NXA-${randomSegment(6)}`
+    ];
+    return formats[Math.floor(Math.random() * formats.length)]();
+  }
+
+  // Unified Sharing API: POST /api/share/enable AND /api/share/create
+  const handleEnableSharingLogic = (req: any, res: any) => {
+    try {
+      const { chatId, ownerEmail, ownerName, defaultPermission = "chat", expiresAt = null } = req.body;
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const existing = sharedDb[chatId];
+
+      const token = existing?.shareToken || "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const code = existing?.accessCode || generateAccessCode();
+
+      sharedDb[chatId] = {
+        id: chatId,
+        ownerEmail: ownerEmail.toLowerCase().trim(),
+        ownerName: ownerName || ownerEmail.split("@")[0],
+        isSharingActive: true,
+        shareToken: token,
+        expiresAt: expiresAt,
+        defaultPermission: defaultPermission, // "chat" or "view"
+        participants: existing?.participants || [],
+        // Access code default state
+        accessCode: code,
+        accessCodeExpiresAt: existing?.accessCodeExpiresAt || null,
+        accessCodePermission: existing?.accessCodePermission || "chat",
+        accessCodeIsActive: existing?.accessCodeIsActive !== undefined ? existing.accessCodeIsActive : true,
+        accessCodeDurationType: existing?.accessCodeDurationType || "never"
+      };
+
+      writeSharedDB(sharedDb);
+      console.info(`[Nexa Server] Sharing enabled/created for chat ${chatId} by ${ownerEmail}`);
+
+      return res.status(200).json({ success: true, shareToken: token, config: sharedDb[chatId], config_alias: sharedDb[chatId] });
+    } catch (e: any) {
+      console.error("Error enabling share:", e);
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  };
+
+  app.post("/api/share/enable", handleEnableSharingLogic);
+  app.post("/api/share/create", handleEnableSharingLogic);
+
+  // Unified Toggle/Disable API: PATCH /api/share/toggle/:chatId, PATCH /api/share/toggle, POST /api/share/disable
+  const handleToggleSharingLogic = (req: any, res: any) => {
+    try {
+      const chatId = req.params.chatId || req.body.chatId;
+      const { ownerEmail, isSharingActive } = req.body;
+
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can toggle sharing." });
+      }
+
+      config.isSharingActive = isSharingActive !== undefined ? isSharingActive : false;
+      writeSharedDB(sharedDb);
+      console.info(`[Nexa Server] Sharing active state set to ${config.isSharingActive} for chat ${chatId}`);
+
+      if (!config.isSharingActive) {
+        // Notify WebSocket clients in the room to disconnect
+        broadcastToRoom(chatId, { type: "revoked", message: "Sharing has been disabled by the owner." });
+      }
+
+      return res.status(200).json({ success: true, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  };
+
+  app.post("/api/share/disable", (req, res) => {
+    req.body.isSharingActive = false;
+    handleToggleSharingLogic(req, res);
+  });
+  app.patch("/api/share/toggle/:chatId", handleToggleSharingLogic);
+
+  // Unified Permission API: POST /api/share/update-permission, PATCH /api/share/participant/role/:chatId
+  const handlePermissionUpdateLogic = (req: any, res: any) => {
+    try {
+      const chatId = req.params.chatId || req.body.chatId;
+      const { ownerEmail, defaultPermission, participantEmail, targetEmail, role } = req.body;
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can update permissions." });
+      }
+
+      const activeTargetEmail = participantEmail || targetEmail;
+      if (activeTargetEmail) {
+        const pEmail = activeTargetEmail.toLowerCase().trim();
+        const participant = config.participants.find((p: any) => p.email === pEmail);
+        if (participant) {
+          participant.role = role; // "editor" (Can Chat) or "viewer" (View Only)
+          console.info(`[Nexa Server] Participant ${pEmail} role updated to ${role} in chat ${chatId}`);
+          
+          // Notify the specific participant via WebSocket
+          broadcastToRoom(chatId, {
+            type: "permission-updated",
+            participantEmail: pEmail,
+            role: role
+          });
+        }
+      } else if (defaultPermission) {
+        config.defaultPermission = defaultPermission;
+        console.info(`[Nexa Server] General permission updated to ${defaultPermission} in chat ${chatId}`);
+        broadcastToRoom(chatId, {
+          type: "general-permission-updated",
+          defaultPermission: defaultPermission
+        });
+      }
+
+      writeSharedDB(sharedDb);
+      return res.status(200).json({ success: true, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  };
+
+  app.post("/api/share/update-permission", handlePermissionUpdateLogic);
+  app.patch("/api/share/participant/role/:chatId", handlePermissionUpdateLogic);
+
+  // Unified Remove Participant API: POST /api/share/remove-participant, DELETE /api/share/participant/remove/:chatId
+  const handleRemoveParticipantLogic = (req: any, res: any) => {
+    try {
+      const chatId = req.params.chatId || req.body.chatId;
+      const { ownerEmail, participantEmail, targetEmail } = req.body;
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can remove participants." });
+      }
+
+      const activeTargetEmail = participantEmail || targetEmail;
+      if (!activeTargetEmail) {
+        return res.status(400).json({ success: false, error: "Participant/Target email is required." });
+      }
+
+      const pEmail = activeTargetEmail.toLowerCase().trim();
+      const index = config.participants.findIndex((p: any) => p.email === pEmail);
+      if (index !== -1) {
+        config.participants.splice(index, 1);
+        writeSharedDB(sharedDb);
+        console.info(`[Nexa Server] Participant ${pEmail} removed from chat ${chatId}`);
+
+        // Notify client to disconnect/kick
+        broadcastToRoom(chatId, { type: "participant-removed", participantEmail: pEmail });
+
+        // Broadcast a system-wide notification inside the room
+        broadcastToRoom(chatId, {
+          type: "notification",
+          message: `${pEmail} has been removed by the owner`,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      return res.status(200).json({ success: true, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  };
+
+  app.post("/api/share/remove-participant", handleRemoveParticipantLogic);
+  app.delete("/api/share/participant/remove/:chatId", handleRemoveParticipantLogic);
+
+  // Unified Regenerate API: POST /api/share/regenerate-link, POST /api/share/regenerate/:chatId
+  const handleRegenerateLogic = (req: any, res: any) => {
+    try {
+      const chatId = req.params.chatId || req.body.chatId;
+      const { ownerEmail } = req.body;
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can regenerate the share link." });
+      }
+
+      const newToken = "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      config.shareToken = newToken;
+      writeSharedDB(sharedDb);
+      console.info(`[Nexa Server] Share link regenerated for chat ${chatId}`);
+
+      return res.status(200).json({ success: true, shareToken: newToken, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  };
+
+  app.post("/api/share/regenerate-link", handleRegenerateLogic);
+  app.post("/api/share/regenerate/:chatId", handleRegenerateLogic);
+
+  // Add Participant Directly: POST /api/share/participant/add/:chatId
+  app.post("/api/share/participant/add/:chatId", (req, res) => {
+    try {
+      const { chatId } = req.params;
+      const { ownerEmail, targetEmail, role = "editor" } = req.body;
+
+      if (!chatId || !ownerEmail || !targetEmail) {
+        return res.status(400).json({ success: false, error: "chatId, ownerEmail, and targetEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can invite participants." });
+      }
+
+      const pEmail = targetEmail.toLowerCase().trim();
+      const existing = config.participants.find((p: any) => p.email === pEmail);
+
+      if (!existing) {
+        config.participants.push({
+          email: pEmail,
+          name: pEmail.split("@")[0],
+          role: role,
+          joinedAt: new Date().toISOString()
+        });
+        writeSharedDB(sharedDb);
+        console.info(`[Nexa Server] Owner invited ${pEmail} with role ${role} to chat ${chatId}`);
+      } else {
+        existing.role = role;
+        writeSharedDB(sharedDb);
+      }
+
+      return res.status(200).json({ success: true, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // --- ACCESS CODE DEDICATED ENDPOINTS ---
+
+  // Generate or regenerate Access Code
+  app.post("/api/share/access-code/generate", (req, res) => {
+    try {
+      const { chatId, ownerEmail, expiresAfterValue = "never", defaultPermission = "chat" } = req.body;
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      let config = sharedDb[chatId];
+
+      if (!config) {
+        // Create initial shared profile if not existing
+        const token = "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        sharedDb[chatId] = {
+          id: chatId,
+          ownerEmail: ownerEmail.toLowerCase().trim(),
+          ownerName: ownerEmail.split("@")[0],
+          isSharingActive: true,
+          shareToken: token,
+          expiresAt: null,
+          defaultPermission: defaultPermission,
+          participants: []
+        };
+        config = sharedDb[chatId];
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can manage access codes." });
+      }
+
+      // Generate unique access code
+      let newCode = generateAccessCode();
+      // Ensure absolute uniqueness across existing sharing configs
+      let collisionCount = 0;
+      while (Object.values(sharedDb).some((c: any) => c.accessCode === newCode) && collisionCount < 10) {
+        newCode = generateAccessCode();
+        collisionCount++;
+      }
+
+      // Calculate expiration string
+      let expiresAtStr: string | null = null;
+      const now = new Date();
+      if (expiresAfterValue === "1h") {
+        expiresAtStr = new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+      } else if (expiresAfterValue === "24h") {
+        expiresAtStr = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      } else if (expiresAfterValue === "7d") {
+        expiresAtStr = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      }
+
+      config.accessCode = newCode;
+      config.accessCodeExpiresAt = expiresAtStr;
+      config.accessCodePermission = defaultPermission; // "chat" or "view"
+      config.accessCodeIsActive = true;
+      config.accessCodeDurationType = expiresAfterValue;
+
+      writeSharedDB(sharedDb);
+      console.info(`[Nexa Server] Generated access code ${newCode} for chat ${chatId} by ${ownerEmail}`);
+
+      return res.status(200).json({ success: true, config });
+    } catch (e: any) {
+      console.error("Error generating access code:", e);
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Toggle/Disable access code
+  app.post("/api/share/access-code/disable", (req, res) => {
+    try {
+      const { chatId, ownerEmail } = req.body;
+      if (!chatId || !ownerEmail) {
+        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can disable access codes." });
+      }
+
+      config.accessCodeIsActive = false;
+      writeSharedDB(sharedDb);
+      console.info(`[Nexa Server] Access code disabled for chat ${chatId}`);
+
+      return res.status(200).json({ success: true, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Join shared conversation using a token OR Access Code
+  app.post("/api/share/join", (req, res) => {
+    try {
+      const { shareToken, accessCode, email, fullName } = req.body;
+      if (!email) {
+        return res.status(400).json({ success: false, error: "Email is required to join." });
+      }
+
+      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || "unknown";
+      const attemptKey = String(clientIp);
+
+      // 1. Brute force check:
+      const attempt = failedAttempts.get(attemptKey);
+      if (attempt && attempt.count >= 5 && Date.now() - attempt.lastAttempt < 15 * 60 * 1000) {
+        return res.status(429).json({
+          success: false,
+          error: "Too many failed attempts. Brute-force protection activated. Please wait 15 minutes."
+        });
+      }
+
+      const sharedDb = readSharedDB();
+      let chatId: string | undefined;
+      let isJoiningViaCode = false;
+
+      if (accessCode) {
+        // Normalizing: uppercase, strip spaces and hyphens
+        const normalizedInput = accessCode.trim().toUpperCase().replace(/[- ]/g, "");
+        chatId = Object.keys(sharedDb).find(id => {
+          const dbCode = sharedDb[id].accessCode;
+          if (!dbCode) return false;
+          return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
+        });
+        isJoiningViaCode = true;
+      } else if (shareToken) {
+        chatId = Object.keys(sharedDb).find(id => sharedDb[id].shareToken === shareToken);
+      }
+
+      // If neither is valid, handle failed attempt
+      if (!chatId) {
+        const now = Date.now();
+        if (attempt) {
+          attempt.count += 1;
+          attempt.lastAttempt = now;
+        } else {
+          failedAttempts.set(attemptKey, { count: 1, lastAttempt: now });
+        }
+        return res.status(404).json({
+          success: false,
+          error: isJoiningViaCode 
+            ? "Invalid Chat Access Code. Please check the code and try again." 
+            : "Invalid share link/token or conversation does not exist."
+        });
+      }
+
+      // Successfully validated, delete failed attempts tracking
+      failedAttempts.delete(attemptKey);
+
+      const config = sharedDb[chatId];
+      const normalizedEmail = email.toLowerCase().trim();
+
+      if (isJoiningViaCode) {
+        // Verify code activity
+        if (!config.accessCodeIsActive) {
+          return res.status(400).json({ success: false, error: "This chat access code has been disabled by the owner." });
+        }
+        // Verify code expiration
+        if (config.accessCodeExpiresAt && new Date(config.accessCodeExpiresAt) < new Date()) {
+          return res.status(400).json({ success: false, error: "This chat access code has expired." });
+        }
+      } else {
+        // Verify link activity
+        if (!config.isSharingActive) {
+          return res.status(400).json({ success: false, error: "This shared conversation has been disabled by the owner." });
+        }
+        // Verify link expiration
+        if (config.expiresAt && new Date(config.expiresAt) < new Date()) {
+          return res.status(400).json({ success: false, error: "This shared conversation link has expired." });
+        }
+      }
+
+      // If owner is joining their own session
+      if (config.ownerEmail === normalizedEmail) {
+        return res.status(200).json({ success: true, chatId, role: "owner", config });
+      }
+
+      // Determine default role permission
+      const defaultPerm = isJoiningViaCode 
+        ? config.accessCodePermission || "chat"
+        : config.defaultPermission || "chat";
+      let role = defaultPerm === "chat" ? "editor" : "viewer";
+
+      // Add to participants list if not already there
+      const existingPart = config.participants.find((p: any) => p.email === normalizedEmail);
+      if (!existingPart) {
+        config.participants.push({
+          email: normalizedEmail,
+          name: fullName || email.split("@")[0],
+          role: role, // editor (can chat) or viewer (view only)
+          joinedAt: new Date().toISOString()
+        });
+        writeSharedDB(sharedDb);
+        console.info(`[Nexa Server] User ${normalizedEmail} joined shared chat ${chatId} as ${role} via ${isJoiningViaCode ? 'Code' : 'Link'}`);
+      } else {
+        role = existingPart.role;
+      }
+
+      return res.status(200).json({ success: true, chatId, role, config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 7. Get share info
+  app.get("/api/share/info/:chatId", (req, res) => {
+    try {
+      const { chatId } = req.params;
+      const email = (req.query.email as string)?.toLowerCase().trim();
+
+      if (!chatId) {
+        return res.status(400).json({ success: false, error: "chatId is required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+
+      if (!config) {
+        return res.status(200).json({ success: true, isShared: false });
+      }
+
+      // If user provided email, we verify if they are owner or participant
+      const isOwner = email && config.ownerEmail === email;
+      const isParticipant = email && config.participants.some((p: any) => p.email === email);
+
+      return res.status(200).json({
+        success: true,
+        isShared: true,
+        config: config,
+        isOwner,
+        isParticipant
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 8. Get complete shared session (conversations & messages)
+  app.get("/api/share/session/:chatId", (req, res) => {
+    try {
+      const { chatId } = req.params;
+      const email = (req.query.email as string)?.toLowerCase().trim();
+
+      if (!chatId || !email) {
+        return res.status(400).json({ success: false, error: "chatId and email are required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Shared conversation configuration not found." });
+      }
+
+      // Verify access: must be owner, participant, or the share link must be active and valid
+      const isOwner = config.ownerEmail === email;
+      const isParticipant = config.participants.some((p: any) => p.email === email);
+
+      if (!isOwner && !isParticipant) {
+        // If not participant yet, verify if the request comes with a valid shareToken
+        const token = req.query.token as string;
+        if (!token || config.shareToken !== token || !config.isSharingActive) {
+          return res.status(403).json({ success: false, error: "Access denied. You must join this shared conversation first." });
+        }
+      }
+
+      // Check expiration
+      if (config.expiresAt && new Date(config.expiresAt) < new Date()) {
+        return res.status(400).json({ success: false, error: "This shared conversation link has expired." });
+      }
+
+      // Retrieve chat session from the owner's profile in users_db.json
+      const userDb = readDB();
+      const ownerRecord = userDb[config.ownerEmail];
+
+      if (!ownerRecord || !Array.isArray(ownerRecord.chats)) {
+        return res.status(404).json({ success: false, error: "Owner profile or conversations not found." });
+      }
+
+      const session = ownerRecord.chats.find((c: any) => c.id === chatId);
+      if (!session) {
+        return res.status(404).json({ success: false, error: "Conversation not found under owner profile." });
+      }
+
+      return res.status(200).json({
+        success: true,
+        session,
+        config
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   // Serve static UI assets
   if (process.env.NODE_ENV !== "production") {
     // Vite middleware for real time HMR asset updates in dev mode
@@ -1619,12 +2231,239 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
     });
   }
 
+  // WebSocket active rooms
+  // Key: chatId, Value: Set of WebSocket connections with custom metadata
+  const activeRooms = new Map<string, Set<any>>();
+
+  function broadcastToRoom(chatId: string, payload: any, skipSocket?: any) {
+    const clients = activeRooms.get(chatId);
+    if (!clients) return;
+
+    const messageString = JSON.stringify(payload);
+    clients.forEach((client: any) => {
+      if (client !== skipSocket && client.readyState === WebSocket.OPEN) {
+        client.send(messageString);
+      }
+    });
+  }
+
   // Bind to 0.0.0.0 on port 3000 exclusively
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Nexa Server] Dynamic fullstack service running on http://0.0.0.0:${PORT}`);
     
     // Execute a test email immediate startup check using the existing SMTP configuration
     sendStartupTestEmail();
+  });
+
+  // WebSocket upgrade and connection setup
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on("upgrade", (request, socket, head) => {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
+
+  wss.on("connection", (ws: any) => {
+    console.info("[Nexa WS] New client connection established");
+    ws.isAlive = true;
+
+    ws.on("pong", () => {
+      ws.isAlive = true;
+    });
+
+    ws.on("message", (message: string) => {
+      try {
+        const payload = JSON.parse(message);
+        const { type, chatId } = payload;
+
+        if (!chatId) return;
+
+        switch (type) {
+          case "join-room": {
+            const { user } = payload;
+            ws.chatId = chatId;
+            ws.userEmail = user.email.toLowerCase().trim();
+            ws.userName = user.fullName || user.email.split("@")[0];
+            ws.userAvatar = user.avatarUrl || `https://api.dicebear.com/7.x/initials/svg?seed=${ws.userName}`;
+
+            if (!activeRooms.has(chatId)) {
+              activeRooms.set(chatId, new Set());
+            }
+            activeRooms.get(chatId)!.add(ws);
+
+            console.info(`[Nexa WS] User ${ws.userEmail} joined room ${chatId}`);
+
+            // Gather all active participants in this room
+            const participants = Array.from(activeRooms.get(chatId)!).map((client: any) => ({
+              email: client.userEmail,
+              name: client.userName,
+              avatarUrl: client.userAvatar,
+              isTyping: !!client.isTyping
+            }));
+
+            // Broadcast presence update
+            broadcastToRoom(chatId, {
+              type: "presence-update",
+              participants
+            });
+
+            // Broadcast join notification message
+            broadcastToRoom(chatId, {
+              type: "notification",
+              message: `${ws.userName} joined the session`,
+              timestamp: new Date().toISOString()
+            });
+            break;
+          }
+
+          case "leave-room": {
+            handleClientLeave(ws);
+            break;
+          }
+
+          case "typing": {
+            const { isTyping } = payload;
+            ws.isTyping = isTyping;
+
+            // Gather active participants with typing status
+            const participants = Array.from(activeRooms.get(chatId)!).map((client: any) => ({
+              email: client.userEmail,
+              name: client.userName,
+              avatarUrl: client.userAvatar,
+              isTyping: !!client.isTyping
+            }));
+
+            // Broadcast typing update
+            broadcastToRoom(chatId, {
+              type: "presence-update",
+              participants
+            }, ws);
+            break;
+          }
+
+          case "message-sync": {
+            const { message: msg } = payload;
+            if (!msg) return;
+
+            // Save message to owner's users_db.json
+            const sharedDb = readSharedDB();
+            const config = sharedDb[chatId];
+            if (config) {
+              const userDb = readDB();
+              const ownerRecord = userDb[config.ownerEmail];
+              if (ownerRecord && Array.isArray(ownerRecord.chats)) {
+                const session = ownerRecord.chats.find((c: any) => c.id === chatId);
+                if (session) {
+                  if (!Array.isArray(session.messages)) {
+                    session.messages = [];
+                  }
+                  
+                  // Ensure we show who sent the message!
+                  // We add a sender field to the message:
+                  const enrichedMsg = {
+                    ...msg,
+                    senderName: ws.userName,
+                    senderEmail: ws.userEmail
+                  };
+
+                  // Guard against duplicates
+                  const exists = session.messages.some((m: any) => m.id === enrichedMsg.id);
+                  if (!exists) {
+                    session.messages.push(enrichedMsg);
+                    session.updatedAt = new Date().toISOString();
+                    writeDB(userDb);
+                    console.info(`[Nexa WS] Saved enriched message ${enrichedMsg.id} to chat ${chatId} in owners database.`);
+                  }
+
+                  // Broadcast enriched message in real-time
+                  broadcastToRoom(chatId, {
+                    type: "message-sync",
+                    message: enrichedMsg
+                  }, ws);
+                }
+              }
+            }
+            break;
+          }
+
+          case "read-receipt": {
+            const { messageId } = payload;
+            broadcastToRoom(chatId, {
+              type: "read-receipt",
+              messageId,
+              userEmail: ws.userEmail,
+              userName: ws.userName
+            }, ws);
+            break;
+          }
+        }
+      } catch (err) {
+        console.error("[Nexa WS] Error processing WS message:", err);
+      }
+    });
+
+    ws.on("close", () => {
+      handleClientLeave(ws);
+    });
+
+    ws.on("error", (err: any) => {
+      console.error("[Nexa WS] Socket error:", err);
+      handleClientLeave(ws);
+    });
+  });
+
+  function handleClientLeave(ws: any) {
+    const chatId = ws.chatId;
+    if (!chatId) return;
+
+    const clients = activeRooms.get(chatId);
+    if (clients) {
+      clients.delete(ws);
+      console.info(`[Nexa WS] User ${ws.userEmail} left room ${chatId}`);
+
+      if (clients.size === 0) {
+        activeRooms.delete(chatId);
+      } else {
+        // Broadcast presence update
+        const participants = Array.from(clients).map((client: any) => ({
+          email: client.userEmail,
+          name: client.userName,
+          avatarUrl: client.userAvatar,
+          isTyping: !!client.isTyping
+        }));
+
+        broadcastToRoom(chatId, {
+          type: "presence-update",
+          participants
+        });
+
+        // Broadcast leave notification
+        broadcastToRoom(chatId, {
+          type: "notification",
+          message: `${ws.userName} left the session`,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+    ws.chatId = null;
+  }
+
+  // Heartbeat keep-alive loop
+  const interval = setInterval(() => {
+    wss.clients.forEach((ws: any) => {
+      const customWs = ws as any;
+      if (customWs.isAlive === false) {
+        console.info(`[Nexa WS] Client dead, terminating connection: ${customWs.userEmail}`);
+        return ws.terminate();
+      }
+      customWs.isAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on("close", () => {
+    clearInterval(interval);
   });
 }
 

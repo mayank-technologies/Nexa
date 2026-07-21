@@ -70,7 +70,7 @@ import { PremiumModal } from "./components/PremiumModal";
 import { FeedbackModal } from "./components/FeedbackModal";
 import { RecentlyDeleted } from "./components/RecentlyDeleted";
 import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
-import { safeStorage } from "./utils/storage";
+import { safeStorage, copyToClipboard } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
 
 function GoogleAuthBridgeView() {
@@ -1908,7 +1908,7 @@ export default function App() {
     const fullContent = `Conversation Title: ${activeSession.title}\nMode: ${activeSession.mode}\n========================================\n\n${formattedThread}\n\n========================================\nGenerated via Nexa Intelligence`;
 
     try {
-      navigator.clipboard.writeText(fullContent);
+      copyToClipboard(fullContent);
       setIsCopiedAll(true);
       playUiSound("success");
       setTimeout(() => setIsCopiedAll(false), 2000);
@@ -1920,7 +1920,7 @@ export default function App() {
   // Message Quick Actions (Bookmark, share, translate, export)
   const handleMessageAction = (action: string, msgId: string) => {
     if (action === "share") {
-      navigator.clipboard.writeText(`${window.location.origin}/share/thread/${activeSessionId}#${msgId}`);
+      copyToClipboard(`${window.location.origin}/share/thread/${activeSessionId}#${msgId}`);
       alert("Shareable thread link copied to clipboard successfully!");
     } else if (action === "bookmark") {
       alert("Successfully bookmarks listed message components inside active user preferences storage!");

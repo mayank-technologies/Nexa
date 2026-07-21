@@ -36,6 +36,7 @@ import {
 import { motion, AnimatePresence, Reorder } from "motion/react";
 import { ChatSession, UserProfile } from "../types";
 import { Logo } from "./Logo";
+import { copyToClipboard } from "../utils/storage";
 
 interface SidebarProps {
   sessions: ChatSession[];
@@ -118,7 +119,7 @@ export function Sidebar({
   const handleShareSession = (session: ChatSession) => {
     try {
       const shareUrl = `${window.location.origin}/share/thread/${session.id}`;
-      navigator.clipboard.writeText(shareUrl);
+      copyToClipboard(shareUrl);
       alert("Shareable chat link copied to clipboard successfully!");
     } catch (e) {
       console.error(e);

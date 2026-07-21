@@ -45,6 +45,7 @@ import { EngineBadge } from "./EngineBadge";
 import { FactCheckWidget } from "./FactCheckWidget";
 import { DeepResearchReport } from "./DeepResearchReport";
 import { QuizGeneratorCenter } from "./QuizGeneratorCenter";
+import { copyToClipboard } from "../utils/storage";
 
 interface MessageListProps {
   messages: Message[];
@@ -164,7 +165,7 @@ export function MessageList({
   };
 
   const handleCopy = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopyingId(id);
     onAction("copy", id);
     setTimeout(() => setCopyingId(null), 1500);
@@ -1009,7 +1010,7 @@ function CodeBlockContainer({ code, lang }: { code: string; lang: string; key?: 
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(code);
+    copyToClipboard(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

@@ -11,8 +11,25 @@ import { GoogleGenAI, Type, ThinkingLevel } from "@google/genai";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 import { WebSocketServer, WebSocket } from "ws";
+import { createClient } from "@supabase/supabase-js";
 
 dotenv.config();
+
+// Helper to get Supabase Client lazily on server-side
+let supabaseServerClient: any = null;
+function getSupabaseServer(): any {
+  if (!supabaseServerClient) {
+    const url = process.env.VITE_SUPABASE_URL || "https://pfblkhotgrsabagnyxgn.supabase.co";
+    const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+    if (url && anonKey) {
+      supabaseServerClient = createClient(url, anonKey);
+      console.log("[Nexa Server] Supabase server-side client initialized successfully.");
+    } else {
+      console.warn("[Nexa Server] Supabase credentials not found in env. Server-side Supabase features disabled.");
+    }
+  }
+  return supabaseServerClient;
+}
 
 interface GroundingSource {
   title: string;
@@ -2124,93 +2141,386 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
     }
   });
 
+  // Helper to find shared chat config by chatId, shareToken, or accessCode
+  const findSharedConfig = (input: string) => {
+    if (!input) return null;
+    const sharedDb = readSharedDB();
+    
+    // 1. Direct match on chatId key
+    if (sharedDb[input]) {
+      return { actualChatId: input, config: sharedDb[input] };
+    }
+    
+    // 2. Match on shareToken
+    const foundByTokenKey = Object.keys(sharedDb).find(
+      id => sharedDb[id].shareToken === input
+    );
+    if (foundByTokenKey) {
+      return { actualChatId: foundByTokenKey, config: sharedDb[foundByTokenKey] };
+    }
+    
+    // 3. Match on accessCode (normalized)
+    const normalizedInput = input.trim().toUpperCase().replace(/[- ]/g, "");
+    const foundByCodeKey = Object.keys(sharedDb).find(id => {
+      const dbCode = sharedDb[id].accessCode;
+      if (!dbCode) return false;
+      return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
+    });
+    if (foundByCodeKey) {
+      return { actualChatId: foundByCodeKey, config: sharedDb[foundByCodeKey] };
+    }
+
+    return null;
+  };
+
   // 7. Get share info
   app.get("/api/share/info/:chatId", (req, res) => {
     try {
       const { chatId } = req.params;
       const email = (req.query.email as string)?.toLowerCase().trim();
 
+      console.log(`[Nexa Server] [share/info] Request received for chatId: "${chatId}", email: "${email || 'none'}"`);
+
       if (!chatId) {
+        console.warn(`[Nexa Server] [share/info] Missing chatId in request`);
         return res.status(400).json({ success: false, error: "chatId is required." });
       }
 
-      const sharedDb = readSharedDB();
-      const config = sharedDb[chatId];
+      const found = findSharedConfig(chatId);
 
-      if (!config) {
+      if (!found) {
+        console.warn(`[Nexa Server] [share/info] No configuration found in shared_chats_db.json for chatId: "${chatId}"`);
         return res.status(200).json({ success: true, isShared: false });
       }
 
+      const { actualChatId, config } = found;
+
       // If user provided email, we verify if they are owner or participant
       const isOwner = email && config.ownerEmail === email;
-      const isParticipant = email && config.participants.some((p: any) => p.email === email);
+      const isParticipant = email && Array.isArray(config.participants) && config.participants.some((p: any) => p.email === email);
+
+      console.log(`[Nexa Server] [share/info] Successfully retrieved config for actualChatId: "${actualChatId}". Owner: ${isOwner} (${config.ownerEmail}), Participant: ${isParticipant}`);
 
       return res.status(200).json({
         success: true,
         isShared: true,
+        actualChatId,
         config: config,
         isOwner,
         isParticipant
       });
     } catch (e: any) {
-      return res.status(500).json({ success: false, error: e.message });
+      console.error(`[Nexa Server] [share/info] Exception inside endpoint:`, e);
+      return res.status(500).json({ success: false, error: `Internal Server Error: ${e.message}` });
     }
   });
 
   // 8. Get complete shared session (conversations & messages)
-  app.get("/api/share/session/:chatId", (req, res) => {
+  app.get("/api/share/session/:chatId", async (req, res) => {
     try {
       const { chatId } = req.params;
       const email = (req.query.email as string)?.toLowerCase().trim();
+      const token = (req.query.token as string) || (req.query.shareToken as string) || (req.query.accessCode as string);
+
+      console.log(`[Nexa Server] [share/session] Accessing shared session. chatId/token: "${chatId}", email: "${email || 'none'}", token: "${token || 'none'}"`);
 
       if (!chatId || !email) {
-        return res.status(400).json({ success: false, error: "chatId and email are required." });
+        console.warn(`[Nexa Server] [share/session] Missing required parameter. chatId: "${chatId}", email: "${email || 'none'}"`);
+        return res.status(400).json({ success: false, error: "chatId and email are required to load a shared session." });
       }
 
-      const sharedDb = readSharedDB();
-      const config = sharedDb[chatId];
+      const found = findSharedConfig(chatId);
 
-      if (!config) {
-        return res.status(404).json({ success: false, error: "Shared conversation configuration not found." });
+      if (!found) {
+        console.warn(`[Nexa Server] [share/session] Shared conversation config not found in shared_chats_db.json for chatId: "${chatId}"`);
+        return res.status(404).json({ success: false, error: `Shared conversation not found. The chat link or access code may be invalid or deleted.` });
       }
 
-      // Verify access: must be owner, participant, or the share link must be active and valid
+      const { actualChatId, config } = found;
+
+      // Verify access: must be owner, participant, or the share link/code must match
       const isOwner = config.ownerEmail === email;
-      const isParticipant = config.participants.some((p: any) => p.email === email);
+      const isParticipant = Array.isArray(config.participants) && config.participants.some((p: any) => p.email === email);
+      const isAccessViaValidToken = token && (token === config.shareToken || token.toUpperCase().replace(/[- ]/g, "") === (config.accessCode || "").toUpperCase().replace(/[- ]/g, ""));
+      const isDirectTokenMatch = chatId === config.shareToken || (config.accessCode && chatId.toUpperCase().replace(/[- ]/g, "") === config.accessCode.toUpperCase().replace(/[- ]/g, ""));
 
-      if (!isOwner && !isParticipant) {
-        // If not participant yet, verify if the request comes with a valid shareToken
-        const token = req.query.token as string;
-        if (!token || config.shareToken !== token || !config.isSharingActive) {
-          return res.status(403).json({ success: false, error: "Access denied. You must join this shared conversation first." });
-        }
+      console.log(`[Nexa Server] [share/session] Auth status. isOwner: ${isOwner}, isParticipant: ${isParticipant}, isAccessViaValidToken: ${isAccessViaValidToken}, isDirectTokenMatch: ${isDirectTokenMatch}`);
+
+      if (!isOwner && !isParticipant && !isAccessViaValidToken && !isDirectTokenMatch) {
+        console.warn(`[Nexa Server] [share/session] Access denied for external user ${email}.`);
+        return res.status(403).json({ success: false, error: "Access denied. You must join this shared conversation first using an invitation link or access code." });
+      }
+
+      if (!config.isSharingActive && !isOwner) {
+        console.warn(`[Nexa Server] [share/session] Access denied. Sharing is disabled for chat "${actualChatId}"`);
+        return res.status(403).json({ success: false, error: "Access denied. The owner has disabled sharing for this conversation." });
       }
 
       // Check expiration
       if (config.expiresAt && new Date(config.expiresAt) < new Date()) {
+        console.warn(`[Nexa Server] [share/session] Access denied. Shared link expired on ${config.expiresAt}`);
         return res.status(400).json({ success: false, error: "This shared conversation link has expired." });
       }
 
-      // Retrieve chat session from the owner's profile in users_db.json
-      const userDb = readDB();
-      const ownerRecord = userDb[config.ownerEmail];
+      let session: any = null;
 
-      if (!ownerRecord || !Array.isArray(ownerRecord.chats)) {
-        return res.status(404).json({ success: false, error: "Owner profile or conversations not found." });
+      // 1. Try to fetch from Supabase first
+      const supabase = getSupabaseServer();
+      if (supabase) {
+        try {
+          console.log(`[Nexa Server] [share/session] Querying Supabase for actualChatId "${actualChatId}"...`);
+          const { data: chatData, error: chatError } = await supabase
+            .from("chats")
+            .select("*")
+            .eq("id", actualChatId)
+            .maybeSingle();
+
+          if (chatData && !chatError) {
+            console.log(`[Nexa Server] [share/session] Chat row found in Supabase. Querying messages...`);
+            const { data: messagesData, error: messagesError } = await supabase
+              .from("messages")
+              .select("*")
+              .eq("chat_id", actualChatId)
+              .order("timestamp", { ascending: true });
+
+            if (messagesError) {
+              console.error(`[Nexa Server] [share/session] Error loading messages from Supabase:`, messagesError.message);
+            }
+
+            session = {
+              id: chatData.id,
+              title: chatData.title,
+              createdAt: chatData.created_at,
+              updatedAt: chatData.updated_at,
+              isPinned: chatData.is_pinned || false,
+              pinOrder: chatData.pin_order,
+              mode: chatData.mode || "general",
+              selectedEngineId: chatData.selected_engine_id,
+              userEmail: chatData.user_email,
+              messages: (messagesData || []).map((msg: any) => ({
+                id: msg.id,
+                role: msg.role,
+                content: msg.content,
+                timestamp: msg.timestamp,
+                engineId: msg.engine_id,
+                sources: msg.sources || null,
+                factCheck: msg.fact_check || null,
+                researchReport: msg.research_report || null,
+                quiz: msg.quiz || null,
+                attachment: msg.attachment || null,
+                reaction: msg.reaction || null
+              }))
+            };
+            console.log(`[Nexa Server] [share/session] Loaded from Supabase: "${session.title}" with ${session.messages.length} messages.`);
+          } else if (chatError) {
+            console.error(`[Nexa Server] [share/session] Supabase error while loading chat:`, chatError.message);
+          } else {
+            console.warn(`[Nexa Server] [share/session] Chat record "${actualChatId}" not found in Supabase table "chats".`);
+          }
+        } catch (supaErr: any) {
+          console.error(`[Nexa Server] [share/session] Exception while connecting to Supabase:`, supaErr);
+        }
+      } else {
+        console.warn(`[Nexa Server] [share/session] Supabase client is not available on server-side. Skipping Supabase query.`);
       }
 
-      const session = ownerRecord.chats.find((c: any) => c.id === chatId);
+      // 2. Fallback to local user DB if not found in Supabase
       if (!session) {
-        return res.status(404).json({ success: false, error: "Conversation not found under owner profile." });
+        console.info(`[Nexa Server] [share/session] Falling back to local db for actualChatId "${actualChatId}"...`);
+        const userDb = readDB();
+        const ownerRecord = userDb[config.ownerEmail];
+
+        if (ownerRecord && Array.isArray(ownerRecord.chats)) {
+          session = ownerRecord.chats.find((c: any) => c.id === actualChatId);
+          if (session) {
+            console.log(`[Nexa Server] [share/session] Session successfully resolved from local DB of owner: "${config.ownerEmail}"`);
+          }
+        } else {
+          console.warn(`[Nexa Server] [share/session] Owner record not found or has no chats in local database.`);
+        }
       }
 
+      // 3. Fallback to active collaborative chat session structure if not in Supabase or local DB
+      if (!session) {
+        console.info(`[Nexa Server] [share/session] Constructing active collaborative chat session object for actualChatId "${actualChatId}"`);
+        session = {
+          id: actualChatId,
+          title: "Collaborative Chat",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          isPinned: false,
+          mode: "general",
+          userEmail: config.ownerEmail,
+          messages: [],
+          isShared: true
+        };
+      }
+
+      console.info(`[Nexa Server] [share/session] Successfully returning shared session for actualChatId: "${actualChatId}" to user: "${email}"`);
       return res.status(200).json({
         success: true,
         session,
         config
       });
     } catch (e: any) {
-      return res.status(500).json({ success: false, error: e.message });
+      console.error("[Nexa Server] [share/session] Error retrieving shared session:", e);
+      return res.status(500).json({ success: false, error: `Internal Server Error: ${e.message}` });
+    }
+  });
+
+  // 9. Diagnostic info for shared chats
+  app.get("/api/share/diagnostics/:chatId", async (req, res) => {
+    try {
+      const { chatId } = req.params;
+      const email = (req.query.email as string)?.toLowerCase().trim();
+      const token = req.query.token as string;
+
+      console.info(`[Nexa Diagnostics] Diagnostic query for chatId: "${chatId}", email: "${email || 'none'}", token: "${token || 'none'}"`);
+
+      const results: any = {
+        timestamp: new Date().toISOString(),
+        chatId,
+        inputEmail: email || null,
+        inputToken: token || null,
+        errors: [],
+        warnings: [],
+        checks: {}
+      };
+
+      // 1. Check shared_chats_db.json
+      let config: any = null;
+      try {
+        const sharedDb = readSharedDB();
+        config = sharedDb[chatId];
+        results.checks.sharedDb = {
+          exists: true,
+          hasConfig: !!config
+        };
+        if (!config) {
+          results.warnings.push(`No configuration found for chatId ${chatId} in shared_chats_db.json`);
+        } else {
+          results.checks.sharedDb.config = {
+            ownerEmail: config.ownerEmail,
+            shareToken: config.shareToken,
+            isSharingActive: config.isSharingActive,
+            expiresAt: config.expiresAt,
+            hasExpired: config.expiresAt ? new Date(config.expiresAt) < new Date() : false,
+            participantsCount: Array.isArray(config.participants) ? config.participants.length : 0,
+            accessCodeEnabled: !!config.accessCode
+          };
+        }
+      } catch (dbErr: any) {
+        results.errors.push(`Failed to read shared_chats_db.json: ${dbErr.message}`);
+        results.checks.sharedDb = { exists: false, error: dbErr.message };
+      }
+
+      // 2. Authorization rules check
+      if (config) {
+        const isOwner = email && config.ownerEmail === email;
+        const isParticipant = email && Array.isArray(config.participants) && config.participants.some((p: any) => p.email === email);
+        const tokenMatches = token && config.shareToken === token;
+        
+        results.checks.authorization = {
+          isOwner: !!isOwner,
+          isParticipant: !!isParticipant,
+          tokenMatches: !!tokenMatches,
+          isSharingActive: !!config.isSharingActive,
+          canAccess: isOwner || isParticipant || (tokenMatches && config.isSharingActive)
+        };
+
+        if (!results.checks.authorization.canAccess) {
+          results.warnings.push(`Requesting user "${email}" is NOT owner or registered participant, and has no valid token / sharing is inactive.`);
+        }
+      }
+
+      // 3. Supabase Integration Check
+      const supabase = getSupabaseServer();
+      results.checks.supabase = {
+        clientInitialized: !!supabase,
+        urlConfigured: !!process.env.VITE_SUPABASE_URL,
+        anonKeyConfigured: !!process.env.VITE_SUPABASE_ANON_KEY
+      };
+
+      if (supabase) {
+        try {
+          const { data: chatData, error: chatError } = await supabase
+            .from("chats")
+            .select("*")
+            .eq("id", chatId)
+            .maybeSingle();
+
+          results.checks.supabase.chatRecord = {
+            found: !!chatData,
+            error: chatError ? chatError.message : null
+          };
+
+          if (chatData) {
+            results.checks.supabase.chatRecord.details = {
+              title: chatData.title,
+              userEmail: chatData.user_email,
+              mode: chatData.mode,
+              created_at: chatData.created_at
+            };
+
+            const { count, error: countError } = await supabase
+              .from("messages")
+              .select("*", { count: "exact", head: true })
+              .eq("chat_id", chatId);
+
+            results.checks.supabase.messagesCount = {
+              count: count || 0,
+              error: countError ? countError.message : null
+            };
+          } else if (chatError) {
+            results.errors.push(`Supabase fetch failed for chat ${chatId}: ${chatError.message}`);
+          } else {
+            results.warnings.push(`Chat ${chatId} not found in Supabase chats table.`);
+          }
+        } catch (supaErr: any) {
+          results.errors.push(`Exception querying Supabase for chat diagnostics: ${supaErr.message}`);
+          results.checks.supabase.exception = supaErr.message;
+        }
+      } else {
+        results.warnings.push("Supabase is not configured on the server-side. Falling back entirely to local JSON files.");
+      }
+
+      // 4. Local DB Fallback Check
+      try {
+        const userDb = readDB();
+        results.checks.localDb = {
+          exists: true
+        };
+        if (config) {
+          const ownerRecord = userDb[config.ownerEmail];
+          results.checks.localDb.ownerRecordFound = !!ownerRecord;
+          if (ownerRecord) {
+            const localChat = Array.isArray(ownerRecord.chats) && ownerRecord.chats.find((c: any) => c.id === chatId);
+            results.checks.localDb.chatFoundInOwnerRecord = !!localChat;
+            if (localChat) {
+              results.checks.localDb.localMessagesCount = Array.isArray(localChat.messages) ? localChat.messages.length : 0;
+            } else {
+              results.warnings.push(`Chat ${chatId} was not found in owner ${config.ownerEmail}'s local profile chats.`);
+            }
+          } else {
+            results.warnings.push(`Owner ${config.ownerEmail} record not found in local user_db.json.`);
+          }
+        }
+      } catch (localDbErr: any) {
+        results.errors.push(`Failed to check local user_db.json: ${localDbErr.message}`);
+        results.checks.localDb = { exists: false, error: localDbErr.message };
+      }
+
+      // Set diagnostic success status
+      results.success = results.errors.length === 0;
+
+      return res.status(200).json(results);
+    } catch (err: any) {
+      console.error("[Nexa Diagnostics] Diagnostic error:", err);
+      return res.status(500).json({
+        success: false,
+        error: `Diagnostic endpoint exception: ${err.message}`,
+        stack: err.stack
+      });
     }
   });
 

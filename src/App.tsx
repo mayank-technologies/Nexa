@@ -629,6 +629,24 @@ export default function App() {
     };
   }, []);
 
+  // Auto-detect share links in the URL hash (e.g. #share=TOKEN)
+  useEffect(() => {
+    const handleHashShare = () => {
+      const hash = window.location.hash;
+      if (hash.startsWith("#share=")) {
+        const token = hash.split("#share=")[1];
+        if (token) {
+          setJoinTokenInput(token);
+          setShowJoinModal(true);
+        }
+      }
+    };
+
+    handleHashShare();
+    window.addEventListener("hashchange", handleHashShare);
+    return () => window.removeEventListener("hashchange", handleHashShare);
+  }, []);
+
   const [sessions, setSessions] = useState<ChatSession[]>([]);
 
   // --- REAL-TIME COLLABORATIVE SHARED CONVERSATIONS STATES ---
@@ -787,7 +805,7 @@ export default function App() {
   }, [activeMode]);
 
   const syncChatSummaryToSupabase = async (chat: ChatSession) => {
-    if (user && !user.isGuest && user.uid) {
+    if (user && (!user.isGuest || isSharedSession) && user.uid) {
       try {
         // Synchronize directly to Supabase
         await syncChatToSupabase(chat, user.email.toLowerCase().trim());
@@ -799,7 +817,7 @@ export default function App() {
   };
 
   const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
-    if (user && !user.isGuest && user.uid) {
+    if (user && (!user.isGuest || isSharedSession) && user.uid) {
       try {
         // Synchronize directly to Supabase (using imported syncMessageToSupabase function)
         await syncMessageToSupabase(chatId, message);
@@ -1140,7 +1158,7 @@ export default function App() {
 
   // --- WebSocket & Real-Time Sharing Coordination Effect ---
   useEffect(() => {
-    if (!activeSessionId || !user || user.isGuest) {
+    if (!activeSessionId || !user) {
       setIsSharedSession(false);
       setSharedRole(null);
       setSharedParticipants([]);
@@ -1156,7 +1174,7 @@ export default function App() {
 
     const checkSharingAndConnect = async () => {
       try {
-        const res = await fetch(`/api/share/info/${activeSessionId}?email=${user.email || ""}`);
+        const res = await fetch(`/api/share/info/${activeSessionId}?email=${encodeURIComponent(user.email || "")}`);
         const data = await res.json();
         
         if (!isSubscribed) return;
@@ -1165,6 +1183,7 @@ export default function App() {
           setIsSharedSession(true);
           const config = data.config;
           const userEmail = (user.email || "").toLowerCase().trim();
+          const targetChatId = data.actualChatId || activeSessionId;
           
           let role: 'owner' | 'editor' | 'viewer' = 'viewer';
           if (config.ownerEmail === userEmail) {
@@ -1181,21 +1200,45 @@ export default function App() {
           setSharedParticipants(config.participants || []);
 
           // Fetch latest shared session messages to ensure synchronization
-          const sessionRes = await fetch(`/api/share/session/${activeSessionId}?email=${user.email || ""}`);
+          const hashToken = window.location.hash.includes("#share=") ? window.location.hash.split("#share=")[1] : "";
+          const tokenParam = joinTokenInput || hashToken || config.shareToken || "";
+          
+          const sessionRes = await fetch(`/api/share/session/${targetChatId}?email=${encodeURIComponent(user.email || "")}&token=${encodeURIComponent(tokenParam)}`);
           const sessionData = await sessionRes.json();
           if (sessionData.success && sessionData.session && isSubscribed) {
-            setSessions((prev) =>
-              prev.map((s) => {
-                if (s.id === activeSessionId) {
-                  return {
-                    ...s,
-                    title: sessionData.session.title || s.title,
-                    messages: sessionData.session.messages || [],
-                  };
-                }
-                return s;
-              })
-            );
+            setSessions((prev) => {
+              const exists = prev.some((s) => s.id === targetChatId);
+              const formattedSession = {
+                id: sessionData.session.id,
+                title: sessionData.session.title || "Collaborative Chat",
+                createdAt: sessionData.session.createdAt || new Date().toISOString(),
+                updatedAt: sessionData.session.updatedAt || new Date().toISOString(),
+                isPinned: false,
+                mode: sessionData.session.mode || "general",
+                selectedEngineId: sessionData.session.selectedEngineId || null,
+                userEmail: sessionData.session.userEmail || "",
+                messages: sessionData.session.messages || [],
+                isShared: true,
+              };
+
+              if (exists) {
+                return prev.map((s) => {
+                  if (s.id === targetChatId) {
+                    return {
+                      ...s,
+                      title: formattedSession.title,
+                      messages: formattedSession.messages,
+                      mode: formattedSession.mode,
+                    };
+                  }
+                  return s;
+                });
+              } else {
+                return [formattedSession, ...prev];
+              }
+            });
+          } else if (!sessionData.success) {
+            console.warn("[Nexa Client] Could not fetch shared session:", sessionData.error);
           }
 
           // Connect to WebSocket
@@ -4167,6 +4210,7 @@ export default function App() {
         onClose={() => setShowJoinModal(false)}
         userEmail={user?.email || "guest@nexa.ai"}
         userName={user?.fullName || "Guest Collaborator"}
+        initialToken={joinTokenInput}
         onJoinSuccess={async (chatId) => {
           // Trigger the App to switch to the joined conversation
           setActiveSessionId(chatId);

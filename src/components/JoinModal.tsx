@@ -7,6 +7,7 @@ interface JoinModalProps {
   userEmail: string;
   userName: string;
   onJoinSuccess: (chatId: string) => void;
+  initialToken?: string;
 }
 
 export const JoinModal: React.FC<JoinModalProps> = ({
@@ -15,10 +16,17 @@ export const JoinModal: React.FC<JoinModalProps> = ({
   userEmail,
   userName,
   onJoinSuccess,
+  initialToken,
 }) => {
-  const [shareInput, setShareInput] = useState("");
+  const [shareInput, setShareInput] = useState(initialToken || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (initialToken) {
+      setShareInput(initialToken);
+    }
+  }, [initialToken]);
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,17 +69,23 @@ export const JoinModal: React.FC<JoinModalProps> = ({
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
-      if (data.success) {
+      let data: any;
+      try {
+        data = await res.json();
+      } catch (parseErr) {
+        throw new Error(`Invalid server response (HTTP status ${res.status})`);
+      }
+
+      if (res.ok && data.success) {
         onJoinSuccess(data.chatId);
         onClose();
         setShareInput("");
       } else {
-        setError(data.error || "Failed to join collaborative conversation. Please verify the code/token.");
+        setError(data.error || `Failed to join conversation (HTTP status ${res.status})`);
       }
     } catch (err: any) {
       console.error("Error joining shared conversation:", err);
-      setError("A network error occurred. Please try again.");
+      setError(err.message ? `Error: ${err.message}` : "A network error occurred. Please try again.");
     } finally {
       setLoading(false);
     }

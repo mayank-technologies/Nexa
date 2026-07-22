@@ -2029,44 +2029,83 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
     }
   });
 
-  // Join shared conversation using a token OR Access Code
-  app.post("/api/share/join", (req, res) => {
+  // Join shared conversation handler logic
+  const handleJoinLogic = (req: any, res: any) => {
     try {
-      const { shareToken, accessCode, email, fullName } = req.body;
+      const body = req.body || {};
+      const query = req.query || {};
+      
+      const email = (body.email || query.email || "").toString().trim().toLowerCase();
+      const fullName = (body.fullName || query.fullName || body.name || query.name || "").toString().trim();
+      const rawInput = (body.accessCode || body.shareToken || body.token || body.input || query.accessCode || query.shareToken || query.token || query.input || "").toString().trim();
+
       if (!email) {
-        return res.status(400).json({ success: false, error: "Email is required to join." });
+        return res.status(400).json({ success: false, error: "Email address is required to join." });
       }
 
-      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || "unknown";
+      if (!rawInput) {
+        return res.status(400).json({ success: false, error: "A valid share link, share token, or access code is required." });
+      }
+
+      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || "unknown";
       const attemptKey = String(clientIp);
 
-      // 1. Brute force check:
+      // 1. Brute force protection check
       const attempt = failedAttempts.get(attemptKey);
-      if (attempt && attempt.count >= 5 && Date.now() - attempt.lastAttempt < 15 * 60 * 1000) {
+      if (attempt && attempt.count >= 10 && Date.now() - attempt.lastAttempt < 15 * 60 * 1000) {
         return res.status(429).json({
           success: false,
           error: "Too many failed attempts. Brute-force protection activated. Please wait 15 minutes."
         });
       }
 
+      // Clean raw input from potential URL hash prefixes
+      let cleanedToken = rawInput;
+      if (cleanedToken.includes("#share=")) {
+        cleanedToken = cleanedToken.split("#share=")[1] || cleanedToken;
+      } else if (cleanedToken.includes("share=")) {
+        cleanedToken = cleanedToken.split("share=")[1] || cleanedToken;
+      } else if (cleanedToken.includes("#code=")) {
+        cleanedToken = cleanedToken.split("#code=")[1] || cleanedToken;
+      } else if (cleanedToken.includes("code=")) {
+        cleanedToken = cleanedToken.split("code=")[1] || cleanedToken;
+      }
+      if (cleanedToken.includes("&")) {
+        cleanedToken = cleanedToken.split("&")[0];
+      }
+
+      const normalizedCodeInput = cleanedToken.toUpperCase().replace(/[- ]/g, "");
       const sharedDb = readSharedDB();
       let chatId: string | undefined;
       let isJoiningViaCode = false;
 
-      if (accessCode) {
-        // Normalizing: uppercase, strip spaces and hyphens
-        const normalizedInput = accessCode.trim().toUpperCase().replace(/[- ]/g, "");
-        chatId = Object.keys(sharedDb).find(id => {
-          const dbCode = sharedDb[id].accessCode;
-          if (!dbCode) return false;
-          return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
-        });
+      // Check 1: Match by accessCode
+      chatId = Object.keys(sharedDb).find(id => {
+        const dbCode = sharedDb[id].accessCode;
+        if (!dbCode) return false;
+        return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedCodeInput;
+      });
+
+      if (chatId) {
         isJoiningViaCode = true;
-      } else if (shareToken) {
-        chatId = Object.keys(sharedDb).find(id => sharedDb[id].shareToken === shareToken);
+      } else {
+        // Check 2: Match by shareToken
+        chatId = Object.keys(sharedDb).find(id => 
+          sharedDb[id].shareToken === cleanedToken || 
+          sharedDb[id].shareToken === rawInput
+        );
+
+        if (!chatId) {
+          // Check 3: Match by direct chatId
+          if (sharedDb[cleanedToken]) {
+            chatId = cleanedToken;
+          } else if (sharedDb[rawInput]) {
+            chatId = rawInput;
+          }
+        }
       }
 
-      // If neither is valid, handle failed attempt
+      // Handle invalid join key
       if (!chatId) {
         const now = Date.now();
         if (attempt) {
@@ -2077,69 +2116,70 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         }
         return res.status(404).json({
           success: false,
-          error: isJoiningViaCode 
-            ? "Invalid Chat Access Code. Please check the code and try again." 
-            : "Invalid share link/token or conversation does not exist."
+          error: "Invalid share link, access code, or the conversation no longer exists."
         });
       }
 
-      // Successfully validated, delete failed attempts tracking
+      // Successfully matched, clear attempt counter
       failedAttempts.delete(attemptKey);
 
       const config = sharedDb[chatId];
-      const normalizedEmail = email.toLowerCase().trim();
 
       if (isJoiningViaCode) {
-        // Verify code activity
         if (!config.accessCodeIsActive) {
           return res.status(400).json({ success: false, error: "This chat access code has been disabled by the owner." });
         }
-        // Verify code expiration
         if (config.accessCodeExpiresAt && new Date(config.accessCodeExpiresAt) < new Date()) {
           return res.status(400).json({ success: false, error: "This chat access code has expired." });
         }
       } else {
-        // Verify link activity
         if (!config.isSharingActive) {
           return res.status(400).json({ success: false, error: "This shared conversation has been disabled by the owner." });
         }
-        // Verify link expiration
         if (config.expiresAt && new Date(config.expiresAt) < new Date()) {
           return res.status(400).json({ success: false, error: "This shared conversation link has expired." });
         }
       }
 
-      // If owner is joining their own session
-      if (config.ownerEmail === normalizedEmail) {
+      // Owner joining
+      if (config.ownerEmail === email) {
         return res.status(200).json({ success: true, chatId, role: "owner", config });
       }
 
-      // Determine default role permission
+      // Determine default participant role
       const defaultPerm = isJoiningViaCode 
         ? config.accessCodePermission || "chat"
         : config.defaultPermission || "chat";
       let role = defaultPerm === "chat" ? "editor" : "viewer";
 
-      // Add to participants list if not already there
-      const existingPart = config.participants.find((p: any) => p.email === normalizedEmail);
+      // Ensure participants list exists
+      if (!Array.isArray(config.participants)) {
+        config.participants = [];
+      }
+
+      const existingPart = config.participants.find((p: any) => p.email === email);
       if (!existingPart) {
         config.participants.push({
-          email: normalizedEmail,
+          email: email,
           name: fullName || email.split("@")[0],
-          role: role, // editor (can chat) or viewer (view only)
+          role: role,
           joinedAt: new Date().toISOString()
         });
         writeSharedDB(sharedDb);
-        console.info(`[Nexa Server] User ${normalizedEmail} joined shared chat ${chatId} as ${role} via ${isJoiningViaCode ? 'Code' : 'Link'}`);
+        console.info(`[Nexa Server] User ${email} joined shared chat ${chatId} as ${role} via ${isJoiningViaCode ? 'Code' : 'Link'}`);
       } else {
         role = existingPart.role;
       }
 
       return res.status(200).json({ success: true, chatId, role, config });
     } catch (e: any) {
-      return res.status(500).json({ success: false, error: e.message });
+      console.error("[Nexa Server] Exception in /api/share/join:", e);
+      return res.status(500).json({ success: false, error: e.message || "An internal error occurred while joining." });
     }
-  });
+  };
+
+  app.post("/api/share/join", handleJoinLogic);
+  app.get("/api/share/join", handleJoinLogic);
 
   // Helper to find shared chat config by chatId, shareToken, or accessCode
   const findSharedConfig = (input: string) => {
@@ -2284,7 +2324,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
               .order("timestamp", { ascending: true });
 
             if (messagesError) {
-              console.error(`[Nexa Server] [share/session] Error loading messages from Supabase:`, messagesError.message);
+              console.warn(`[Nexa Server] [share/session] Supabase messages query notice (${messagesError.code}): ${messagesError.message}`);
             }
 
             session = {
@@ -2313,12 +2353,12 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
             };
             console.log(`[Nexa Server] [share/session] Loaded from Supabase: "${session.title}" with ${session.messages.length} messages.`);
           } else if (chatError) {
-            console.error(`[Nexa Server] [share/session] Supabase error while loading chat:`, chatError.message);
+            console.warn(`[Nexa Server] [share/session] Supabase table/schema notice (${chatError.code || 'NO_CODE'}): ${chatError.message}. Falling back to local storage.`);
           } else {
-            console.warn(`[Nexa Server] [share/session] Chat record "${actualChatId}" not found in Supabase table "chats".`);
+            console.warn(`[Nexa Server] [share/session] Chat record "${actualChatId}" not found in Supabase table "chats". Falling back to local storage.`);
           }
         } catch (supaErr: any) {
-          console.error(`[Nexa Server] [share/session] Exception while connecting to Supabase:`, supaErr);
+          console.warn(`[Nexa Server] [share/session] Exception while connecting to Supabase: ${supaErr.message || supaErr}. Falling back to local storage.`);
         }
       } else {
         console.warn(`[Nexa Server] [share/session] Supabase client is not available on server-side. Skipping Supabase query.`);
@@ -2472,12 +2512,12 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
               error: countError ? countError.message : null
             };
           } else if (chatError) {
-            results.errors.push(`Supabase fetch failed for chat ${chatId}: ${chatError.message}`);
+            results.warnings.push(`Supabase query notice for chat ${chatId}: ${chatError.message}`);
           } else {
             results.warnings.push(`Chat ${chatId} not found in Supabase chats table.`);
           }
         } catch (supaErr: any) {
-          results.errors.push(`Exception querying Supabase for chat diagnostics: ${supaErr.message}`);
+          results.warnings.push(`Exception querying Supabase for chat diagnostics: ${supaErr.message}`);
           results.checks.supabase.exception = supaErr.message;
         }
       } else {
@@ -2522,6 +2562,15 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         stack: err.stack
       });
     }
+  });
+
+  // Catch-All 404 for API endpoints to ensure JSON response instead of HTML
+  app.all("/api/*", (req, res) => {
+    console.warn(`[Nexa Server] 404 Unhandled API route requested: ${req.method} ${req.originalUrl}`);
+    return res.status(404).json({
+      success: false,
+      error: `API endpoint not found: ${req.method} ${req.originalUrl}`
+    });
   });
 
   // Serve static UI assets

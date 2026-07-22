@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   MessageSquare,
   Plus,
@@ -35,11 +36,35 @@ import {
   Users,
   Link,
   Archive,
+  History,
+  RotateCcw,
+  Clock,
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "motion/react";
-import { ChatSession, UserProfile } from "../types";
+import { ChatSession, UserProfile, SearchHistoryItem } from "../types";
 import { Logo } from "./Logo";
-import { copyToClipboard } from "../utils/storage";
+import { copyToClipboard, safeStorage } from "../utils/storage";
+
+function formatRelativeTime(isoString: string): string {
+  try {
+    const d = new Date(isoString);
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffSecs < 30) return "Just now";
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch (e) {
+    return "";
+  }
+}
 
 interface SidebarProps {
   sessions: ChatSession[];
@@ -68,6 +93,7 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
   onOpenShare?: (sessionId: string) => void;
   onOpenJoinCollaboration?: () => void;
+  onReRunQuery?: (query: string) => void;
 }
 
 export function Sidebar({
@@ -97,16 +123,142 @@ export function Sidebar({
   onToggleCollapse,
   onOpenShare,
   onOpenJoinCollaboration,
+  onReRunQuery,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
 
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState<{
+    sessionId: string;
+    session: ChatSession;
+    isPinnedItem: boolean;
+    top: number;
+    right: number;
+  } | null>(null);
+
+  // Close 3-dot dropdown menu on outside click, scroll, resize, or Escape key
+  useEffect(() => {
+    if (!activeMenu) return;
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      const menuEl = document.getElementById("nexa-chat-item-menu");
+      if (menuEl && menuEl.contains(e.target as Node)) {
+        return;
+      }
+      setActiveMenu(null);
+    };
+
+    const handleScrollOrResize = () => {
+      setActiveMenu(null);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setActiveMenu(null);
+      }
+    };
+
+    window.addEventListener("mousedown", handlePointerDown, true);
+    window.addEventListener("touchstart", handlePointerDown, true);
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown, true);
+      window.removeEventListener("touchstart", handlePointerDown, true);
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeMenu]);
   const [isRecentChatsExpanded, setIsRecentChatsExpanded] = useState(true);
   const [isRecentlyDeletedExpanded, setIsRecentlyDeletedExpanded] = useState(true);
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(true);
+  const [isSearchHistoryExpanded, setIsSearchHistoryExpanded] = useState(true);
+
+  // Search History local storage state
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => {
+    const saved = safeStorage.getItem("nexa_search_history");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.warn("[Nexa Sidebar] Failed to parse search history:", e);
+      }
+    }
+    return [];
+  });
+
+  const saveSearchHistory = (items: SearchHistoryItem[]) => {
+    setSearchHistory(items);
+    safeStorage.setItem("nexa_search_history", JSON.stringify(items));
+  };
+
+  const addSearchQuery = (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    const existingIndex = searchHistory.findIndex(
+      (item) => item.query.toLowerCase() === trimmed.toLowerCase()
+    );
+
+    let updated: SearchHistoryItem[];
+    if (existingIndex >= 0) {
+      const existingItem = searchHistory[existingIndex];
+      const newItem: SearchHistoryItem = {
+        ...existingItem,
+        query: trimmed,
+        timestamp: new Date().toISOString(),
+        count: (existingItem.count || 1) + 1,
+      };
+      updated = [newItem, ...searchHistory.filter((_, idx) => idx !== existingIndex)];
+    } else {
+      const newItem: SearchHistoryItem = {
+        id: "sh_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+        query: trimmed,
+        timestamp: new Date().toISOString(),
+        count: 1,
+      };
+      updated = [newItem, ...searchHistory];
+    }
+
+    if (updated.length > 50) {
+      updated = updated.slice(0, 50);
+    }
+
+    saveSearchHistory(updated);
+  };
+
+  const deleteSearchQuery = (id: string) => {
+    const updated = searchHistory.filter((item) => item.id !== id);
+    saveSearchHistory(updated);
+  };
+
+  const clearSearchHistory = () => {
+    saveSearchHistory([]);
+  };
+
+  const handleApplySearchFilter = (query: string) => {
+    setSearchQuery(query);
+    setIsSearchOpen(true);
+    addSearchQuery(query);
+  };
+
+  const handleReRunQueryInChat = (query: string) => {
+    addSearchQuery(query);
+    if (onReRunQuery) {
+      onReRunQuery(query);
+      onCloseMobile?.();
+    } else {
+      setSearchQuery(query);
+      setIsSearchOpen(true);
+    }
+  };
+
   const touchStartTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Lazy loading state for infinite scrolling
@@ -145,10 +297,27 @@ export function Sidebar({
   // Mobile Long-Press Handling
   const handleTouchStart = (e: React.TouchEvent, sessionId: string) => {
     if (touchStartTimerRef.current) clearTimeout(touchStartTimerRef.current);
+    const targetEl = e.currentTarget as HTMLElement;
     touchStartTimerRef.current = setTimeout(() => {
-      setActiveMenuId(sessionId);
-      if (navigator.vibrate) {
-        navigator.vibrate(50);
+      const session = filteredSessions.find((s) => s.id === sessionId);
+      if (session) {
+        const rect = targetEl.getBoundingClientRect();
+        const menuHeight = 170;
+        let top = rect.bottom + 4;
+        if (top + menuHeight > window.innerHeight) {
+          top = Math.max(8, rect.top - menuHeight);
+        }
+        const right = Math.max(12, window.innerWidth - rect.right);
+        setActiveMenu({
+          sessionId: session.id,
+          session,
+          isPinnedItem: !!session.isPinned,
+          top,
+          right,
+        });
+        if (navigator.vibrate) {
+          navigator.vibrate(50);
+        }
       }
     }, 600);
   };
@@ -334,7 +503,7 @@ export function Sidebar({
         ) : (
           <button
             onClick={() => {
-              if (activeMenuId === session.id) return;
+              if (activeMenu?.sessionId === session.id) return;
               onSelectSession(session.id);
               onCloseMobile?.();
             }}
@@ -348,75 +517,39 @@ export function Sidebar({
         )}
 
         {!isEditing && (
-          <div className={`flex items-center gap-1 pr-1 shrink-0 ${activeMenuId === session.id ? "flex" : "hidden group-hover/session:flex"}`}>
+          <div className={`flex items-center gap-1 pr-1 shrink-0 ${activeMenu?.sessionId === session.id ? "flex" : "hidden group-hover/session:flex"}`}>
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                setActiveMenuId(activeMenuId === session.id ? null : session.id);
+                if (activeMenu?.sessionId === session.id) {
+                  setActiveMenu(null);
+                } else {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const menuHeight = 170;
+                  let top = rect.bottom + 4;
+                  if (top + menuHeight > window.innerHeight) {
+                    top = Math.max(8, rect.top - menuHeight);
+                  }
+                  const right = Math.max(12, window.innerWidth - rect.right);
+                  setActiveMenu({
+                    sessionId: session.id,
+                    session,
+                    isPinnedItem,
+                    top,
+                    right,
+                  });
+                }
               }}
-              className="p-1 rounded-md text-slate-400 hover:text-[#C96A3D] hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-all cursor-pointer"
+              className={`p-1 rounded-md transition-all cursor-pointer ${
+                activeMenu?.sessionId === session.id
+                  ? "text-[#C96A3D] bg-slate-100 dark:bg-slate-800/80"
+                  : "text-slate-400 hover:text-[#C96A3D] hover:bg-slate-100 dark:hover:bg-slate-800/80"
+              }`}
               title="More Actions"
             >
               <MoreVertical className="w-3.5 h-3.5" />
             </button>
-
-            {activeMenuId === session.id && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: -5 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                className="absolute right-2 top-8 z-55 bg-white dark:bg-[#11192e] border border-slate-100 dark:border-slate-800/80 rounded-2xl shadow-xl p-1.5 min-w-[150px] text-left space-y-0.5 pointer-events-auto"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPinSession(session.id);
-                    setActiveMenuId(null);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
-                >
-                  <Pin className={`w-3.5 h-3.5 ${isPinnedItem ? "rotate-45 fill-[#C96A3D] text-[#C96A3D]" : ""}`} />
-                  <span>{isPinnedItem ? "Unpin Chat" : "Pin Chat"}</span>
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleStartRename(session);
-                    setActiveMenuId(null);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>Rename Chat</span>
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleShareSession(session);
-                    setActiveMenuId(null);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share Chat</span>
-                </button>
-
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteSession(session.id);
-                    setActiveMenuId(null);
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete Chat</span>
-                </button>
-              </motion.div>
-            )}
           </div>
         )}
       </div>
@@ -562,6 +695,16 @@ export function Sidebar({
                       placeholder="Search conversations..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && searchQuery.trim()) {
+                          addSearchQuery(searchQuery);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (searchQuery.trim().length >= 2) {
+                          addSearchQuery(searchQuery);
+                        }
+                      }}
                       className="w-full text-xs py-2 pl-8 pr-12 rounded-xl border border-[#C96A3D]/30 dark:border-[#C96A3D]/30 bg-slate-50/50 dark:bg-slate-900/40 focus:border-[#C96A3D] focus:ring-1 focus:ring-[#C96A3D] outline-none text-[#14213D] dark:text-white transition-all font-medium h-9"
                     />
                     <Search className="absolute left-2.5 top-3 text-[#C96A3D] w-3.5 h-3.5" />
@@ -689,7 +832,113 @@ export function Sidebar({
               </AnimatePresence>
             </div>
 
-            {/* 2. Collapsible Recently Deleted (Placed just under Recent Chats) */}
+            {/* 2. Dedicated Search History Section */}
+            <div className="space-y-2 w-full pt-2 border-t border-slate-100 dark:border-slate-800/40">
+              <div className="flex items-center justify-between py-1">
+                <button
+                  onClick={() => setIsSearchHistoryExpanded(!isSearchHistoryExpanded)}
+                  className="flex-1 flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 hover:text-slate-650 dark:hover:text-slate-300 transition-colors cursor-pointer select-none outline-none pr-2"
+                >
+                  <div className="flex items-center gap-1.5">
+                    {isSearchHistoryExpanded ? (
+                      <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <History className="w-3.5 h-3.5 shrink-0 text-[#C96A3D]/80" />
+                    <span>Search History</span>
+                  </div>
+                  <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
+                    {searchHistory.length}
+                  </span>
+                </button>
+
+                {searchHistory.length > 0 && isSearchHistoryExpanded && (
+                  <button
+                    onClick={clearSearchHistory}
+                    className="text-[9px] font-extrabold text-slate-400 hover:text-rose-500 transition-colors px-1.5 py-0.5 rounded hover:bg-rose-50 dark:hover:bg-rose-950/30 cursor-pointer"
+                    title="Clear search history"
+                  >
+                    Clear All
+                  </button>
+                )}
+              </div>
+
+              <AnimatePresence initial={false}>
+                {isSearchHistoryExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    className="overflow-hidden space-y-1.5 w-full pl-1"
+                  >
+                    {searchHistory.length > 0 ? (
+                      <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                        {searchHistory.map((item) => (
+                          <div
+                            key={item.id}
+                            className="group/item flex items-center justify-between p-2 rounded-xl border border-transparent hover:border-slate-200 dark:hover:border-slate-800/60 bg-slate-50/50 dark:bg-slate-900/30 hover:bg-slate-100/70 dark:hover:bg-slate-800/50 transition-all duration-150 text-xs"
+                          >
+                            <button
+                              onClick={() => handleApplySearchFilter(item.query)}
+                              className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer outline-none pr-1"
+                              title={`Filter conversations for: "${item.query}"`}
+                            >
+                              <History className="w-3.5 h-3.5 shrink-0 text-slate-400 group-hover/item:text-[#C96A3D] transition-colors" />
+                              <div className="flex flex-col min-w-0">
+                                <span className="truncate font-semibold text-slate-700 dark:text-slate-200 group-hover/item:text-[#C96A3D] transition-colors text-[11.5px]">
+                                  {item.query}
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-normal">
+                                  {formatRelativeTime(item.timestamp)}
+                                </span>
+                              </div>
+                            </button>
+
+                            <div className="flex items-center gap-1 shrink-0 opacity-70 group-hover/item:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleReRunQueryInChat(item.query);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-[#C96A3D] hover:bg-[#C96A3D]/10 dark:hover:bg-[#C96A3D]/20 transition-all cursor-pointer"
+                                title="Re-run query with AI assistant"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteSearchQuery(item.id);
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+                                title="Delete search item"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 text-center rounded-xl bg-slate-50/50 dark:bg-slate-900/20 border border-dashed border-slate-200 dark:border-slate-800/60">
+                        <History className="w-4 h-4 text-slate-300 dark:text-slate-600 mx-auto mb-1" />
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                          No search history
+                        </p>
+                        <p className="text-[9.5px] text-slate-400/80 dark:text-slate-500/80 mt-0.5">
+                          Past searches will be saved here for quick access.
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* 3. Collapsible Recently Deleted (Placed just under Search History) */}
             <div className="space-y-2 w-full pt-2 border-t border-slate-100 dark:border-slate-800/40">
               <button
                 onClick={() => setIsRecentlyDeletedExpanded(!isRecentlyDeletedExpanded)}
@@ -733,7 +982,7 @@ export function Sidebar({
               </AnimatePresence>
             </div>
 
-            {/* 3. Collapsible Archived Chats (Placed under Recently Deleted) */}
+            {/* 4. Collapsible Archived Chats (Placed under Recently Deleted) */}
             <div className="space-y-2 w-full pt-2 border-t border-slate-100 dark:border-slate-800/40">
               <button
                 onClick={() => setIsArchiveExpanded(!isArchiveExpanded)}
@@ -801,6 +1050,25 @@ export function Sidebar({
                 {renderChatItem(session, false)}
               </div>
             ))}
+
+            {/* Search History icon separator */}
+            <div className="w-8 border-t border-slate-100 dark:border-slate-800/60 my-2" />
+
+            {/* Search History button */}
+            <button
+              onClick={() => {
+                onToggleCollapse?.();
+                setIsSearchHistoryExpanded(true);
+              }}
+              className="flex items-center justify-center select-none transition-all duration-200 cursor-pointer w-11 h-11 rounded-xl relative group/history border border-transparent text-slate-400 hover:bg-slate-50/50 dark:hover:bg-slate-900/30 hover:text-[#C96A3D]"
+              title="Search History"
+            >
+              <History className="w-4 h-4 shrink-0 text-slate-400 group-hover/history:text-[#C96A3D]" />
+              <div className="absolute left-[54px] top-1/2 -translate-y-1/2 ml-1 px-3 py-2 bg-slate-900 dark:bg-slate-950 text-white text-[11px] font-medium rounded-xl shadow-2xl border border-slate-800 pointer-events-none opacity-0 scale-90 translate-x-2 origin-left group-hover/history:opacity-100 group-hover/history:scale-100 group-hover/history:translate-x-0 transition-all duration-200 z-50 whitespace-nowrap text-left">
+                <span className="font-extrabold text-slate-100">Search History ({searchHistory.length})</span>
+                <div className="absolute right-full top-1/2 -translate-y-1/2 border-y-4 border-y-transparent border-r-4 border-r-slate-900 dark:border-r-slate-950 mr-[-1px]" />
+              </div>
+            </button>
 
             {/* Recently Deleted icon separator */}
             <div className="w-8 border-t border-slate-100 dark:border-slate-800/60 my-2" />
@@ -1051,6 +1319,76 @@ export function Sidebar({
           )}
         </div>
       )}
+
+      {activeMenu &&
+        createPortal(
+          <AnimatePresence>
+            <motion.div
+              id="nexa-chat-item-menu"
+              initial={{ opacity: 0, scale: 0.95, y: -4 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: -4 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              style={{
+                position: "fixed",
+                top: `${activeMenu.top}px`,
+                right: `${activeMenu.right}px`,
+                zIndex: 99999,
+              }}
+              className="bg-white dark:bg-[#11192e] border border-slate-200/90 dark:border-slate-800 rounded-2xl shadow-2xl p-1.5 min-w-[160px] text-left space-y-0.5 pointer-events-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPinSession(activeMenu.session.id);
+                  setActiveMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
+              >
+                <Pin className={`w-3.5 h-3.5 ${activeMenu.isPinnedItem ? "rotate-45 fill-[#C96A3D] text-[#C96A3D]" : ""}`} />
+                <span>{activeMenu.isPinnedItem ? "Unpin Chat" : "Pin Chat"}</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStartRename(activeMenu.session);
+                  setActiveMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Rename Chat</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleShareSession(activeMenu.session);
+                  setActiveMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Share Chat</span>
+              </button>
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDeleteSession(activeMenu.session.id);
+                  setActiveMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Chat</span>
+              </button>
+            </motion.div>
+          </AnimatePresence>,
+          document.body
+        )}
     </aside>
   );
 }

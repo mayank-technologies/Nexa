@@ -1,0 +1,73 @@
+{
+  "session-1784714769554": {
+    "id": "session-1784714769554",
+    "ownerEmail": "guest@nexa.ai",
+    "ownerName": "guest",
+    "isSharingActive": true,
+    "shareToken": "sh_ozgp6ufatios36ig5fo1u",
+    "expiresAt": null,
+    "defaultPermission": "chat",
+    "participants": [],
+    "accessCode": "CHAT-TWTG",
+    "accessCodeExpiresAt": null,
+    "accessCodePermission": "chat",
+    "accessCodeIsActive": true,
+    "accessCodeDurationType": "never"
+  },
+  "test_chat_1784716795758": {
+    "id": "test_chat_1784716795758",
+    "ownerEmail": "owner@nexa.ai",
+    "ownerName": "Owner User",
+    "isSharingActive": true,
+    "shareToken": "sh_g0a2q4j0ld4pk34hyi0pp",
+    "expiresAt": null,
+    "defaultPermission": "chat",
+    "participants": [
+      {
+        "email": "guest@nexa.ai",
+        "name": "Guest User 1",
+        "role": "editor",
+        "joinedAt": "2026-07-22T10:39:55.904Z"
+      },
+      {
+        "email": "guest2@nexa.ai",
+        "name": "Guest User 2",
+        "role": "editor",
+        "joinedAt": "2026-07-22T10:39:55.910Z"
+      }
+    ],
+    "accessCode": "NXA-276227",
+    "accessCodeExpiresAt": null,
+    "accessCodePermission": "chat",
+    "accessCodeIsActive": true,
+    "accessCodeDurationType": "never"
+  },
+  "test_chat_1784716805486": {
+    "id": "test_chat_1784716805486",
+    "ownerEmail": "owner@nexa.ai",
+    "ownerName": "Owner User",
+    "isSharingActive": true,
+    "shareToken": "sh_rodg36t7kgrvpdnrjs08d",
+    "expiresAt": null,
+    "defaultPermission": "chat",
+    "participants": [
+      {
+        "email": "guest@nexa.ai",
+        "name": "Guest User 1",
+        "role": "editor",
+        "joinedAt": "2026-07-22T10:40:05.688Z"
+      },
+      {
+        "email": "guest2@nexa.ai",
+        "name": "Guest User 2",
+        "role": "editor",
+        "joinedAt": "2026-07-22T10:40:05.694Z"
+      }
+    ],
+    "accessCode": "NXA-WA8N-H7",
+    "accessCodeExpiresAt": null,
+    "accessCodePermission": "chat",
+    "accessCodeIsActive": true,
+    "accessCodeDurationType": "never"
+  }
+}

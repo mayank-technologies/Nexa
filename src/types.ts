@@ -109,6 +109,13 @@ export interface UserProfile {
   gamification?: GamificationState;
 }
 
+export interface SearchHistoryItem {
+  id: string;
+  query: string;
+  timestamp: string;
+  count?: number;
+}
+
 export interface AppSettings {
   theme: "light" | "dark";
   language: string;

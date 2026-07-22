@@ -40,28 +40,35 @@ export const JoinModal: React.FC<JoinModalProps> = ({
       let token = trimmedInput;
       let isCode = false;
 
-      // Parse token from either full URL format (e.g. http://localhost:3000/#share=TOKEN) or raw token
+      // Parse token/code from full URL format or hash format
       if (token.includes("#share=")) {
         token = token.split("#share=")[1] || token;
       } else if (token.includes("share=")) {
         token = token.split("share=")[1] || token;
+      } else if (token.includes("#code=")) {
+        token = token.split("#code=")[1] || token;
+        isCode = true;
+      } else if (token.includes("code=")) {
+        token = token.split("code=")[1] || token;
+        isCode = true;
       } else {
-        // If it doesn't start with "sh_" and has standard access code length/format, treat as access code
-        if (!token.startsWith("sh_") && (token.includes("-") || token.length <= 15)) {
+        if (!token.startsWith("sh_") && (token.includes("-") || token.length <= 18)) {
           isCode = true;
         }
+      }
+
+      // Strip query parameters if present
+      if (token.includes("&")) {
+        token = token.split("&")[0];
       }
 
       const payload: any = {
         email: userEmail,
         fullName: userName,
+        input: trimmedInput,
+        shareToken: token,
+        accessCode: token,
       };
-
-      if (isCode) {
-        payload.accessCode = token;
-      } else {
-        payload.shareToken = token;
-      }
 
       const res = await fetch("/api/share/join", {
         method: "POST",
@@ -73,7 +80,7 @@ export const JoinModal: React.FC<JoinModalProps> = ({
       try {
         data = await res.json();
       } catch (parseErr) {
-        throw new Error(`Invalid server response (HTTP status ${res.status})`);
+        throw new Error(`Server returned non-JSON response (HTTP status ${res.status})`);
       }
 
       if (res.ok && data.success) {

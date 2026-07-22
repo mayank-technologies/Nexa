@@ -3222,6 +3222,10 @@ export default function App() {
             onOpenJoinCollaboration={() => {
               setShowJoinModal(true);
             }}
+            onReRunQuery={(query) => {
+              setCurrentView("chat");
+              handleChatSubmit(query);
+            }}
           />
         </div>
 
@@ -3292,6 +3296,11 @@ export default function App() {
                   }}
                   onOpenJoinCollaboration={() => {
                     setShowJoinModal(true);
+                  }}
+                  onReRunQuery={(query) => {
+                    setCurrentView("chat");
+                    setIsMobileSidebarOpen(false);
+                    handleChatSubmit(query);
                   }}
                 />
               </motion.div>

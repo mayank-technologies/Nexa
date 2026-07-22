@@ -911,6 +911,26 @@ export default function App() {
       // Remove Guest cached data to avoid state leakage
       clearGuestCache();
 
+      // Hydrate from localStorage for instant display
+      const currentUid = user.uid;
+      const cached = safeStorage.getItem(`nexa_sessions_${currentUid}`) || safeStorage.getItem("nexa_sessions");
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as ChatSession[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setSessions(parsed);
+            const cachedActive = safeStorage.getItem(`nexa_active_session_id_${currentUid}`);
+            if (cachedActive && parsed.some((s) => s.id === cachedActive)) {
+              setActiveSessionId(cachedActive);
+            } else if (parsed.length > 0) {
+              setActiveSessionId(parsed[0].id);
+            }
+          }
+        } catch (e) {
+          console.error("[Nexa Client] Local hydration error:", e);
+        }
+      }
+
       const loadChats = async () => {
         if (isLoadingRef.current || isGeneratingRef.current) {
           console.log("[Nexa Client] Skip loadChats during active stream (start).");
@@ -928,6 +948,16 @@ export default function App() {
             if (sessionsRef.current.length > 0) {
               console.log("[Nexa Client] summaries is empty, but local sessions exist. Skipping seeding default chat.");
               return;
+            }
+            const localCheck = safeStorage.getItem(`nexa_sessions_${currentUid}`);
+            if (localCheck) {
+              try {
+                const parsedLocal = JSON.parse(localCheck);
+                if (Array.isArray(parsedLocal) && parsedLocal.length > 0) {
+                  console.log("[Nexa Client] summaries is empty, but localStorage sessions exist. Skipping seeding default chat.");
+                  return;
+                }
+              } catch (e) {}
             }
             console.log("[Nexa Client] [LOG] Supabase chats is empty and no local sessions exist. Seeding default starter chat.");
             const defaultId = `session-${Date.now()}`;
@@ -959,6 +989,7 @@ export default function App() {
             return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
           });
 
+          let mergedSessionsResult: ChatSession[] = [];
           setSessions((prevSessions) => {
             if (isLoadingRef.current || isGeneratingRef.current) {
               return prevSessions;
@@ -967,7 +998,7 @@ export default function App() {
               const existing = prevSessions.find((s) => s.id === summary.id);
               return {
                 ...summary,
-                messages: existing && existing.messages.length > 0 ? existing.messages : summary.messages,
+                messages: existing && existing.messages && existing.messages.length > 0 ? existing.messages : summary.messages,
               };
             });
 
@@ -975,20 +1006,24 @@ export default function App() {
               (s) => !summaries.some((sum) => sum.id === s.id)
             );
 
-            return [...localOnly, ...merged];
+            mergedSessionsResult = [...localOnly, ...merged];
+            return mergedSessionsResult;
           });
 
-          // Ensure activeSessionId is set to a valid session
+          // Ensure activeSessionId remains preserved on existing sessions
           setActiveSessionId((currentId) => {
             if (isLoadingRef.current || isGeneratingRef.current) {
               return currentId;
             }
-            if (summaries.some((s) => s.id === currentId) || (currentId && currentId.startsWith("session-"))) {
+            if (currentId && (mergedSessionsResult.some((s) => s.id === currentId) || summaries.some((s) => s.id === currentId))) {
               return currentId;
             }
             const cachedActiveId = safeStorage.getItem(`nexa_active_session_id_${user.uid}`);
-            if (cachedActiveId && (summaries.some((s) => s.id === cachedActiveId) || cachedActiveId.startsWith("session-"))) {
+            if (cachedActiveId && (mergedSessionsResult.some((s) => s.id === cachedActiveId) || summaries.some((s) => s.id === cachedActiveId))) {
               return cachedActiveId;
+            }
+            if (mergedSessionsResult.length > 0) {
+              return mergedSessionsResult[0].id;
             }
             return summaries.length > 0 ? summaries[0].id : "";
           });
@@ -1113,25 +1148,32 @@ export default function App() {
             }
             return prevSessions.map((s) => {
               if (s.id === activeSessionId) {
-                // Safeguard against overwriting local messages with an empty/stale list from Supabase
-                if (fetchedMessages.length < s.messages.length) {
-                  console.warn(
-                    `[Nexa Client] [loadMessages] Prevented overwriting messages for ${s.id}. ` +
-                    `Local messages count: ${s.messages.length}, Supabase fetched count: ${fetchedMessages.length}`
-                  );
-                  return s;
+                if (fetchedMessages.length === 0 && s.messages.length > 0) {
+                  return s; // Keep existing local messages
                 }
 
-                // Check if changes are genuine before triggering state update
-                if (JSON.stringify(s.messages) !== JSON.stringify(fetchedMessages)) {
+                // Combine local and remote messages by unique ID
+                const msgMap = new Map<string, Message>();
+                s.messages.forEach((m) => msgMap.set(m.id, m));
+                fetchedMessages.forEach((m) => msgMap.set(m.id, m));
+                const combined = Array.from(msgMap.values());
+
+                combined.sort((a, b) => {
+                  const getNum = (id: string) => {
+                    const match = id.match(/\d+/);
+                    return match ? parseInt(match[0], 10) : 0;
+                  };
+                  return getNum(a.id) - getNum(b.id);
+                });
+
+                if (JSON.stringify(s.messages) !== JSON.stringify(combined)) {
                   console.log(
-                    `[Nexa Client] [loadMessages] Updating messages for ${s.id} from Supabase. ` +
-                    `Local count: ${s.messages.length}, Supabase count: ${fetchedMessages.length}`
-                    + (fetchedMessages.length > 0 ? `, Last fetched role: ${fetchedMessages[fetchedMessages.length - 1].role}` : "")
+                    `[Nexa Client] [loadMessages] Merged messages for ${s.id}. ` +
+                    `Local count: ${s.messages.length}, Combined count: ${combined.length}`
                   );
                   return {
                     ...s,
-                    messages: fetchedMessages,
+                    messages: combined,
                   };
                 }
               }
@@ -1352,22 +1394,15 @@ export default function App() {
 
   useEffect(() => {
     if (isAuthLoading) return;
+    if (sessions.length === 0) return; // Don't persist empty state over valid cache
     const currentUid = user?.isGuest ? "guest@nexa.ai" : (user?.uid || "guest@nexa.ai");
-    console.log("[Nexa Restorations Debug] [persist trigger] Persisting sessions to storage. Sessions count:", sessions.length, "Active session ID:", activeSessionId, "For UID:", currentUid);
     
     if (currentUid) {
-      if (!lastWriteUidRef.current) {
-        lastWriteUidRef.current = currentUid;
-      }
-      // Avoid writing stale state of previous user to a newly switched user
-      if (lastWriteUidRef.current !== currentUid) {
-        console.warn("[Nexa Restorations Debug] [persist bypassed] Stale write prevented: current UID", currentUid, "differs from last write UID", lastWriteUidRef.current);
-        lastWriteUidRef.current = currentUid;
-        return;
-      }
+      lastWriteUidRef.current = currentUid;
       safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(sessions));
-      safeStorage.setItem(`nexa_active_session_id_${currentUid}`, activeSessionId);
-      console.log("[Nexa Restorations Debug] [persist success] Successfully saved sessions & active ID to storage.");
+      if (activeSessionId) {
+        safeStorage.setItem(`nexa_active_session_id_${currentUid}`, activeSessionId);
+      }
     }
   }, [sessions, activeSessionId, user, isAuthLoading]);
 
@@ -1377,6 +1412,15 @@ export default function App() {
   }, [adminMetrics]);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || ({ id: "", title: "", messages: [], mode: "general", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), isPinned: false } as ChatSession);
+
+  // Auto-repair activeSessionId if out of sync with sessions list
+  useEffect(() => {
+    if (sessions.length > 0 && (!activeSessionId || !sessions.some((s) => s.id === activeSessionId))) {
+      console.log("[Nexa Fix] Repairing activeSessionId to match existing session:", sessions[0].id);
+      setActiveSessionId(sessions[0].id);
+    }
+  }, [sessions, activeSessionId]);
+
   const lastMessage = activeSession && Array.isArray(activeSession.messages) && activeSession.messages.length > 0
     ? activeSession.messages[activeSession.messages.length - 1]
     : undefined;
@@ -1424,24 +1468,12 @@ export default function App() {
     }
   }, [activeSessionId, messageCount, lastMessageContent, isLoading]);
 
-  // Sync mode whenever active mode changes
-  useEffect(() => {
-    console.log("[Nexa Restorations Debug] [sync mode change] activeMode changed to:", activeMode, "Current active session mode:", activeSession?.mode);
-    if (activeSession && activeSession.mode !== activeMode) {
-      console.log("[Nexa Restorations Debug] [sync mode change] Overwriting session mode with:", activeMode);
-      setSessions((prev) =>
-        prev.map((s) => (s.id === activeSession.id ? { ...s, mode: activeMode } : s))
-      );
-    }
-  }, [activeMode]);
-
   // Triggered when opening a session to match sidebar toggle mode
   useEffect(() => {
-    console.log("[Nexa Restorations Debug] [match sidebar] activeSessionId changed to:", activeSessionId, "Target mode:", activeSession?.mode);
-    if (activeSession) {
+    if (activeSession && activeSession.mode) {
       setActiveMode(activeSession.mode);
     }
-  }, [activeSessionId]);
+  }, [activeSessionId, activeSession?.mode]);
 
   // Play Premium Modal Open sound
   useEffect(() => {
@@ -1509,6 +1541,20 @@ export default function App() {
   // Chat Session management controls
   const handleNewSession = (mode: ChatSession["mode"] = "general") => {
     console.log("[Nexa Debug] [createConversation] handleNewSession called with mode:", mode);
+    
+    // Check if current active session is already empty
+    const currentActive = sessions.find((s) => s.id === activeSessionId);
+    if (currentActive && currentActive.messages.length === 0) {
+      console.log("[Nexa Debug] Currently active session is already empty, reusing it:", currentActive.id);
+      setSessions((prev) =>
+        prev.map((s) => (s.id === currentActive.id ? { ...s, mode } : s))
+      );
+      setActiveMode(mode);
+      setAttachment(null);
+      setCurrentView("chat");
+      return;
+    }
+
     const newId = `session-${Date.now()}`;
     const newChat: ChatSession = {
       id: newId,
@@ -1521,7 +1567,9 @@ export default function App() {
           ? "Study Guide Workspace"
           : mode === "factcheck"
           ? "Claim Verification"
-          : "Drafting Workspace",
+          : mode === "writing"
+          ? "Drafting Workspace"
+          : "MCQ Quiz Arena",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       messages: [],
@@ -1536,8 +1584,9 @@ export default function App() {
     setAttachment(null);
     setCurrentView("chat");
 
-    // Sync to Supabase
-    syncChatSummaryToSupabase(newChat);
+    if (user && !user.isGuest && user.email) {
+      syncChatToSupabase(newChat, user.email);
+    }
   };
 
   const fetchDeletedChatsAndMessages = async (email: string) => {
@@ -2734,10 +2783,14 @@ export default function App() {
     }
   };
 
-  const updateMessageContent = (msgId: string, content: string) => {
+  const updateMessageContent = (targetChatIdOrMsgId: string, msgIdOrContent: string, contentOptional?: string) => {
+    const targetChatId = contentOptional !== undefined ? targetChatIdOrMsgId : (activeSessionIdRef.current || activeSessionId);
+    const msgId = contentOptional !== undefined ? msgIdOrContent : targetChatIdOrMsgId;
+    const content = contentOptional !== undefined ? contentOptional : msgIdOrContent;
+
     setSessions((prev) =>
       prev.map((s) => {
-        if (s.id === activeSessionId) {
+        if (s.id === targetChatId) {
           return {
             ...s,
             messages: s.messages.map((m) => (m.id === msgId ? { ...m, content } : m)),
@@ -2819,7 +2872,37 @@ export default function App() {
     const promptToSend = customPrompt || inputPrompt;
     if (!promptToSend.trim() && !customAttachment) return;
 
-    console.log("[Nexa Debug] [Send Message] Conversation ID before Send:", activeSessionId);
+    // Determine target session ID safely
+    let targetChatId = activeSessionId;
+    let currentSession = sessions.find((s) => s.id === targetChatId);
+
+    if (!currentSession && sessions.length > 0) {
+      currentSession = sessions[0];
+      targetChatId = currentSession.id;
+      setActiveSessionId(targetChatId);
+    }
+
+    if (!currentSession) {
+      const newId = `session-${Date.now()}`;
+      currentSession = {
+        id: newId,
+        title: promptToSend.substring(0, 36) + "...",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+        isPinned: false,
+        mode: activeMode || "general",
+        userEmail: user && !user.isGuest ? user.email || "" : undefined,
+      };
+      targetChatId = newId;
+      setSessions([currentSession]);
+      setActiveSessionId(newId);
+      syncChatSummaryToSupabase(currentSession);
+    } else if (activeSessionId !== targetChatId) {
+      setActiveSessionId(targetChatId);
+    }
+
+    console.log("[Nexa Debug] [Send Message] Target Chat ID:", targetChatId);
 
     if (voiceModeActiveRef.current) {
       setVoiceState("processing");
@@ -2841,22 +2924,21 @@ export default function App() {
       attachment: currentAttachment ? { ...currentAttachment } : undefined,
     };
 
-    const isFirstAssistantResponse = activeSession.messages.length === 0;
-    const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : activeSession.title;
+    const isFirstAssistantResponse = currentSession.messages.length === 0;
+    const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : currentSession.title;
     
     // Save user message immediately to Supabase subcollection & update parent metadata
-    syncMessageSummaryToSupabase(activeSessionId, newUserMsg);
+    syncMessageSummaryToSupabase(targetChatId, newUserMsg);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "message-sync",
-        chatId: activeSessionId,
+        chatId: targetChatId,
         message: newUserMsg
       }));
     }
-    console.log("[Nexa Debug] [Send Message] Conversation ID after Send:", activeSessionId);
     
     const updatedParentChat: ChatSession = {
-      ...activeSession,
+      ...currentSession,
       title: titleRename,
       updatedAt: new Date().toISOString()
     };
@@ -2864,7 +2946,7 @@ export default function App() {
 
     setSessions((prev) =>
       prev.map((s) => {
-        if (s.id === activeSessionId) {
+        if (s.id === targetChatId) {
           return {
             ...s,
             title: titleRename,
@@ -2886,10 +2968,10 @@ export default function App() {
 
     try {
       // Build previous messages stream context list (limited to last 12 messages)
-      const feedMessages = [...activeSession.messages, newUserMsg].slice(-12);
+      const feedMessages = [...currentSession.messages, newUserMsg].slice(-12);
 
       const otherSessionsPayload = sessions
-        .filter((s) => s.id !== activeSessionId && s.messages && s.messages.length > 0)
+        .filter((s) => s.id !== targetChatId && s.messages && s.messages.length > 0)
         .map((s) => ({
           id: s.id,
           title: s.title,
@@ -2944,7 +3026,7 @@ export default function App() {
       // Append assistant message placeholder immediately
       setSessions((prev) =>
         prev.map((s) => {
-          if (s.id === activeSessionId) {
+          if (s.id === targetChatId) {
             return {
               ...s,
               messages: [...s.messages, newAssistantMsg],
@@ -2960,15 +3042,15 @@ export default function App() {
       const speedSetting = settingsRef.current.renderingSpeed || "turbo";
 
       if (speedSetting === "instant") {
-        updateMessageContent(assistantMsgId, fullContent);
+        updateMessageContent(targetChatId, assistantMsgId, fullContent);
         setIsGenerating(false);
         const finalMsg = { ...newAssistantMsg, content: fullContent };
         triggerVoiceIfNeeded(finalMsg);
-        syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+        syncMessageSummaryToSupabase(targetChatId, finalMsg);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
             type: "message-sync",
-            chatId: activeSessionId,
+            chatId: targetChatId,
             message: finalMsg
           }));
         }
@@ -2978,7 +3060,7 @@ export default function App() {
         };
         syncChatSummaryToSupabase(finalParentChat);
         if (isFirstAssistantResponse) {
-          generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
+          generateAndSetAutomatedTitle(targetChatId, promptToSend, fullContent);
         }
       } else {
         const tokens = fullContent.split(/(\s+)/);
@@ -2989,7 +3071,7 @@ export default function App() {
           clearInterval(streamIntervalRef.current);
         }
 
-        console.log("[Nexa Debug] [Streaming Start] Initiating streaming for Conversation ID:", activeSessionId);
+        console.log("[Nexa Debug] [Streaming Start] Initiating streaming for Conversation ID:", targetChatId);
 
         let intervalMs = 20;
         let divisor = 80;
@@ -3019,17 +3101,17 @@ export default function App() {
             streamIntervalRef.current = null;
             setIsGenerating(false);
 
-            console.log("[Nexa Debug] [Stream Finished] Conversation ID after stream finishes:", activeSessionId, "Full content length:", fullContent.length);
+            console.log("[Nexa Debug] [Stream Finished] Conversation ID after stream finishes:", targetChatId, "Full content length:", fullContent.length);
 
             const finalMsg = { ...newAssistantMsg, content: fullContent };
             triggerVoiceIfNeeded(finalMsg);
 
             // Sync complete message to Supabase
-            syncMessageSummaryToSupabase(activeSessionId, finalMsg);
+            syncMessageSummaryToSupabase(targetChatId, finalMsg);
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
                 type: "message-sync",
-                chatId: activeSessionId,
+                chatId: targetChatId,
                 message: finalMsg
               }));
             }
@@ -3040,7 +3122,7 @@ export default function App() {
             syncChatSummaryToSupabase(finalParentChat);
 
             if (isFirstAssistantResponse) {
-              generateAndSetAutomatedTitle(activeSessionId, promptToSend, fullContent);
+              generateAndSetAutomatedTitle(targetChatId, promptToSend, fullContent);
             }
           } else {
             const tokensToAppend = Math.max(minTokens, Math.ceil((tokens.length - currentTokenIdx) / divisor));
@@ -3048,10 +3130,7 @@ export default function App() {
               currentText += tokens[currentTokenIdx];
               currentTokenIdx++;
             }
-            if (currentTokenIdx % 10 === 0 || currentTokenIdx === 1) {
-              console.log("[Nexa Debug] [Streaming] Conversation ID while streaming:", activeSessionId, "Current text length:", currentText.length);
-            }
-            updateMessageContent(assistantMsgId, currentText);
+            updateMessageContent(targetChatId, assistantMsgId, currentText);
           }
         }, intervalMs);
       }

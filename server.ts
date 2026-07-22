@@ -1667,6 +1667,184 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
     return formats[Math.floor(Math.random() * formats.length)]();
   }
 
+  // --- SHARED CHATS DATABASE SYNC HELPERS ---
+  const syncSharedConfigToSupabase = async (config: any) => {
+    const supabase = getSupabaseServer();
+    if (!supabase || !config || !config.id) return;
+    try {
+      await supabase.from("shared_conversations").upsert({
+        id: config.id,
+        chat_id: config.id,
+        owner_email: config.ownerEmail,
+        owner_name: config.ownerName,
+        is_sharing_active: config.isSharingActive !== false,
+        share_token: config.shareToken,
+        expires_at: config.expiresAt || null,
+        default_permission: config.defaultPermission || "chat",
+        updated_at: new Date().toISOString()
+      }, { onConflict: "id" }).catch(() => {});
+
+      if (Array.isArray(config.participants)) {
+        for (const p of config.participants) {
+          await supabase.from("shared_participants").upsert({
+            chat_id: config.id,
+            email: p.email,
+            name: p.name,
+            role: p.role || "editor",
+            joined_at: p.joinedAt || new Date().toISOString()
+          }, { onConflict: "chat_id,email" }).catch(() => {});
+        }
+      }
+
+      if (config.accessCode) {
+        await supabase.from("share_codes").upsert({
+          chat_id: config.id,
+          access_code: config.accessCode,
+          is_active: config.accessCodeIsActive !== false,
+          expires_at: config.accessCodeExpiresAt || null,
+          permission: config.accessCodePermission || "chat",
+          duration_type: config.accessCodeDurationType || "never"
+        }, { onConflict: "chat_id" }).catch(() => {});
+      }
+    } catch (e: any) {
+      console.warn("[Nexa Server] Notice during Supabase share sync:", e.message);
+    }
+  };
+
+  const cleanShareInput = (input: string): string => {
+    if (!input) return "";
+    let clean = input.trim();
+    if (clean.includes("#share=")) clean = clean.split("#share=")[1] || clean;
+    else if (clean.includes("share=")) clean = clean.split("share=")[1] || clean;
+    else if (clean.includes("#code=")) clean = clean.split("#code=")[1] || clean;
+    else if (clean.includes("code=")) clean = clean.split("code=")[1] || clean;
+    if (clean.includes("&")) clean = clean.split("&")[0];
+    if (clean.includes("?")) clean = clean.split("?")[0];
+    return clean.trim();
+  };
+
+  // Helper to find shared chat config by chatId, shareToken, or accessCode
+  const findSharedConfig = (input: string) => {
+    if (!input) return null;
+    const sharedDb = readSharedDB();
+    const clean = cleanShareInput(input);
+    
+    // 1. Direct match on chatId key
+    if (sharedDb[clean]) {
+      return { actualChatId: clean, config: sharedDb[clean] };
+    }
+    if (sharedDb[input]) {
+      return { actualChatId: input, config: sharedDb[input] };
+    }
+    
+    // 2. Match on shareToken
+    const foundByTokenKey = Object.keys(sharedDb).find(
+      id => sharedDb[id].shareToken === clean || sharedDb[id].shareToken === input
+    );
+    if (foundByTokenKey) {
+      return { actualChatId: foundByTokenKey, config: sharedDb[foundByTokenKey] };
+    }
+    
+    // 3. Match on accessCode (normalized)
+    const normalizedInput = clean.toUpperCase().replace(/[- ]/g, "");
+    const foundByCodeKey = Object.keys(sharedDb).find(id => {
+      const dbCode = sharedDb[id].accessCode;
+      if (!dbCode) return false;
+      return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
+    });
+    if (foundByCodeKey) {
+      return { actualChatId: foundByCodeKey, config: sharedDb[foundByCodeKey] };
+    }
+
+    return null;
+  };
+
+  const findSharedConfigAsync = async (input: string) => {
+    if (!input) return null;
+    const syncResult = findSharedConfig(input);
+    if (syncResult) return syncResult;
+
+    const supabase = getSupabaseServer();
+    if (!supabase) return null;
+
+    try {
+      const clean = cleanShareInput(input);
+      const normalizedInput = clean.toUpperCase().replace(/[- ]/g, "");
+
+      const { data: convData } = await supabase
+        .from("shared_conversations")
+        .select("*")
+        .or(`chat_id.eq.${clean},share_token.eq.${clean},chat_id.eq.${input},share_token.eq.${input}`)
+        .maybeSingle();
+
+      let matchedChatId: string | null = null;
+      if (convData) {
+        matchedChatId = convData.chat_id || convData.id;
+      } else {
+        const { data: codeData } = await supabase
+          .from("share_codes")
+          .select("*")
+          .eq("access_code", clean)
+          .maybeSingle();
+        if (codeData) {
+          matchedChatId = codeData.chat_id;
+        }
+      }
+
+      if (matchedChatId) {
+        const { data: sc } = await supabase
+          .from("shared_conversations")
+          .select("*")
+          .eq("chat_id", matchedChatId)
+          .maybeSingle();
+
+        const { data: parts } = await supabase
+          .from("shared_participants")
+          .select("*")
+          .eq("chat_id", matchedChatId);
+
+        const { data: scode } = await supabase
+          .from("share_codes")
+          .select("*")
+          .eq("chat_id", matchedChatId)
+          .maybeSingle();
+
+        if (sc) {
+          const rehydratedConfig = {
+            id: matchedChatId,
+            ownerEmail: sc.owner_email,
+            ownerName: sc.owner_name || sc.owner_email?.split("@")[0],
+            isSharingActive: sc.is_sharing_active !== false,
+            shareToken: sc.share_token,
+            expiresAt: sc.expires_at || null,
+            defaultPermission: sc.default_permission || "chat",
+            participants: (parts || []).map((p: any) => ({
+              email: p.email,
+              name: p.name || p.email?.split("@")[0],
+              role: p.role || "editor",
+              joinedAt: p.joined_at || p.created_at
+            })),
+            accessCode: scode?.access_code || generateAccessCode(),
+            accessCodeExpiresAt: scode?.expires_at || null,
+            accessCodePermission: scode?.permission || "chat",
+            accessCodeIsActive: scode?.is_active !== false,
+            accessCodeDurationType: scode?.duration_type || "never"
+          };
+
+          const sharedDb = readSharedDB();
+          sharedDb[matchedChatId] = rehydratedConfig;
+          writeSharedDB(sharedDb);
+
+          return { actualChatId: matchedChatId, config: rehydratedConfig };
+        }
+      }
+    } catch (supaErr: any) {
+      console.warn("[Nexa Server] Notice during Supabase share query:", supaErr.message);
+    }
+
+    return null;
+  };
+
   // Unified Sharing API: POST /api/share/enable AND /api/share/create
   const handleEnableSharingLogic = (req: any, res: any) => {
     try {
@@ -1699,6 +1877,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       };
 
       writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(sharedDb[chatId]);
       console.info(`[Nexa Server] Sharing enabled/created for chat ${chatId} by ${ownerEmail}`);
 
       return res.status(200).json({ success: true, shareToken: token, config: sharedDb[chatId], config_alias: sharedDb[chatId] });
@@ -1733,6 +1912,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       config.isSharingActive = isSharingActive !== undefined ? isSharingActive : false;
       writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
       console.info(`[Nexa Server] Sharing active state set to ${config.isSharingActive} for chat ${chatId}`);
 
       if (!config.isSharingActive) {
@@ -1779,7 +1959,6 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
           participant.role = role; // "editor" (Can Chat) or "viewer" (View Only)
           console.info(`[Nexa Server] Participant ${pEmail} role updated to ${role} in chat ${chatId}`);
           
-          // Notify the specific participant via WebSocket
           broadcastToRoom(chatId, {
             type: "permission-updated",
             participantEmail: pEmail,
@@ -1796,6 +1975,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       }
 
       writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
       return res.status(200).json({ success: true, config });
     } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message });
@@ -1834,12 +2014,11 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       if (index !== -1) {
         config.participants.splice(index, 1);
         writeSharedDB(sharedDb);
+        syncSharedConfigToSupabase(config);
         console.info(`[Nexa Server] Participant ${pEmail} removed from chat ${chatId}`);
 
-        // Notify client to disconnect/kick
         broadcastToRoom(chatId, { type: "participant-removed", participantEmail: pEmail });
 
-        // Broadcast a system-wide notification inside the room
         broadcastToRoom(chatId, {
           type: "notification",
           message: `${pEmail} has been removed by the owner`,
@@ -1878,6 +2057,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       const newToken = "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       config.shareToken = newToken;
       writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
       console.info(`[Nexa Server] Share link regenerated for chat ${chatId}`);
 
       return res.status(200).json({ success: true, shareToken: newToken, config });
@@ -1920,10 +2100,12 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
           joinedAt: new Date().toISOString()
         });
         writeSharedDB(sharedDb);
+        syncSharedConfigToSupabase(config);
         console.info(`[Nexa Server] Owner invited ${pEmail} with role ${role} to chat ${chatId}`);
       } else {
         existing.role = role;
         writeSharedDB(sharedDb);
+        syncSharedConfigToSupabase(config);
       }
 
       return res.status(200).json({ success: true, config });
@@ -1946,7 +2128,6 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       let config = sharedDb[chatId];
 
       if (!config) {
-        // Create initial shared profile if not existing
         const token = "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
         sharedDb[chatId] = {
           id: chatId,
@@ -1965,16 +2146,13 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         return res.status(403).json({ success: false, error: "Only the owner can manage access codes." });
       }
 
-      // Generate unique access code
       let newCode = generateAccessCode();
-      // Ensure absolute uniqueness across existing sharing configs
       let collisionCount = 0;
       while (Object.values(sharedDb).some((c: any) => c.accessCode === newCode) && collisionCount < 10) {
         newCode = generateAccessCode();
         collisionCount++;
       }
 
-      // Calculate expiration string
       let expiresAtStr: string | null = null;
       const now = new Date();
       if (expiresAfterValue === "1h") {
@@ -1987,11 +2165,12 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       config.accessCode = newCode;
       config.accessCodeExpiresAt = expiresAtStr;
-      config.accessCodePermission = defaultPermission; // "chat" or "view"
+      config.accessCodePermission = defaultPermission;
       config.accessCodeIsActive = true;
       config.accessCodeDurationType = expiresAfterValue;
 
       writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
       console.info(`[Nexa Server] Generated access code ${newCode} for chat ${chatId} by ${ownerEmail}`);
 
       return res.status(200).json({ success: true, config });
@@ -2021,6 +2200,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       config.accessCodeIsActive = false;
       writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
       console.info(`[Nexa Server] Access code disabled for chat ${chatId}`);
 
       return res.status(200).json({ success: true, config });
@@ -2030,14 +2210,31 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   });
 
   // Join shared conversation handler logic
-  const handleJoinLogic = (req: any, res: any) => {
+  const handleJoinLogic = async (req: any, res: any) => {
     try {
       const body = req.body || {};
       const query = req.query || {};
-      
+      const params = req.params || {};
+
       const email = (body.email || query.email || "").toString().trim().toLowerCase();
       const fullName = (body.fullName || query.fullName || body.name || query.name || "").toString().trim();
-      const rawInput = (body.accessCode || body.shareToken || body.token || body.input || query.accessCode || query.shareToken || query.token || query.input || "").toString().trim();
+      const rawInput = (
+        params.input ||
+        params.chatId ||
+        body.accessCode ||
+        body.shareToken ||
+        body.token ||
+        body.input ||
+        body.code ||
+        body.chatId ||
+        query.accessCode ||
+        query.shareToken ||
+        query.token ||
+        query.input ||
+        query.code ||
+        query.chatId ||
+        ""
+      ).toString().trim();
 
       if (!email) {
         return res.status(400).json({ success: false, error: "Email address is required to join." });
@@ -2050,7 +2247,6 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || "unknown";
       const attemptKey = String(clientIp);
 
-      // 1. Brute force protection check
       const attempt = failedAttempts.get(attemptKey);
       if (attempt && attempt.count >= 10 && Date.now() - attempt.lastAttempt < 15 * 60 * 1000) {
         return res.status(429).json({
@@ -2059,54 +2255,9 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         });
       }
 
-      // Clean raw input from potential URL hash prefixes
-      let cleanedToken = rawInput;
-      if (cleanedToken.includes("#share=")) {
-        cleanedToken = cleanedToken.split("#share=")[1] || cleanedToken;
-      } else if (cleanedToken.includes("share=")) {
-        cleanedToken = cleanedToken.split("share=")[1] || cleanedToken;
-      } else if (cleanedToken.includes("#code=")) {
-        cleanedToken = cleanedToken.split("#code=")[1] || cleanedToken;
-      } else if (cleanedToken.includes("code=")) {
-        cleanedToken = cleanedToken.split("code=")[1] || cleanedToken;
-      }
-      if (cleanedToken.includes("&")) {
-        cleanedToken = cleanedToken.split("&")[0];
-      }
+      const found = await findSharedConfigAsync(rawInput);
 
-      const normalizedCodeInput = cleanedToken.toUpperCase().replace(/[- ]/g, "");
-      const sharedDb = readSharedDB();
-      let chatId: string | undefined;
-      let isJoiningViaCode = false;
-
-      // Check 1: Match by accessCode
-      chatId = Object.keys(sharedDb).find(id => {
-        const dbCode = sharedDb[id].accessCode;
-        if (!dbCode) return false;
-        return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedCodeInput;
-      });
-
-      if (chatId) {
-        isJoiningViaCode = true;
-      } else {
-        // Check 2: Match by shareToken
-        chatId = Object.keys(sharedDb).find(id => 
-          sharedDb[id].shareToken === cleanedToken || 
-          sharedDb[id].shareToken === rawInput
-        );
-
-        if (!chatId) {
-          // Check 3: Match by direct chatId
-          if (sharedDb[cleanedToken]) {
-            chatId = cleanedToken;
-          } else if (sharedDb[rawInput]) {
-            chatId = rawInput;
-          }
-        }
-      }
-
-      // Handle invalid join key
-      if (!chatId) {
+      if (!found) {
         const now = Date.now();
         if (attempt) {
           attempt.count += 1;
@@ -2120,10 +2271,13 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         });
       }
 
-      // Successfully matched, clear attempt counter
       failedAttempts.delete(attemptKey);
 
-      const config = sharedDb[chatId];
+      const { actualChatId: chatId, config } = found;
+      const clean = cleanShareInput(rawInput);
+      const isJoiningViaCode = config.accessCode && (
+        clean.toUpperCase().replace(/[- ]/g, "") === config.accessCode.toUpperCase().replace(/[- ]/g, "")
+      );
 
       if (isJoiningViaCode) {
         if (!config.accessCodeIsActive) {
@@ -2141,18 +2295,15 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         }
       }
 
-      // Owner joining
       if (config.ownerEmail === email) {
         return res.status(200).json({ success: true, chatId, role: "owner", config });
       }
 
-      // Determine default participant role
       const defaultPerm = isJoiningViaCode 
         ? config.accessCodePermission || "chat"
         : config.defaultPermission || "chat";
       let role = defaultPerm === "chat" ? "editor" : "viewer";
 
-      // Ensure participants list exists
       if (!Array.isArray(config.participants)) {
         config.participants = [];
       }
@@ -2165,7 +2316,10 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
           role: role,
           joinedAt: new Date().toISOString()
         });
+        const sharedDb = readSharedDB();
+        sharedDb[chatId] = config;
         writeSharedDB(sharedDb);
+        syncSharedConfigToSupabase(config);
         console.info(`[Nexa Server] User ${email} joined shared chat ${chatId} as ${role} via ${isJoiningViaCode ? 'Code' : 'Link'}`);
       } else {
         role = existingPart.role;
@@ -2180,41 +2334,111 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
   app.post("/api/share/join", handleJoinLogic);
   app.get("/api/share/join", handleJoinLogic);
+  app.post("/api/share/join/:input", handleJoinLogic);
+  app.get("/api/share/join/:input", handleJoinLogic);
+  app.post("/api/share/:chatId/join", handleJoinLogic);
 
-  // Helper to find shared chat config by chatId, shareToken, or accessCode
-  const findSharedConfig = (input: string) => {
-    if (!input) return null;
-    const sharedDb = readSharedDB();
-    
-    // 1. Direct match on chatId key
-    if (sharedDb[input]) {
-      return { actualChatId: input, config: sharedDb[input] };
-    }
-    
-    // 2. Match on shareToken
-    const foundByTokenKey = Object.keys(sharedDb).find(
-      id => sharedDb[id].shareToken === input
-    );
-    if (foundByTokenKey) {
-      return { actualChatId: foundByTokenKey, config: sharedDb[foundByTokenKey] };
-    }
-    
-    // 3. Match on accessCode (normalized)
-    const normalizedInput = input.trim().toUpperCase().replace(/[- ]/g, "");
-    const foundByCodeKey = Object.keys(sharedDb).find(id => {
-      const dbCode = sharedDb[id].accessCode;
-      if (!dbCode) return false;
-      return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
-    });
-    if (foundByCodeKey) {
-      return { actualChatId: foundByCodeKey, config: sharedDb[foundByCodeKey] };
-    }
+  // Validate Share Token or Access Code Endpoint
+  const handleValidateLogic = async (req: any, res: any) => {
+    try {
+      const body = req.body || {};
+      const query = req.query || {};
+      const params = req.params || {};
 
-    return null;
+      const rawInput = (
+        params.input ||
+        body.accessCode ||
+        body.shareToken ||
+        body.token ||
+        body.input ||
+        body.code ||
+        body.chatId ||
+        query.accessCode ||
+        query.shareToken ||
+        query.token ||
+        query.input ||
+        query.code ||
+        query.chatId ||
+        ""
+      ).toString().trim();
+
+      if (!rawInput) {
+        return res.status(400).json({ success: false, valid: false, error: "Share token or access code input is required." });
+      }
+
+      const found = await findSharedConfigAsync(rawInput);
+      if (!found) {
+        return res.status(200).json({ success: true, valid: false, error: "Invalid share link or access code." });
+      }
+
+      const { actualChatId, config } = found;
+
+      if (!config.isSharingActive && !config.accessCodeIsActive) {
+        return res.status(200).json({ success: true, valid: false, error: "Sharing has been disabled by the owner." });
+      }
+
+      const now = new Date();
+      if (config.expiresAt && new Date(config.expiresAt) < now) {
+        return res.status(200).json({ success: true, valid: false, error: "This share link has expired." });
+      }
+
+      return res.status(200).json({
+        success: true,
+        valid: true,
+        chatId: actualChatId,
+        isSharingActive: !!config.isSharingActive,
+        accessCodeIsActive: !!config.accessCodeIsActive,
+        defaultPermission: config.defaultPermission || "chat",
+        config
+      });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, valid: false, error: e.message });
+    }
   };
 
+  app.post("/api/share/validate", handleValidateLogic);
+  app.get("/api/share/validate", handleValidateLogic);
+  app.post("/api/share/validate/:input", handleValidateLogic);
+  app.get("/api/share/validate/:input", handleValidateLogic);
+
+  // Revoke Share API Endpoint
+  const handleRevokeLogic = async (req: any, res: any) => {
+    try {
+      const chatId = req.params.chatId || req.body.chatId || req.body.id;
+      const ownerEmail = req.body.ownerEmail || req.body.email;
+
+      if (!chatId) {
+        return res.status(400).json({ success: false, error: "chatId is required." });
+      }
+
+      const sharedDb = readSharedDB();
+      const config = sharedDb[chatId];
+      if (!config) {
+        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+      }
+
+      if (ownerEmail && config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+        return res.status(403).json({ success: false, error: "Only the owner can revoke sharing." });
+      }
+
+      config.isSharingActive = false;
+      config.accessCodeIsActive = false;
+      writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
+
+      broadcastToRoom(chatId, { type: "revoked", message: "Sharing has been revoked by the owner." });
+
+      return res.status(200).json({ success: true, message: "Sharing revoked successfully.", config });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  };
+
+  app.post("/api/share/revoke", handleRevokeLogic);
+  app.post("/api/share/revoke/:chatId", handleRevokeLogic);
+
   // 7. Get share info
-  app.get("/api/share/info/:chatId", (req, res) => {
+  app.get("/api/share/info/:chatId", async (req, res) => {
     try {
       const { chatId } = req.params;
       const email = (req.query.email as string)?.toLowerCase().trim();
@@ -2226,16 +2450,15 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         return res.status(400).json({ success: false, error: "chatId is required." });
       }
 
-      const found = findSharedConfig(chatId);
+      const found = await findSharedConfigAsync(chatId);
 
       if (!found) {
-        console.warn(`[Nexa Server] [share/info] No configuration found in shared_chats_db.json for chatId: "${chatId}"`);
+        console.warn(`[Nexa Server] [share/info] No configuration found for chatId: "${chatId}"`);
         return res.status(200).json({ success: true, isShared: false });
       }
 
       const { actualChatId, config } = found;
 
-      // If user provided email, we verify if they are owner or participant
       const isOwner = email && config.ownerEmail === email;
       const isParticipant = email && Array.isArray(config.participants) && config.participants.some((p: any) => p.email === email);
 
@@ -2269,10 +2492,10 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         return res.status(400).json({ success: false, error: "chatId and email are required to load a shared session." });
       }
 
-      const found = findSharedConfig(chatId);
+      const found = await findSharedConfigAsync(chatId);
 
       if (!found) {
-        console.warn(`[Nexa Server] [share/session] Shared conversation config not found in shared_chats_db.json for chatId: "${chatId}"`);
+        console.warn(`[Nexa Server] [share/session] Shared conversation config not found for chatId: "${chatId}"`);
         return res.status(404).json({ success: false, error: `Shared conversation not found. The chat link or access code may be invalid or deleted.` });
       }
 

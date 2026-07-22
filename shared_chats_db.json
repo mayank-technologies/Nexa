@@ -69,5 +69,33 @@
     "accessCodePermission": "chat",
     "accessCodeIsActive": true,
     "accessCodeDurationType": "never"
+  },
+  "test_chat_e2e_123": {
+    "id": "test_chat_e2e_123",
+    "ownerEmail": "owner@example.com",
+    "ownerName": "Owner User",
+    "isSharingActive": false,
+    "shareToken": "sh_6gdmw46x69dja1notz674",
+    "expiresAt": null,
+    "defaultPermission": "chat",
+    "participants": [
+      {
+        "email": "visitor@example.com",
+        "name": "visitor",
+        "role": "editor",
+        "joinedAt": "2026-07-22T10:59:42.523Z"
+      },
+      {
+        "email": "visitor2@example.com",
+        "name": "visitor2",
+        "role": "editor",
+        "joinedAt": "2026-07-22T10:59:44.717Z"
+      }
+    ],
+    "accessCode": "NXA-2KR46F",
+    "accessCodeExpiresAt": null,
+    "accessCodePermission": "chat",
+    "accessCodeIsActive": false,
+    "accessCodeDurationType": "never"
   }
 }

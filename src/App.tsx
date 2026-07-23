@@ -3354,6 +3354,7 @@ export default function App() {
             onSelectArchive={() => setCurrentView("archive")}
             isArchiveActive={currentView === "archive"}
             onOpenShare={(id) => {
+              console.log("[Nexa App] Sidebar onOpenShare triggered with sessionId:", id, "current activeSessionId:", activeSessionId);
               setActiveSessionId(id);
               setShowShareModal(true);
             }}
@@ -3429,6 +3430,7 @@ export default function App() {
                   }}
                   isArchiveActive={currentView === "archive"}
                   onOpenShare={(id) => {
+                    console.log("[Nexa App] Mobile Sidebar onOpenShare triggered with sessionId:", id, "current activeSessionId:", activeSessionId);
                     setActiveSessionId(id);
                     setShowShareModal(true);
                   }}
@@ -3583,6 +3585,7 @@ export default function App() {
                       sharedParticipants={sharedParticipants}
                       onPinToggle={handlePinSession}
                       onOpenShare={(id) => {
+                        console.log("[Nexa App] ConversationHeaderMenu onOpenShare triggered with sessionId:", id, "current activeSessionId:", activeSessionId);
                         setActiveSessionId(id);
                         setShowShareModal(true);
                       }}

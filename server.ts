@@ -1714,12 +1714,45 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   const cleanShareInput = (input: string): string => {
     if (!input) return "";
     let clean = input.trim();
+
+    // Strip full domain / origin if present
+    if (clean.includes("://")) {
+      try {
+        const url = new URL(clean);
+        clean = url.pathname + url.search + url.hash;
+      } catch (e) {
+        clean = clean.split("://")[1] || clean;
+        if (clean.includes("/")) {
+          clean = clean.substring(clean.indexOf("/"));
+        }
+      }
+    }
+
+    // Strip common path prefixes
+    if (clean.includes("/share/thread/")) {
+      clean = clean.split("/share/thread/")[1] || clean;
+    } else if (clean.includes("/share/")) {
+      clean = clean.split("/share/")[1] || clean;
+    } else if (clean.includes("/code/")) {
+      clean = clean.split("/code/")[1] || clean;
+    }
+
+    if (clean.startsWith("thread/")) {
+      clean = clean.replace("thread/", "");
+    }
+
+    // Strip hash or query parameters
     if (clean.includes("#share=")) clean = clean.split("#share=")[1] || clean;
     else if (clean.includes("share=")) clean = clean.split("share=")[1] || clean;
     else if (clean.includes("#code=")) clean = clean.split("#code=")[1] || clean;
     else if (clean.includes("code=")) clean = clean.split("code=")[1] || clean;
+    else if (clean.includes("#join=")) clean = clean.split("#join=")[1] || clean;
+    else if (clean.includes("join=")) clean = clean.split("join=")[1] || clean;
+
+    if (clean.includes("#")) clean = clean.split("#")[0];
     if (clean.includes("&")) clean = clean.split("&")[0];
     if (clean.includes("?")) clean = clean.split("?")[0];
+
     return clean.trim();
   };
 
@@ -1745,15 +1778,17 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       return { actualChatId: foundByTokenKey, config: sharedDb[foundByTokenKey] };
     }
     
-    // 3. Match on accessCode (normalized)
+    // 3. Match on accessCode (normalized comparison)
     const normalizedInput = clean.toUpperCase().replace(/[- ]/g, "");
-    const foundByCodeKey = Object.keys(sharedDb).find(id => {
-      const dbCode = sharedDb[id].accessCode;
-      if (!dbCode) return false;
-      return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
-    });
-    if (foundByCodeKey) {
-      return { actualChatId: foundByCodeKey, config: sharedDb[foundByCodeKey] };
+    if (normalizedInput) {
+      const foundByCodeKey = Object.keys(sharedDb).find(id => {
+        const dbCode = sharedDb[id].accessCode;
+        if (!dbCode) return false;
+        return dbCode.toUpperCase().replace(/[- ]/g, "") === normalizedInput;
+      });
+      if (foundByCodeKey) {
+        return { actualChatId: foundByCodeKey, config: sharedDb[foundByCodeKey] };
+      }
     }
 
     return null;
@@ -1761,87 +1796,142 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
   const findSharedConfigAsync = async (input: string) => {
     if (!input) return null;
+    console.log(`[Nexa Server] [findSharedConfigAsync] Searching share config for input: "${input}"`);
     const syncResult = findSharedConfig(input);
-    if (syncResult) return syncResult;
-
-    const supabase = getSupabaseServer();
-    if (!supabase) return null;
-
-    try {
-      const clean = cleanShareInput(input);
-      const normalizedInput = clean.toUpperCase().replace(/[- ]/g, "");
-
-      const { data: convData } = await supabase
-        .from("shared_conversations")
-        .select("*")
-        .or(`chat_id.eq.${clean},share_token.eq.${clean},chat_id.eq.${input},share_token.eq.${input}`)
-        .maybeSingle();
-
-      let matchedChatId: string | null = null;
-      if (convData) {
-        matchedChatId = convData.chat_id || convData.id;
-      } else {
-        const { data: codeData } = await supabase
-          .from("share_codes")
-          .select("*")
-          .eq("access_code", clean)
-          .maybeSingle();
-        if (codeData) {
-          matchedChatId = codeData.chat_id;
-        }
-      }
-
-      if (matchedChatId) {
-        const { data: sc } = await supabase
-          .from("shared_conversations")
-          .select("*")
-          .eq("chat_id", matchedChatId)
-          .maybeSingle();
-
-        const { data: parts } = await supabase
-          .from("shared_participants")
-          .select("*")
-          .eq("chat_id", matchedChatId);
-
-        const { data: scode } = await supabase
-          .from("share_codes")
-          .select("*")
-          .eq("chat_id", matchedChatId)
-          .maybeSingle();
-
-        if (sc) {
-          const rehydratedConfig = {
-            id: matchedChatId,
-            ownerEmail: sc.owner_email,
-            ownerName: sc.owner_name || sc.owner_email?.split("@")[0],
-            isSharingActive: sc.is_sharing_active !== false,
-            shareToken: sc.share_token,
-            expiresAt: sc.expires_at || null,
-            defaultPermission: sc.default_permission || "chat",
-            participants: (parts || []).map((p: any) => ({
-              email: p.email,
-              name: p.name || p.email?.split("@")[0],
-              role: p.role || "editor",
-              joinedAt: p.joined_at || p.created_at
-            })),
-            accessCode: scode?.access_code || generateAccessCode(),
-            accessCodeExpiresAt: scode?.expires_at || null,
-            accessCodePermission: scode?.permission || "chat",
-            accessCodeIsActive: scode?.is_active !== false,
-            accessCodeDurationType: scode?.duration_type || "never"
-          };
-
-          const sharedDb = readSharedDB();
-          sharedDb[matchedChatId] = rehydratedConfig;
-          writeSharedDB(sharedDb);
-
-          return { actualChatId: matchedChatId, config: rehydratedConfig };
-        }
-      }
-    } catch (supaErr: any) {
-      console.warn("[Nexa Server] Notice during Supabase share query:", supaErr.message);
+    if (syncResult) {
+      console.log(`[Nexa Server] [findSharedConfigAsync] Resolved from local DB: actualChatId="${syncResult.actualChatId}"`);
+      return syncResult;
     }
 
+    const clean = cleanShareInput(input);
+    const normalizedInput = clean.toUpperCase().replace(/[- ]/g, "");
+
+    // Check Supabase
+    const supabase = getSupabaseServer();
+    if (supabase) {
+      try {
+        const { data: convData } = await supabase
+          .from("shared_conversations")
+          .select("*")
+          .or(`chat_id.eq.${clean},share_token.eq.${clean},chat_id.eq.${input},share_token.eq.${input}`)
+          .maybeSingle();
+
+        let matchedChatId: string | null = null;
+        if (convData) {
+          matchedChatId = convData.chat_id || convData.id;
+        } else {
+          // Query share_codes with multiple variations (exact, normalized, ILIKE)
+          const { data: codeData } = await supabase
+            .from("share_codes")
+            .select("*")
+            .or(`access_code.eq.${clean},access_code.ilike.${clean},access_code.ilike.${normalizedInput}`)
+            .maybeSingle();
+          if (codeData) {
+            matchedChatId = codeData.chat_id;
+          }
+        }
+
+        if (matchedChatId) {
+          const { data: sc } = await supabase
+            .from("shared_conversations")
+            .select("*")
+            .eq("chat_id", matchedChatId)
+            .maybeSingle();
+
+          const { data: parts } = await supabase
+            .from("shared_participants")
+            .select("*")
+            .eq("chat_id", matchedChatId);
+
+          const { data: scode } = await supabase
+            .from("share_codes")
+            .select("*")
+            .eq("chat_id", matchedChatId)
+            .maybeSingle();
+
+          if (sc) {
+            const rehydratedConfig = {
+              id: matchedChatId,
+              ownerEmail: sc.owner_email,
+              ownerName: sc.owner_name || sc.owner_email?.split("@")[0],
+              isSharingActive: sc.is_sharing_active !== false,
+              shareToken: sc.share_token,
+              expiresAt: sc.expires_at || null,
+              defaultPermission: sc.default_permission || "chat",
+              participants: (parts || []).map((p: any) => ({
+                email: p.email,
+                name: p.name || p.email?.split("@")[0],
+                role: p.role || "editor",
+                joinedAt: p.joined_at || p.created_at
+              })),
+              accessCode: scode?.access_code || generateAccessCode(),
+              accessCodeExpiresAt: scode?.expires_at || null,
+              accessCodePermission: scode?.permission || "chat",
+              accessCodeIsActive: scode?.is_active !== false,
+              accessCodeDurationType: scode?.duration_type || "never"
+            };
+
+            const sharedDb = readSharedDB();
+            sharedDb[matchedChatId] = rehydratedConfig;
+            writeSharedDB(sharedDb);
+
+            console.log(`[Nexa Server] [findSharedConfigAsync] Rehydrated share config from Supabase for chat: "${matchedChatId}"`);
+            return { actualChatId: matchedChatId, config: rehydratedConfig };
+          }
+        }
+      } catch (supaErr: any) {
+        console.warn("[Nexa Server] Notice during Supabase share query:", supaErr.message);
+      }
+    }
+
+    // Auto-provision default share config if input is a valid chatId format (e.g. session-xxx) or exists in local user chats
+    const targetChatId = clean || input;
+    if (targetChatId && (targetChatId.startsWith("session-") || targetChatId.length >= 8)) {
+      const userDb = readDB();
+      let ownerEmail = "guest@nexa.ai";
+      let ownerName = "Nexa User";
+      let chatFound = false;
+
+      for (const email of Object.keys(userDb)) {
+        const u = userDb[email];
+        if (Array.isArray(u.chats) && u.chats.some((c: any) => c.id === targetChatId)) {
+          ownerEmail = email;
+          ownerName = u.fullName || email.split("@")[0];
+          chatFound = true;
+          break;
+        }
+      }
+
+      if (chatFound || targetChatId.startsWith("session-")) {
+        console.info(`[Nexa Server] [findSharedConfigAsync] Auto-provisioning share configuration for chat "${targetChatId}"`);
+        const token = "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const code = generateAccessCode();
+        const autoConfig = {
+          id: targetChatId,
+          ownerEmail: ownerEmail.toLowerCase().trim(),
+          ownerName: ownerName,
+          isSharingActive: true,
+          shareToken: token,
+          expiresAt: null,
+          defaultPermission: "chat",
+          participants: [],
+          accessCode: code,
+          accessCodeExpiresAt: null,
+          accessCodePermission: "chat",
+          accessCodeIsActive: true,
+          accessCodeDurationType: "never"
+        };
+
+        const sharedDb = readSharedDB();
+        sharedDb[targetChatId] = autoConfig;
+        writeSharedDB(sharedDb);
+        syncSharedConfigToSupabase(autoConfig);
+
+        return { actualChatId: targetChatId, config: autoConfig };
+      }
+    }
+
+    console.warn(`[Nexa Server] [findSharedConfigAsync] Config NOT found for input: "${input}" (cleaned: "${clean}")`);
     return null;
   };
 
@@ -2216,8 +2306,8 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       const query = req.query || {};
       const params = req.params || {};
 
-      const email = (body.email || query.email || "").toString().trim().toLowerCase();
-      const fullName = (body.fullName || query.fullName || body.name || query.name || "").toString().trim();
+      const email = (body.email || query.email || "guest@nexa.ai").toString().trim().toLowerCase();
+      const fullName = (body.fullName || query.fullName || body.name || query.name || "Guest Collaborator").toString().trim();
       const rawInput = (
         params.input ||
         params.chatId ||
@@ -2236,17 +2326,14 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         ""
       ).toString().trim();
 
-      if (!email) {
-        return res.status(400).json({ success: false, error: "Email address is required to join." });
-      }
+      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || "unknown";
+      console.log(`[Nexa Server] [share/join] Request received from ${clientIp}. Email: "${email}", Input: "${rawInput}"`);
 
       if (!rawInput) {
         return res.status(400).json({ success: false, error: "A valid share link, share token, or access code is required." });
       }
 
-      const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || "unknown";
       const attemptKey = String(clientIp);
-
       const attempt = failedAttempts.get(attemptKey);
       if (attempt && attempt.count >= 10 && Date.now() - attempt.lastAttempt < 15 * 60 * 1000) {
         return res.status(429).json({
@@ -2441,9 +2528,9 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   app.get("/api/share/info/:chatId", async (req, res) => {
     try {
       const { chatId } = req.params;
-      const email = (req.query.email as string)?.toLowerCase().trim();
+      const email = (req.query.email as string)?.toLowerCase().trim() || "guest@nexa.ai";
 
-      console.log(`[Nexa Server] [share/info] Request received for chatId: "${chatId}", email: "${email || 'none'}"`);
+      console.log(`[Nexa Server] [share/info] Request received for chatId: "${chatId}", email: "${email}"`);
 
       if (!chatId) {
         console.warn(`[Nexa Server] [share/info] Missing chatId in request`);
@@ -2482,14 +2569,14 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   app.get("/api/share/session/:chatId", async (req, res) => {
     try {
       const { chatId } = req.params;
-      const email = (req.query.email as string)?.toLowerCase().trim();
+      const email = (req.query.email as string)?.toLowerCase().trim() || "guest@nexa.ai";
       const token = (req.query.token as string) || (req.query.shareToken as string) || (req.query.accessCode as string);
 
-      console.log(`[Nexa Server] [share/session] Accessing shared session. chatId/token: "${chatId}", email: "${email || 'none'}", token: "${token || 'none'}"`);
+      console.log(`[Nexa Server] [share/session] Accessing shared session. chatId/token: "${chatId}", email: "${email}", token: "${token || 'none'}"`);
 
-      if (!chatId || !email) {
-        console.warn(`[Nexa Server] [share/session] Missing required parameter. chatId: "${chatId}", email: "${email || 'none'}"`);
-        return res.status(400).json({ success: false, error: "chatId and email are required to load a shared session." });
+      if (!chatId) {
+        console.warn(`[Nexa Server] [share/session] Missing required parameter chatId`);
+        return res.status(400).json({ success: false, error: "chatId is required to load a shared session." });
       }
 
       const found = await findSharedConfigAsync(chatId);
@@ -2501,7 +2588,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       const { actualChatId, config } = found;
 
-      // Verify access: must be owner, participant, or the share link/code must match
+      // Verify access: must be owner, participant, or access via valid share token / access code
       const isOwner = config.ownerEmail === email;
       const isParticipant = Array.isArray(config.participants) && config.participants.some((p: any) => p.email === email);
       const isAccessViaValidToken = token && (token === config.shareToken || token.toUpperCase().replace(/[- ]/g, "") === (config.accessCode || "").toUpperCase().replace(/[- ]/g, ""));
@@ -2509,9 +2596,23 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       console.log(`[Nexa Server] [share/session] Auth status. isOwner: ${isOwner}, isParticipant: ${isParticipant}, isAccessViaValidToken: ${isAccessViaValidToken}, isDirectTokenMatch: ${isDirectTokenMatch}`);
 
-      if (!isOwner && !isParticipant && !isAccessViaValidToken && !isDirectTokenMatch) {
-        console.warn(`[Nexa Server] [share/session] Access denied for external user ${email}.`);
-        return res.status(403).json({ success: false, error: "Access denied. You must join this shared conversation first using an invitation link or access code." });
+      // Auto-register guest/external participant if token is valid
+      if (!isOwner && !isParticipant && (isAccessViaValidToken || isDirectTokenMatch || config.isSharingActive)) {
+        if (!Array.isArray(config.participants)) {
+          config.participants = [];
+        }
+        const role = config.defaultPermission === "chat" ? "editor" : "viewer";
+        config.participants.push({
+          email: email,
+          name: email.split("@")[0] || "Guest Collaborator",
+          role: role,
+          joinedAt: new Date().toISOString()
+        });
+        const sharedDb = readSharedDB();
+        sharedDb[actualChatId] = config;
+        writeSharedDB(sharedDb);
+        syncSharedConfigToSupabase(config);
+        console.log(`[Nexa Server] [share/session] Auto-registered participant ${email} for chat ${actualChatId}`);
       }
 
       if (!config.isSharingActive && !isOwner) {

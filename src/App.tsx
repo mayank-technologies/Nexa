@@ -629,23 +629,82 @@ export default function App() {
     };
   }, []);
 
-  // Auto-detect share links in the URL hash (e.g. #share=TOKEN)
+  // Auto-detect share links in URL (hash, search params, path)
   useEffect(() => {
-    const handleHashShare = () => {
-      const hash = window.location.hash;
+    const handleUrlShareDetection = async () => {
+      const hash = window.location.hash || "";
+      const search = window.location.search || "";
+      const pathname = window.location.pathname || "";
+
+      let extractedTokenOrCode = "";
+
+      // 1. Hash formats: #share=xxx, #code=xxx, #join=xxx, #sh_xxx, #NXA-xxx
       if (hash.startsWith("#share=")) {
-        const token = hash.split("#share=")[1];
-        if (token) {
-          setJoinTokenInput(token);
+        extractedTokenOrCode = hash.split("#share=")[1] || "";
+      } else if (hash.startsWith("#code=")) {
+        extractedTokenOrCode = hash.split("#code=")[1] || "";
+      } else if (hash.startsWith("#join=")) {
+        extractedTokenOrCode = hash.split("#join=")[1] || "";
+      } else if (hash.startsWith("#sh_") || hash.startsWith("#NXA-")) {
+        extractedTokenOrCode = hash.replace("#", "");
+      }
+
+      // 2. Query search formats: ?share=xxx, ?code=xxx, ?join=xxx
+      if (!extractedTokenOrCode && search) {
+        const params = new URLSearchParams(search);
+        extractedTokenOrCode = params.get("share") || params.get("code") || params.get("join") || "";
+      }
+
+      // 3. Path formats: /share/thread/:id, /share/:id, /code/:id
+      if (!extractedTokenOrCode && pathname) {
+        if (pathname.startsWith("/share/thread/")) {
+          extractedTokenOrCode = pathname.replace("/share/thread/", "");
+        } else if (pathname.startsWith("/share/")) {
+          extractedTokenOrCode = pathname.replace("/share/", "");
+        } else if (pathname.startsWith("/code/")) {
+          extractedTokenOrCode = pathname.replace("/code/", "");
+        }
+      }
+
+      if (extractedTokenOrCode) {
+        const clean = extractedTokenOrCode.trim();
+        console.log("[Nexa Share Client] Share/code detected from URL:", clean);
+        setJoinTokenInput(clean);
+
+        // Attempt automatic join via API
+        try {
+          const emailToUse = user?.email || "guest@nexa.ai";
+          const res = await fetch("/api/share/join", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: emailToUse,
+              fullName: user?.fullName || "Guest Collaborator",
+              input: clean,
+              shareToken: clean,
+              accessCode: clean
+            })
+          });
+          const data = await res.json();
+          if (data.success && data.chatId) {
+            console.log("[Nexa Share Client] Auto-joined conversation successfully:", data.chatId);
+            setActiveSessionId(data.chatId);
+            setCurrentView("chat");
+            playUiSound("success");
+          } else {
+            setShowJoinModal(true);
+          }
+        } catch (e) {
+          console.error("[Nexa Share Client] Auto-join exception:", e);
           setShowJoinModal(true);
         }
       }
     };
 
-    handleHashShare();
-    window.addEventListener("hashchange", handleHashShare);
-    return () => window.removeEventListener("hashchange", handleHashShare);
-  }, []);
+    handleUrlShareDetection();
+    window.addEventListener("hashchange", handleUrlShareDetection);
+    return () => window.removeEventListener("hashchange", handleUrlShareDetection);
+  }, [user?.email]);
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
 

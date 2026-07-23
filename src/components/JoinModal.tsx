@@ -63,8 +63,8 @@ export const JoinModal: React.FC<JoinModalProps> = ({
       }
 
       const payload: any = {
-        email: userEmail,
-        fullName: userName,
+        email: userEmail || "guest@nexa.ai",
+        fullName: userName || "Guest Collaborator",
         input: trimmedInput,
         shareToken: token,
         accessCode: token,

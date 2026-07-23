@@ -731,7 +731,7 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
                         {isSharedSession ? "Active Sharing Node" : "Secure Private Log"}
                       </span>
                     </div>
-                    {isSharedSession && (
+                    {isSharedSession ? (
                       <button
                         onClick={handleCopyShareLink}
                         className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-lg text-[10px] font-black uppercase transition-colors cursor-pointer flex items-center gap-1"
@@ -747,6 +747,14 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
                             <span>Copy Link</span>
                           </>
                         )}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleShareAction}
+                        className="px-2.5 py-1 bg-[#C96A3D] hover:bg-[#b05d33] text-white rounded-lg text-[10px] font-black uppercase transition-colors cursor-pointer flex items-center gap-1 shadow-sm"
+                      >
+                        <Share2 className="w-3 h-3" />
+                        <span>Enable Collaborative Sharing</span>
                       </button>
                     )}
                   </div>

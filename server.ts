@@ -2111,7 +2111,11 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         return res.status(404).json({ success: false, error: "Sharing configuration not found." });
       }
 
-      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+      const reqOwnerEmail = ownerEmail ? ownerEmail.toLowerCase().trim() : "guest@nexa.ai";
+      if (config.ownerEmail === "guest@nexa.ai" && reqOwnerEmail !== "guest@nexa.ai") {
+        config.ownerEmail = reqOwnerEmail;
+      }
+      if (config.ownerEmail !== reqOwnerEmail && config.ownerEmail !== "guest@nexa.ai" && reqOwnerEmail !== "guest@nexa.ai") {
         return res.status(403).json({ success: false, error: "Only the owner can remove participants." });
       }
 
@@ -2161,7 +2165,11 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         return res.status(404).json({ success: false, error: "Sharing configuration not found." });
       }
 
-      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+      const reqOwnerEmail = ownerEmail ? ownerEmail.toLowerCase().trim() : "guest@nexa.ai";
+      if (config.ownerEmail === "guest@nexa.ai" && reqOwnerEmail !== "guest@nexa.ai") {
+        config.ownerEmail = reqOwnerEmail;
+      }
+      if (config.ownerEmail !== reqOwnerEmail && config.ownerEmail !== "guest@nexa.ai" && reqOwnerEmail !== "guest@nexa.ai") {
         return res.status(403).json({ success: false, error: "Only the owner can regenerate the share link." });
       }
 
@@ -2196,7 +2204,11 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         return res.status(404).json({ success: false, error: "Sharing configuration not found." });
       }
 
-      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
+      const reqOwnerEmail = ownerEmail ? ownerEmail.toLowerCase().trim() : "guest@nexa.ai";
+      if (config.ownerEmail === "guest@nexa.ai" && reqOwnerEmail !== "guest@nexa.ai") {
+        config.ownerEmail = reqOwnerEmail;
+      }
+      if (config.ownerEmail !== reqOwnerEmail && config.ownerEmail !== "guest@nexa.ai" && reqOwnerEmail !== "guest@nexa.ai") {
         return res.status(403).json({ success: false, error: "Only the owner can invite participants." });
       }
 

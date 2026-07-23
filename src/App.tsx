@@ -4347,9 +4347,15 @@ export default function App() {
       <ShareModal
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
-        chatId={activeSessionId}
+        chatId={activeSessionId || activeSession?.id || "session-default"}
         userEmail={user?.email || "guest@nexa.ai"}
         userName={user?.fullName || "Guest Collaborator"}
+        onShareEnabled={(newConfig) => {
+          console.log("[Nexa App] Collaborative sharing enabled from modal:", newConfig);
+          setIsSharedSession(true);
+          setSharedRole('owner');
+          setSharedParticipants(newConfig.participants || []);
+        }}
       />
 
       <JoinModal

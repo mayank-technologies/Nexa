@@ -97,5 +97,27 @@
     "accessCodePermission": "chat",
     "accessCodeIsActive": false,
     "accessCodeDurationType": "never"
+  },
+  "session-test123": {
+    "id": "session-test123",
+    "ownerEmail": "mayanktechnologies00@gmail.com",
+    "ownerName": "Mayank",
+    "isSharingActive": false,
+    "shareToken": "sh_73fxjsxjw3gouv7hrg1xhg",
+    "expiresAt": null,
+    "defaultPermission": "chat",
+    "participants": [
+      {
+        "email": "collaborator@nexa.ai",
+        "name": "Collaborator",
+        "role": "editor",
+        "joinedAt": "2026-07-23T10:54:58.758Z"
+      }
+    ],
+    "accessCode": "CHAT-V436",
+    "accessCodeExpiresAt": "2026-07-24T10:54:56.278Z",
+    "accessCodePermission": "chat",
+    "accessCodeIsActive": true,
+    "accessCodeDurationType": "24h"
   }
 }

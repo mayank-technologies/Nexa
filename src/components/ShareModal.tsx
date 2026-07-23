@@ -52,11 +52,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [codePermissionValue, setCodePermissionValue] = useState<"chat" | "view">("chat");
 
   const fetchShareConfig = async () => {
+    if (!chatId) {
+      setLoading(false);
+      setConfig(null);
+      return;
+    }
     try {
       setLoading(true);
-      const res = await fetch(`/api/share/info/${chatId}?email=${userEmail}`);
+      const effectiveEmail = userEmail || "guest@nexa.ai";
+      const res = await fetch(`/api/share/info/${chatId}?email=${encodeURIComponent(effectiveEmail)}`);
       const data = await res.json();
-      if (data.success && data.isShared) {
+      if (data.success && data.config) {
         setConfig(data.config);
         if (data.config.accessCodeDurationType) {
           setCodeExpiryValue(data.config.accessCodeDurationType);
@@ -69,6 +75,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       }
     } catch (err) {
       console.error("Error fetching share config:", err);
+      setConfig(null);
     } finally {
       setLoading(false);
     }
@@ -78,23 +85,29 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     if (isOpen) {
       fetchShareConfig();
     }
-  }, [isOpen, chatId]);
+  }, [isOpen, chatId, userEmail]);
 
   const handleEnableSharing = async () => {
+    if (!chatId) return;
     try {
       setActionLoading("enable");
+      const effectiveEmail = userEmail || "guest@nexa.ai";
+      const effectiveName = userEmail ? userEmail.split("@")[0] : "Guest Collaborator";
       const res = await fetch("/api/share/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatId,
-          ownerEmail: userEmail,
+          ownerEmail: effectiveEmail,
+          ownerName: effectiveName,
           defaultPermission: "chat",
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
+      } else if (data.config_alias) {
+        setConfig(data.config_alias);
       }
     } catch (err) {
       console.error("Error enabling sharing:", err);
@@ -104,19 +117,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleToggleSharing = async (active: boolean) => {
-    if (!config) return;
+    if (!chatId) return;
     try {
       setActionLoading("toggle");
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch(`/api/share/toggle/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ownerEmail: userEmail,
+          ownerEmail: effectiveEmail,
           isSharingActive: active,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
       }
     } catch (err) {
@@ -127,15 +141,19 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleRegenerateLink = async () => {
+    if (!chatId) return;
     try {
       setActionLoading("regenerate");
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch(`/api/share/regenerate/${chatId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerEmail: userEmail }),
+        body: JSON.stringify({ ownerEmail: effectiveEmail }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
+        setConfig(data.config);
+      } else if (data.success && data.shareToken) {
         setConfig((prev) => prev ? { ...prev, shareToken: data.shareToken } : null);
       }
     } catch (err) {
@@ -146,19 +164,21 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleUpdateParticipantRole = async (targetEmail: string, role: "editor" | "viewer") => {
+    if (!chatId) return;
     try {
       setActionLoading(`role-${targetEmail}`);
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch(`/api/share/participant/role/${chatId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ownerEmail: userEmail,
+          ownerEmail: effectiveEmail,
           targetEmail,
           role,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
       }
     } catch (err) {
@@ -169,18 +189,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleRemoveParticipant = async (targetEmail: string) => {
+    if (!chatId) return;
     try {
       setActionLoading(`remove-${targetEmail}`);
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch(`/api/share/participant/remove/${chatId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ownerEmail: userEmail,
+          ownerEmail: effectiveEmail,
           targetEmail,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
       }
     } catch (err) {
@@ -192,20 +214,21 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteEmail.trim() || !config) return;
+    if (!inviteEmail.trim() || !chatId) return;
     try {
       setActionLoading("invite");
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch(`/api/share/participant/add/${chatId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ownerEmail: userEmail,
+          ownerEmail: effectiveEmail,
           targetEmail: inviteEmail.trim().toLowerCase(),
           role: inviteRole,
         }),
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
         setInviteEmail("");
       } else {
@@ -220,20 +243,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   // --- ACCESS CODE WORKFLOWS ---
   const handleGenerateAccessCode = async (expiryVal: string, permVal: "chat" | "view") => {
+    if (!chatId) return;
     try {
       setActionLoading("generateCode");
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch("/api/share/access-code/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatId,
-          ownerEmail: userEmail,
+          ownerEmail: effectiveEmail,
           expiresAfterValue: expiryVal,
           defaultPermission: permVal
         })
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
       }
     } catch (err) {
@@ -244,18 +269,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleDisableAccessCode = async () => {
+    if (!chatId) return;
     try {
       setActionLoading("disableCode");
+      const effectiveEmail = userEmail || "guest@nexa.ai";
       const res = await fetch("/api/share/access-code/disable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatId,
-          ownerEmail: userEmail
+          ownerEmail: effectiveEmail
         })
       });
       const data = await res.json();
-      if (data.success) {
+      if (data.success && data.config) {
         setConfig(data.config);
       }
     } catch (err) {

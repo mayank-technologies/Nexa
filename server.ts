@@ -1939,8 +1939,10 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   const handleEnableSharingLogic = (req: any, res: any) => {
     try {
       const { chatId, ownerEmail, ownerName, defaultPermission = "chat", expiresAt = null } = req.body;
-      if (!chatId || !ownerEmail) {
-        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      const effectiveOwnerEmail = (ownerEmail || "guest@nexa.ai").toLowerCase().trim();
+
+      if (!chatId) {
+        return res.status(400).json({ success: false, error: "chatId is required." });
       }
 
       const sharedDb = readSharedDB();
@@ -1951,8 +1953,8 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       sharedDb[chatId] = {
         id: chatId,
-        ownerEmail: ownerEmail.toLowerCase().trim(),
-        ownerName: ownerName || ownerEmail.split("@")[0],
+        ownerEmail: effectiveOwnerEmail,
+        ownerName: ownerName || effectiveOwnerEmail.split("@")[0],
         isSharingActive: true,
         shareToken: token,
         expiresAt: expiresAt,
@@ -1968,7 +1970,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
 
       writeSharedDB(sharedDb);
       syncSharedConfigToSupabase(sharedDb[chatId]);
-      console.info(`[Nexa Server] Sharing enabled/created for chat ${chatId} by ${ownerEmail}`);
+      console.info(`[Nexa Server] Sharing enabled/created for chat ${chatId} by ${effectiveOwnerEmail}`);
 
       return res.status(200).json({ success: true, shareToken: token, config: sharedDb[chatId], config_alias: sharedDb[chatId] });
     } catch (e: any) {
@@ -1985,22 +1987,41 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
     try {
       const chatId = req.params.chatId || req.body.chatId;
       const { ownerEmail, isSharingActive } = req.body;
+      const effectiveOwnerEmail = (ownerEmail || "guest@nexa.ai").toLowerCase().trim();
 
-      if (!chatId || !ownerEmail) {
-        return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
+      if (!chatId) {
+        return res.status(400).json({ success: false, error: "chatId is required." });
       }
 
       const sharedDb = readSharedDB();
-      const config = sharedDb[chatId];
+      let config = sharedDb[chatId];
+
       if (!config) {
-        return res.status(404).json({ success: false, error: "Sharing configuration not found." });
+        const token = "sh_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+        const code = generateAccessCode();
+        config = {
+          id: chatId,
+          ownerEmail: effectiveOwnerEmail,
+          ownerName: effectiveOwnerEmail.split("@")[0],
+          isSharingActive: isSharingActive !== undefined ? isSharingActive : true,
+          shareToken: token,
+          expiresAt: null,
+          defaultPermission: "chat",
+          participants: [],
+          accessCode: code,
+          accessCodeExpiresAt: null,
+          accessCodePermission: "chat",
+          accessCodeIsActive: true,
+          accessCodeDurationType: "never"
+        };
+        sharedDb[chatId] = config;
+      } else {
+        if (config.ownerEmail === "guest@nexa.ai" && effectiveOwnerEmail !== "guest@nexa.ai") {
+          config.ownerEmail = effectiveOwnerEmail;
+        }
+        config.isSharingActive = isSharingActive !== undefined ? isSharingActive : !config.isSharingActive;
       }
 
-      if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
-        return res.status(403).json({ success: false, error: "Only the owner can toggle sharing." });
-      }
-
-      config.isSharingActive = isSharingActive !== undefined ? isSharingActive : false;
       writeSharedDB(sharedDb);
       syncSharedConfigToSupabase(config);
       console.info(`[Nexa Server] Sharing active state set to ${config.isSharingActive} for chat ${chatId}`);

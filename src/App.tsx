@@ -40,7 +40,9 @@ import {
   AlertTriangle,
   Square,
   Check,
-  Copy
+  Copy,
+  Wifi,
+  ChevronDown
 } from "lucide-react";
 import {
   ChatSession,
@@ -77,6 +79,7 @@ import { ConversationHeaderMenu } from "./components/ConversationHeaderMenu";
 import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
 import { safeStorage, copyToClipboard } from "./utils/storage";
 import { soundManager, playUiSound } from "./utils/sounds";
+import { diagnoseSharedSessionFetch } from "./utils/sharedDiagnostic";
 
 function GoogleAuthBridgeView() {
   const [status, setStatus] = useState<"connecting" | "success" | "error">("connecting");
@@ -688,7 +691,55 @@ export default function App() {
           });
           if (data && data.success && data.chatId) {
             console.log("[Nexa Share Client] Auto-joined conversation successfully:", data.chatId);
-            setActiveSessionId(data.chatId);
+            const joinedChatId = data.chatId;
+
+            // Trigger diagnostic log for verification
+            diagnoseSharedSessionFetch(clean, emailToUse, sessionsRef.current, joinedChatId);
+
+            // Fetch session details & history
+            const res = await safeFetchJson(`/api/share/session/${joinedChatId}?email=${encodeURIComponent(emailToUse)}`);
+            let fetchedMessages: Message[] = [];
+            let sessionTitle = "Collaborative Conversation";
+
+            if (res.data && res.data.success && res.data.session) {
+              if (res.data.session.title) sessionTitle = res.data.session.title;
+              if (Array.isArray(res.data.session.messages)) fetchedMessages = res.data.session.messages;
+            }
+
+            setSessions((prev) => {
+              const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
+              if (existingIdx !== -1) {
+                const updated = [...prev];
+                updated[existingIdx] = {
+                  ...updated[existingIdx],
+                  title: sessionTitle,
+                  messages: fetchedMessages.length > 0 ? fetchedMessages : updated[existingIdx].messages,
+                  isShared: true
+                };
+                return updated;
+              } else {
+                const newSession: ChatSession = {
+                  id: joinedChatId,
+                  title: sessionTitle,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  messages: fetchedMessages,
+                  isPinned: false,
+                  mode: "general",
+                  userEmail: emailToUse,
+                  isShared: true
+                };
+                return [newSession, ...prev];
+              }
+            });
+
+            setIsSharedSession(true);
+            setSharedRole(data.role || "editor");
+            if (data.config?.participants) {
+              setSharedParticipants(data.config.participants);
+            }
+
+            setActiveSessionId(joinedChatId);
             setCurrentView("chat");
             playUiSound("success");
           } else {
@@ -719,6 +770,7 @@ export default function App() {
 
   // Real-time states
   const [isSharedSession, setIsSharedSession] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<"Connected" | "Syncing..." | "Reconnecting">("Connected");
   const [sharedRole, setSharedRole] = useState<'owner' | 'editor' | 'viewer' | null>(null);
   const [sharedParticipants, setSharedParticipants] = useState<any[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
@@ -854,6 +906,13 @@ export default function App() {
     console.log("[Nexa Debug] [selectedConversationId Change] activeSessionId (selectedConversationId) changed from:", activeSessionIdRef.current || "empty", "to:", activeSessionId || "empty");
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    (window as any).diagnoseSharedSessionFetch = (inputTokenOrId?: string) => {
+      const target = inputTokenOrId || activeSessionIdRef.current || "session-default";
+      return diagnoseSharedSessionFetch(target, user?.email || "guest@nexa.ai", sessionsRef.current, activeSessionIdRef.current);
+    };
+  }, [user?.email]);
 
   useEffect(() => {
     console.log("[Nexa Debug] [Navigation Event] View changed to:", currentView);
@@ -1175,43 +1234,61 @@ export default function App() {
       messagesUnsubscribeRef.current = null;
     }
 
-    if (user && !user.isGuest && user.uid && activeSessionId) {
-      console.log("[Nexa Client] Subscribing to Supabase messages for chat:", activeSessionId);
+    if (activeSessionId) {
+      console.log("[Nexa Client] Subscribing/polling messages for chat:", activeSessionId);
       
       const loadMessages = async () => {
         if (isLoadingRef.current || isGeneratingRef.current) {
-          console.log("[Nexa Client] Skip loadMessages during active stream (start).");
           return;
         }
         try {
-          const fetchedMessages = await fetchMessagesFromSupabase(activeSessionId);
+          let fetchedMessages: Message[] = [];
+
+          // 1. Fetch from Supabase if authenticated user
+          if (user && !user.isGuest && user.uid) {
+            fetchedMessages = await fetchMessagesFromSupabase(activeSessionId);
+          }
+
+          // 2. Fetch from /api/share/session if no messages found or isSharedSession
+          const currentSess = sessions.find((s) => s.id === activeSessionId);
+          if (fetchedMessages.length === 0 || isSharedSession || currentSess?.isShared) {
+            const effectiveEmail = user?.email || "guest@nexa.ai";
+            const res = await safeFetchJson(`/api/share/session/${activeSessionId}?email=${encodeURIComponent(effectiveEmail)}`);
+            if (res.data && res.data.success && res.data.session && Array.isArray(res.data.session.messages)) {
+              const sharedMsgs = res.data.session.messages;
+              if (sharedMsgs.length > 0) {
+                const msgMap = new Map<string, Message>();
+                fetchedMessages.forEach((m) => msgMap.set(m.id, m));
+                sharedMsgs.forEach((m: any) => msgMap.set(m.id, m));
+                fetchedMessages = Array.from(msgMap.values());
+              }
+            }
+          }
 
           if (isLoadingRef.current || isGeneratingRef.current) {
-            console.log("[Nexa Client] Skip loadMessages during active stream (post-fetch).");
             return;
           }
 
-          // Chronological sorting of messages
-          fetchedMessages.sort((a, b) => {
-            const getNum = (id: string) => {
-              const match = id.match(/\d+/);
-              return match ? parseInt(match[0], 10) : 0;
-            };
-            return getNum(a.id) - getNum(b.id);
-          });
+          setSyncStatus("Connected");
 
-          setSessions((prevSessions) => {
-            if (isLoadingRef.current || isGeneratingRef.current) {
-              console.log("[Nexa Client] Skip setSessions inside loadMessages during active stream.");
-              return prevSessions;
-            }
-            return prevSessions.map((s) => {
-              if (s.id === activeSessionId) {
-                if (fetchedMessages.length === 0 && s.messages.length > 0) {
-                  return s; // Keep existing local messages
-                }
+          if (fetchedMessages.length > 0) {
+            // Chronological sorting of messages
+            fetchedMessages.sort((a, b) => {
+              const getNum = (id: string) => {
+                const match = id.match(/\d+/);
+                return match ? parseInt(match[0], 10) : 0;
+              };
+              return getNum(a.id) - getNum(b.id);
+            });
 
-                // Combine local and remote messages by unique ID
+            setSessions((prevSessions) => {
+              if (isLoadingRef.current || isGeneratingRef.current) {
+                return prevSessions;
+              }
+
+              const existingIdx = prevSessions.findIndex((s) => s.id === activeSessionId);
+              if (existingIdx !== -1) {
+                const s = prevSessions[existingIdx];
                 const msgMap = new Map<string, Message>();
                 s.messages.forEach((m) => msgMap.set(m.id, m));
                 fetchedMessages.forEach((m) => msgMap.set(m.id, m));
@@ -1227,25 +1304,44 @@ export default function App() {
 
                 if (JSON.stringify(s.messages) !== JSON.stringify(combined)) {
                   console.log(
-                    `[Nexa Client] [loadMessages] Merged messages for ${s.id}. ` +
+                    `[Nexa Client] [loadMessages] Updated messages for ${s.id}. ` +
                     `Local count: ${s.messages.length}, Combined count: ${combined.length}`
                   );
-                  return {
+                  const updated = [...prevSessions];
+                  updated[existingIdx] = {
                     ...s,
                     messages: combined,
                   };
+                  return updated;
                 }
+                return prevSessions;
+              } else {
+                console.log(
+                  `[Nexa Client] [loadMessages] Upserting missing session ${activeSessionId} into state with ${fetchedMessages.length} messages.`
+                );
+                const newSession: ChatSession = {
+                  id: activeSessionId,
+                  title: "Collaborative Conversation",
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  messages: fetchedMessages,
+                  isPinned: false,
+                  mode: "general",
+                  userEmail: user?.email || "guest@nexa.ai",
+                  isShared: true,
+                };
+                return [newSession, ...prevSessions];
               }
-              return s;
             });
-          });
+          }
         } catch (error) {
           console.error("Messages fetch error:", error);
+          setSyncStatus("Reconnecting");
         }
       };
 
       loadMessages();
-      const pollInterval = setInterval(loadMessages, 3500);
+      const pollInterval = setInterval(loadMessages, 3000);
       messagesUnsubscribeRef.current = () => clearInterval(pollInterval);
     }
 
@@ -1352,6 +1448,7 @@ export default function App() {
 
           ws.onopen = () => {
             console.log("[Nexa WS client] Connected successfully to share room:", activeSessionId);
+            setSyncStatus("Connected");
             ws?.send(
               JSON.stringify({
                 type: "join-room",
@@ -1365,6 +1462,7 @@ export default function App() {
           };
 
           ws.onmessage = (event) => {
+            setSyncStatus("Connected");
             try {
               const payload = JSON.parse(event.data);
               console.log("[Nexa WS client] Message received:", payload);
@@ -1411,10 +1509,16 @@ export default function App() {
 
           ws.onclose = () => {
             console.log("[Nexa WS client] Socket closed for room:", activeSessionId);
+            if (isSubscribed) {
+              setSyncStatus("Reconnecting");
+            }
           };
 
           ws.onerror = (err) => {
             console.error("[Nexa WS client] Socket error occurred:", err);
+            if (isSubscribed) {
+              setSyncStatus("Reconnecting");
+            }
           };
 
         } else {
@@ -1485,8 +1589,46 @@ export default function App() {
   const lastMessageRole = lastMessage?.role;
   const messageCount = activeSession && Array.isArray(activeSession.messages) ? activeSession.messages.length : 0;
 
-  // Track if user is currently near the bottom using a ref updated by IntersectionObserver
+  // Chat container ref and scroll-to-bottom floating button state
+  const chatScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [showScrollBottom, setShowScrollBottom] = useState<boolean>(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const isNearBottomRef = useRef<boolean>(true);
+  const prevMessageCountRef = useRef<number>(messageCount);
+
+  // Scroll event handler for detecting scroll position in chat list
+  const handleChatScroll = () => {
+    const container = chatScrollContainerRef.current;
+    if (!container) return;
+
+    const threshold = 120;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const isAtBottom = distanceFromBottom <= threshold;
+
+    isNearBottomRef.current = isAtBottom;
+
+    if (isAtBottom) {
+      setShowScrollBottom(false);
+      setUnreadCount(0);
+    } else {
+      setShowScrollBottom(true);
+    }
+  };
+
+  // Smooth scroll to bottom action handler
+  const handleScrollToBottom = () => {
+    if (messageEndRef.current) {
+      messageEndRef.current.scrollIntoView({ behavior: "smooth" });
+    } else if (chatScrollContainerRef.current) {
+      chatScrollContainerRef.current.scrollTo({
+        top: chatScrollContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+    setShowScrollBottom(false);
+    setUnreadCount(0);
+    isNearBottomRef.current = true;
+  };
 
   // Set up an intersection observer on the message end tag to track user view state
   useEffect(() => {
@@ -1496,10 +1638,14 @@ export default function App() {
     const observer = new IntersectionObserver(
       ([entry]) => {
         isNearBottomRef.current = entry.isIntersecting;
+        if (entry.isIntersecting) {
+          setShowScrollBottom(false);
+          setUnreadCount(0);
+        }
       },
       {
-        root: null, // Viewport
-        threshold: 0.1, // Trigger as soon as bottom spacer begins to enter/exit viewport
+        root: chatScrollContainerRef.current, // Viewport container
+        threshold: 0.1, // Trigger as soon as bottom spacer enters viewport
       }
     );
 
@@ -1507,6 +1653,26 @@ export default function App() {
     return () => {
       observer.disconnect();
     };
+  }, [activeSessionId]);
+
+  // Track unread messages arriving while user is scrolled up
+  useEffect(() => {
+    if (messageCount > prevMessageCountRef.current) {
+      const diff = messageCount - prevMessageCountRef.current;
+      if (!isNearBottomRef.current) {
+        setUnreadCount((prev) => prev + diff);
+        setShowScrollBottom(true);
+      }
+    }
+    prevMessageCountRef.current = messageCount;
+  }, [messageCount]);
+
+  // Reset scroll button state on changing session
+  useEffect(() => {
+    setShowScrollBottom(false);
+    setUnreadCount(0);
+    isNearBottomRef.current = true;
+    prevMessageCountRef.current = messageCount;
   }, [activeSessionId]);
 
   // Scroll to bottom of message feeds on rendering new messages or loading state changes
@@ -3549,9 +3715,37 @@ export default function App() {
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-2 h-2 rounded-full bg-[#C96A3D] shrink-0 animate-pulse" />
                     <div className="min-w-0">
-                      <h4 className="text-xs font-black text-slate-800 dark:text-white truncate max-w-[200px] sm:max-w-xs md:max-w-md">
-                        {activeSession.title}
-                      </h4>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-xs font-black text-slate-800 dark:text-white truncate max-w-[180px] sm:max-w-xs md:max-w-md">
+                          {activeSession.title}
+                        </h4>
+
+                        {/* Visual Live Shared Connection Indicator */}
+                        {(isSharedSession || activeSession.isShared) && (
+                          <div
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold tracking-tight transition-all border shrink-0 ${
+                              syncStatus === "Connected"
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+                                : syncStatus === "Syncing..."
+                                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25 animate-pulse"
+                                : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25"
+                            }`}
+                            title={`Real-time WebSocket & Supabase subscription live status: ${syncStatus}`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                syncStatus === "Connected"
+                                  ? "bg-emerald-500"
+                                  : syncStatus === "Syncing..."
+                                  ? "bg-amber-500 animate-ping"
+                                  : "bg-rose-500 animate-bounce"
+                              }`}
+                            />
+                            <Wifi className="w-3 h-3 shrink-0" />
+                            <span>{syncStatus}</span>
+                          </div>
+                        )}
+                      </div>
                       <p className="text-[10px] text-slate-400 font-bold capitalize mt-0.5">
                         {activeSession.mode} Workspace
                       </p>
@@ -3596,7 +3790,11 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto pb-28 md:pb-4 pr-1 scrollbar-thin">
+                <div 
+                  ref={chatScrollContainerRef}
+                  onScroll={handleChatScroll}
+                  className="flex-1 overflow-y-auto pb-28 md:pb-4 pr-1 scrollbar-thin relative"
+                >
                   <MessageList
                     messages={activeSession.messages}
                     activeEngine={activeSession.selectedEngineId || "core"}
@@ -3623,6 +3821,41 @@ export default function App() {
             id="nexa-dock"
             style={{ paddingBottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
           >
+            
+            {/* Floating Scroll to Bottom Button */}
+            <AnimatePresence>
+              {showScrollBottom && (
+                <div className="absolute bottom-full right-4 sm:right-6 mb-3 z-50 pointer-events-auto">
+                  <motion.button
+                    type="button"
+                    initial={{ opacity: 0, y: 14, scale: 0.85 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 14, scale: 0.85 }}
+                    transition={{ type: "spring", stiffness: 380, damping: 24 }}
+                    onClick={handleScrollToBottom}
+                    className={`flex items-center gap-2 rounded-full shadow-xl backdrop-blur-md border transition-all cursor-pointer active:scale-95 group ${
+                      unreadCount > 0
+                        ? "px-3.5 py-2 bg-white/95 dark:bg-[#11192e]/95 text-slate-800 dark:text-white border-[#C96A3D]/50 dark:border-[#C96A3D]/50 hover:bg-[#C96A3D] hover:text-white dark:hover:bg-[#C96A3D] dark:hover:text-white"
+                        : "w-10 h-10 justify-center bg-white/90 dark:bg-[#11192e]/90 text-slate-700 dark:text-slate-200 border-slate-200/80 dark:border-slate-800/80 hover:border-[#C96A3D] dark:hover:border-[#C96A3D] hover:bg-[#C96A3D] hover:text-white dark:hover:bg-[#C96A3D] dark:hover:text-white"
+                    }`}
+                    title={unreadCount > 0 ? `${unreadCount} new message${unreadCount > 1 ? "s" : ""} - Click to scroll down` : "Scroll to bottom"}
+                    aria-label="Scroll to latest message"
+                  >
+                    {unreadCount > 0 ? (
+                      <>
+                        <span className="flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-[#C96A3D] text-white text-[10px] font-black group-hover:bg-white group-hover:text-[#C96A3D] transition-colors">
+                          {unreadCount}
+                        </span>
+                        <span className="text-[11.5px] font-bold">New</span>
+                        <ChevronDown className="w-4 h-4 text-[#C96A3D] group-hover:text-white transition-colors animate-bounce" />
+                      </>
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-slate-600 dark:text-slate-300 group-hover:text-white transition-colors" />
+                    )}
+                  </motion.button>
+                </div>
+              )}
+            </AnimatePresence>
             
             {/* Thumbs Up Feedback Toast Slide-in from Right */}
             <AnimatePresence>
@@ -4351,6 +4584,8 @@ export default function App() {
         chatId={activeSessionId || activeSession?.id || "session-default"}
         userEmail={user?.email || "guest@nexa.ai"}
         userName={user?.fullName || "Guest Collaborator"}
+        sessionTitle={activeSession?.title}
+        messages={activeSession?.messages}
         onShareEnabled={(newConfig) => {
           console.log("[Nexa App] Collaborative sharing enabled from modal:", newConfig);
           setIsSharedSession(true);
@@ -4365,9 +4600,60 @@ export default function App() {
         userEmail={user?.email || "guest@nexa.ai"}
         userName={user?.fullName || "Guest Collaborator"}
         initialToken={joinTokenInput}
-        onJoinSuccess={async (chatId) => {
-          // Trigger the App to switch to the joined conversation
-          setActiveSessionId(chatId);
+        onJoinSuccess={async (joinedChatId) => {
+          console.log("[Nexa App] Joined shared session via modal. chatId:", joinedChatId);
+          
+          try {
+            const effectiveEmail = user?.email || "guest@nexa.ai";
+            // Trigger diagnostic log for verification
+            diagnoseSharedSessionFetch(joinedChatId, effectiveEmail, sessionsRef.current, joinedChatId);
+
+            const res = await safeFetchJson(`/api/share/session/${joinedChatId}?email=${encodeURIComponent(effectiveEmail)}`);
+            console.log("[Nexa App] /api/share/session response on join:", res);
+            
+            if (res.data && res.data.success && res.data.session) {
+              const joinedSessionData = res.data.session;
+              const fetchedMessages = Array.isArray(joinedSessionData.messages) ? joinedSessionData.messages : [];
+              const sessionTitle = joinedSessionData.title || "Collaborative Conversation";
+
+              setSessions((prev) => {
+                const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
+                if (existingIdx !== -1) {
+                  const updated = [...prev];
+                  updated[existingIdx] = {
+                    ...updated[existingIdx],
+                    title: sessionTitle,
+                    messages: fetchedMessages.length > 0 ? fetchedMessages : updated[existingIdx].messages,
+                    isShared: true
+                  };
+                  return updated;
+                } else {
+                  const newSession = {
+                    id: joinedChatId,
+                    title: sessionTitle,
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                    messages: fetchedMessages,
+                    isPinned: false,
+                    mode: "general" as const,
+                    userEmail: effectiveEmail,
+                    isShared: true
+                  };
+                  return [newSession, ...prev];
+                }
+              });
+
+              setIsSharedSession(true);
+              setSharedRole(res.data.role || 'editor');
+              if (res.data.config?.participants) {
+                setSharedParticipants(res.data.config.participants);
+              }
+            }
+          } catch (err) {
+            console.error("[Nexa App] Error loading joined session details:", err);
+          }
+
+          setActiveSessionId(joinedChatId);
           setCurrentView("chat");
           playUiSound("success");
         }}

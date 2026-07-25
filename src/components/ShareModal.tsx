@@ -31,6 +31,8 @@ interface ShareModalProps {
   chatId: string;
   userEmail: string;
   userName?: string;
+  sessionTitle?: string;
+  messages?: any[];
   onShareEnabled?: (config: ShareConfig) => void;
 }
 
@@ -40,6 +42,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   chatId,
   userEmail,
   userName,
+  sessionTitle,
+  messages,
   onShareEnabled,
 }) => {
   const [config, setConfig] = useState<ShareConfig | null>(null);
@@ -115,6 +119,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           ownerEmail: effectiveEmail,
           ownerName: effectiveName,
           defaultPermission: "chat",
+          title: sessionTitle || "Collaborative Conversation",
+          messages: messages || [],
         }),
       });
       console.log("[Nexa Share Modal] /api/share/create response:", data, "error:", error);
@@ -275,7 +281,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           chatId: effectiveChatId,
           ownerEmail: effectiveEmail,
           expiresAfterValue: expiryVal,
-          defaultPermission: permVal
+          defaultPermission: permVal,
+          title: sessionTitle || "Collaborative Conversation",
+          messages: messages || [],
         })
       });
       if (data && data.success && data.config) {

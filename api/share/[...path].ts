@@ -589,9 +589,10 @@ export default async function handler(req: any, res: any) {
       const chatId = targetId || "session-default";
       const email = (reqQuery.email as string) || "guest@nexa.ai";
       const found = await findSharedConfigAsync(chatId);
+      const actualChatId = found ? found.actualChatId : chatId;
 
       const config = found?.config || {
-        id: chatId,
+        id: actualChatId,
         ownerEmail: "guest@nexa.ai",
         ownerName: "Guest Collaborator",
         isSharingActive: true,
@@ -600,18 +601,141 @@ export default async function handler(req: any, res: any) {
         participants: [],
       };
 
+      let title = (config as any).title || "Collaborative Conversation";
+      let messages: any[] = (config as any).messages || [];
+
+      // Query Supabase for real chat metadata & messages
+      const supabase = getSupabaseServer();
+      if (supabase) {
+        try {
+          const { data: chatRow } = await supabase.from("chats").select("*").eq("id", actualChatId).maybeSingle();
+          if (chatRow && chatRow.title) {
+            title = chatRow.title;
+          }
+          const { data: msgRows } = await supabase
+            .from("messages")
+            .select("*")
+            .eq("chat_id", actualChatId)
+            .order("timestamp", { ascending: true });
+
+          if (msgRows && msgRows.length > 0) {
+            messages = msgRows.map((r: any) => ({
+              id: r.id,
+              role: r.role,
+              content: r.content,
+              timestamp: r.timestamp,
+              engineId: r.engine_id,
+              sources: r.sources,
+              factCheck: r.fact_check,
+              researchReport: r.research_report,
+              quiz: r.quiz,
+              attachment: r.attachment,
+              reaction: r.reaction,
+            }));
+          }
+        } catch (e) {
+          console.warn("[Nexa Share Serverless] Error fetching session messages from Supabase:", e);
+        }
+      }
+
+      // Fallback to sharedDb[actualChatId]
+      const sharedDb = readSharedDB();
+      if (messages.length === 0 && sharedDb[actualChatId]?.messages) {
+        messages = sharedDb[actualChatId].messages;
+      }
+      if (sharedDb[actualChatId]?.title) {
+        title = sharedDb[actualChatId].title;
+      }
+
       return res.status(200).json({
         success: true,
         session: {
-          id: chatId,
-          title: "Collaborative Conversation",
-          messages: [],
+          id: actualChatId,
+          title: title,
+          messages: messages,
         },
         role: "editor",
         isOwner: config.ownerEmail?.toLowerCase() === email.toLowerCase(),
         isParticipant: true,
         config,
       });
+    }
+
+    // 10b. SYNC MESSAGES
+    if (action === "sync-messages" || action === "update-messages") {
+      const chatId = body.chatId || targetId || "session-default";
+      const messages = body.messages || [];
+      const title = body.title || "";
+      const found = await findSharedConfigAsync(chatId);
+      const sharedDb = readSharedDB();
+      const actualChatId = found ? found.actualChatId : chatId;
+
+      let conf = sharedDb[actualChatId];
+      if (!conf) {
+        conf = {
+          id: actualChatId,
+          ownerEmail: body.ownerEmail || "guest@nexa.ai",
+          ownerName: "Guest Collaborator",
+          isSharingActive: true,
+          shareToken: generateShareToken(),
+          defaultPermission: "chat",
+          participants: [],
+        };
+        sharedDb[actualChatId] = conf;
+      }
+
+      if (Array.isArray(messages) && messages.length > 0) {
+        conf.messages = messages;
+      }
+      if (title) {
+        conf.title = title;
+      }
+
+      writeSharedDB(sharedDb);
+
+      // Upsert to Supabase
+      const supabase = getSupabaseServer();
+      if (supabase) {
+        try {
+          if (title) {
+            try {
+              await supabase.from("chats").upsert({
+                id: actualChatId,
+                title: title,
+                user_email: conf.ownerEmail,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: "id" });
+            } catch (err) {}
+          }
+
+          if (Array.isArray(messages) && messages.length > 0) {
+            for (const msg of messages) {
+              if (msg && msg.id) {
+                try {
+                  await supabase.from("messages").upsert({
+                    id: msg.id,
+                    chat_id: actualChatId,
+                    role: msg.role,
+                    content: msg.content || "",
+                    timestamp: msg.timestamp || new Date().toISOString(),
+                    engine_id: msg.engineId || null,
+                    sources: msg.sources || null,
+                    fact_check: msg.factCheck || null,
+                    research_report: msg.researchReport || null,
+                    quiz: msg.quiz || null,
+                    attachment: msg.attachment || null,
+                    reaction: msg.reaction || null,
+                  }, { onConflict: "id" });
+                } catch (err) {}
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[Nexa Share Serverless] Error syncing messages to Supabase:", e);
+        }
+      }
+
+      return res.status(200).json({ success: true, count: messages.length });
     }
 
     // 11. DIAGNOSTICS

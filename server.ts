@@ -1938,7 +1938,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   // Unified Sharing API: POST /api/share/enable AND /api/share/create
   const handleEnableSharingLogic = (req: any, res: any) => {
     try {
-      const { chatId, ownerEmail, ownerName, defaultPermission = "chat", expiresAt = null } = req.body;
+      const { chatId, ownerEmail, ownerName, defaultPermission = "chat", expiresAt = null, messages, title } = req.body;
       const effectiveOwnerEmail = (ownerEmail || "guest@nexa.ai").toLowerCase().trim();
 
       if (!chatId) {
@@ -1960,6 +1960,8 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         expiresAt: expiresAt,
         defaultPermission: defaultPermission, // "chat" or "view"
         participants: existing?.participants || [],
+        messages: Array.isArray(messages) ? messages : (existing?.messages || []),
+        title: title || existing?.title || "Collaborative Conversation",
         // Access code default state
         accessCode: code,
         accessCodeExpiresAt: existing?.accessCodeExpiresAt || null,
@@ -2242,7 +2244,7 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
   // Generate or regenerate Access Code
   app.post("/api/share/access-code/generate", (req, res) => {
     try {
-      const { chatId, ownerEmail, expiresAfterValue = "never", defaultPermission = "chat" } = req.body;
+      const { chatId, ownerEmail, expiresAfterValue = "never", defaultPermission = "chat", messages, title } = req.body;
       if (!chatId || !ownerEmail) {
         return res.status(400).json({ success: false, error: "chatId and ownerEmail are required." });
       }
@@ -2260,9 +2262,18 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
           shareToken: token,
           expiresAt: null,
           defaultPermission: defaultPermission,
-          participants: []
+          participants: [],
+          messages: Array.isArray(messages) ? messages : [],
+          title: title || "Collaborative Conversation"
         };
         config = sharedDb[chatId];
+      }
+
+      if (Array.isArray(messages) && messages.length > 0) {
+        config.messages = messages;
+      }
+      if (title) {
+        config.title = title;
       }
 
       if (config.ownerEmail !== ownerEmail.toLowerCase().trim()) {
@@ -2299,6 +2310,39 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
       return res.status(200).json({ success: true, config });
     } catch (e: any) {
       console.error("Error generating access code:", e);
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // Sync messages directly into shared DB & Supabase
+  app.post("/api/share/sync-messages", (req, res) => {
+    try {
+      const { chatId, messages, title } = req.body;
+      if (!chatId) return res.status(400).json({ success: false, error: "chatId is required." });
+
+      const sharedDb = readSharedDB();
+      let config = sharedDb[chatId];
+      if (!config) {
+        config = {
+          id: chatId,
+          ownerEmail: "guest@nexa.ai",
+          ownerName: "Guest Collaborator",
+          isSharingActive: true,
+          shareToken: "sh_" + Math.random().toString(36).substring(2, 15),
+          defaultPermission: "chat",
+          participants: [],
+        };
+        sharedDb[chatId] = config;
+      }
+
+      if (Array.isArray(messages)) config.messages = messages;
+      if (title) config.title = title;
+
+      writeSharedDB(sharedDb);
+      syncSharedConfigToSupabase(config);
+
+      return res.status(200).json({ success: true, count: Array.isArray(messages) ? messages.length : 0 });
+    } catch (e: any) {
       return res.status(500).json({ success: false, error: e.message });
     }
   });
@@ -2737,20 +2781,29 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         }
       }
 
-      // 3. Fallback to active collaborative chat session structure if not in Supabase or local DB
+      // 3. Fallback to active collaborative chat session structure or sharedDb if not in Supabase or local DB
       if (!session) {
         console.info(`[Nexa Server] [share/session] Constructing active collaborative chat session object for actualChatId "${actualChatId}"`);
+        const sharedDb = readSharedDB();
+        const sharedRecord = sharedDb[actualChatId];
+        
         session = {
           id: actualChatId,
-          title: "Collaborative Chat",
+          title: sharedRecord?.title || "Collaborative Chat",
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           isPinned: false,
           mode: "general",
           userEmail: config.ownerEmail,
-          messages: [],
-          isShared: true
+          messages: sharedRecord?.messages || []
         };
+      } else if ((!session.messages || session.messages.length === 0)) {
+        const sharedDb = readSharedDB();
+        const sharedRecord = sharedDb[actualChatId];
+        if (sharedRecord && Array.isArray(sharedRecord.messages) && sharedRecord.messages.length > 0) {
+          session.messages = sharedRecord.messages;
+          if (sharedRecord.title) session.title = sharedRecord.title;
+        }
       }
 
       console.info(`[Nexa Server] [share/session] Successfully returning shared session for actualChatId: "${actualChatId}" to user: "${email}"`);

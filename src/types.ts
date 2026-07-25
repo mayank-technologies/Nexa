@@ -79,6 +79,7 @@ export interface ChatSession {
   isDeleted?: boolean;
   deletedAt?: string;
   autoDeleteAt?: string;
+  isShared?: boolean;
 }
 
 export interface GamificationState {

@@ -630,6 +630,77 @@ export default async function handler(req: any, res: any) {
       });
     }
 
+    // 9b. USER SESSIONS (get all shared sessions owned or joined by user)
+    if (action === "user-sessions" || action === "user-shares") {
+      const reqQuery = req.query || {};
+      const email = ((reqQuery.email as string) || body.email || "").toLowerCase().trim();
+      if (!email) {
+        return res.status(200).json({ success: true, sessions: [] });
+      }
+
+      const sharedDb = readSharedDB();
+      const matchedConfigs: any[] = [];
+
+      for (const chatId of Object.keys(sharedDb)) {
+        const conf = sharedDb[chatId];
+        if (!conf || conf.isSharingActive === false) continue;
+        const isOwner = conf.ownerEmail?.toLowerCase() === email;
+        const isParticipant = Array.isArray(conf.participants) && conf.participants.some((p: any) => p.email?.toLowerCase() === email);
+        if (isOwner || isParticipant) {
+          matchedConfigs.push({
+            id: chatId,
+            title: conf.title || "Collaborative Conversation",
+            createdAt: conf.createdAt || new Date().toISOString(),
+            updatedAt: conf.updatedAt || new Date().toISOString(),
+            isPinned: false,
+            mode: conf.mode || "general",
+            userEmail: conf.ownerEmail,
+            isShared: true,
+            messages: conf.messages || [],
+          });
+        }
+      }
+
+      // Query Supabase for shared participants if available
+      const supabase = getSupabaseServer();
+      if (supabase) {
+        try {
+          const { data: partRows } = await supabase
+            .from("shared_participants")
+            .select("chat_id")
+            .eq("email", email);
+          if (partRows && partRows.length > 0) {
+            for (const prow of partRows) {
+              if (!matchedConfigs.some((m) => m.id === prow.chat_id)) {
+                const { data: confRow } = await supabase
+                  .from("shared_configs")
+                  .select("*")
+                  .eq("chat_id", prow.chat_id)
+                  .maybeSingle();
+                if (confRow) {
+                  matchedConfigs.push({
+                    id: confRow.chat_id,
+                    title: confRow.title || "Collaborative Conversation",
+                    createdAt: confRow.created_at || new Date().toISOString(),
+                    updatedAt: confRow.updated_at || new Date().toISOString(),
+                    isPinned: false,
+                    mode: "general",
+                    userEmail: confRow.owner_email,
+                    isShared: true,
+                    messages: [],
+                  });
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("[Nexa Share Serverless] Error querying user shared sessions from Supabase:", err);
+        }
+      }
+
+      return res.status(200).json({ success: true, sessions: matchedConfigs });
+    }
+
     // 10. SESSION FETCH
     if (action === "session") {
       const reqQuery = req.query || {};

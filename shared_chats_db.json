@@ -119,5 +119,20 @@
     "accessCodePermission": "chat",
     "accessCodeIsActive": true,
     "accessCodeDurationType": "24h"
+  },
+  "session-verify123": {
+    "id": "session-verify123",
+    "ownerEmail": "test@nexa.ai",
+    "ownerName": "Tester",
+    "isSharingActive": true,
+    "shareToken": "sh_04o3gb0zb4v1dt804xmwqfw",
+    "expiresAt": null,
+    "defaultPermission": "chat",
+    "participants": [],
+    "accessCode": "NXA-7J2B-3D",
+    "accessCodeExpiresAt": null,
+    "accessCodePermission": "chat",
+    "accessCodeIsActive": true,
+    "accessCodeDurationType": "never"
   }
 }

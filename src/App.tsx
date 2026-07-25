@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Analytics } from "@vercel/analytics/react";
+import { safeFetchJson } from "./utils/safeFetch";
 import {
   Sparkles,
   Search,
@@ -674,7 +675,7 @@ export default function App() {
         // Attempt automatic join via API
         try {
           const emailToUse = user?.email || "guest@nexa.ai";
-          const res = await fetch("/api/share/join", {
+          const { data } = await safeFetchJson("/api/share/join", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -685,8 +686,7 @@ export default function App() {
               accessCode: clean
             })
           });
-          const data = await res.json();
-          if (data.success && data.chatId) {
+          if (data && data.success && data.chatId) {
             console.log("[Nexa Share Client] Auto-joined conversation successfully:", data.chatId);
             setActiveSessionId(data.chatId);
             setCurrentView("chat");
@@ -1275,12 +1275,11 @@ export default function App() {
 
     const checkSharingAndConnect = async () => {
       try {
-        const res = await fetch(`/api/share/info/${activeSessionId}?email=${encodeURIComponent(user.email || "")}`);
-        const data = await res.json();
+        const { data } = await safeFetchJson(`/api/share/info/${activeSessionId}?email=${encodeURIComponent(user.email || "")}`);
         
         if (!isSubscribed) return;
 
-        if (data.success && data.isShared && data.config?.isSharingActive) {
+        if (data && data.success && data.isShared && data.config?.isSharingActive) {
           setIsSharedSession(true);
           const config = data.config;
           const userEmail = (user.email || "").toLowerCase().trim();
@@ -1304,9 +1303,8 @@ export default function App() {
           const hashToken = window.location.hash.includes("#share=") ? window.location.hash.split("#share=")[1] : "";
           const tokenParam = joinTokenInput || hashToken || config.shareToken || "";
           
-          const sessionRes = await fetch(`/api/share/session/${targetChatId}?email=${encodeURIComponent(user.email || "")}&token=${encodeURIComponent(tokenParam)}`);
-          const sessionData = await sessionRes.json();
-          if (sessionData.success && sessionData.session && isSubscribed) {
+          const { data: sessionData } = await safeFetchJson(`/api/share/session/${targetChatId}?email=${encodeURIComponent(user.email || "")}&token=${encodeURIComponent(tokenParam)}`);
+          if (sessionData && sessionData.success && sessionData.session && isSubscribed) {
             setSessions((prev) => {
               const exists = prev.some((s) => s.id === targetChatId);
               const formattedSession = {

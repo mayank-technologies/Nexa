@@ -287,9 +287,56 @@ export default async function handler(req: any, res: any) {
         if (!config.accessCode) config.accessCode = generateAccessCode();
       }
 
+      const initialMessages = body.messages || [];
+      const initialTitle = body.title || "";
+      if (Array.isArray(initialMessages) && initialMessages.length > 0) {
+        (config as any).messages = initialMessages;
+      }
+      if (initialTitle) {
+        (config as any).title = initialTitle;
+      }
+
       sharedDb[chatId] = config;
       writeSharedDB(sharedDb);
       await syncSharedConfigToSupabase(config);
+
+      // Also upsert chat and initial messages to Supabase database
+      const supabase = getSupabaseServer();
+      if (supabase) {
+        try {
+          if (initialTitle) {
+            await supabase.from("chats").upsert({
+              id: chatId,
+              title: initialTitle,
+              user_email: ownerEmail,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: "id" });
+          }
+
+          if (Array.isArray(initialMessages) && initialMessages.length > 0) {
+            for (const msg of initialMessages) {
+              if (msg && msg.id) {
+                await supabase.from("messages").upsert({
+                  id: msg.id,
+                  chat_id: chatId,
+                  role: msg.role,
+                  content: msg.content || "",
+                  timestamp: msg.timestamp || new Date().toISOString(),
+                  engine_id: msg.engineId || null,
+                  sources: msg.sources || null,
+                  fact_check: msg.factCheck || null,
+                  research_report: msg.researchReport || null,
+                  quiz: msg.quiz || null,
+                  attachment: msg.attachment || null,
+                  reaction: msg.reaction || null,
+                }, { onConflict: "id" });
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[Nexa Share Serverless] Error syncing initial chat messages on share create:", e);
+        }
+      }
 
       return res.status(200).json({
         success: true,

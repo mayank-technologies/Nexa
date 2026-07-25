@@ -20,6 +20,28 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 /**
+ * Helper to identify whether a Supabase query error is due to missing tables or uninitialized schema cache.
+ */
+export function isMissingTableError(error: any): boolean {
+  if (!error) return false;
+  const msg = (error.message || "").toLowerCase();
+  const details = (error.details || "").toLowerCase();
+  const hint = (error.hint || "").toLowerCase();
+  const code = (error.code || "").toString().toUpperCase();
+  return (
+    code === "42P01" ||
+    code === "PGRST200" ||
+    code === "PGRST204" ||
+    code === "PGRST301" ||
+    msg.includes("schema cache") ||
+    msg.includes("could not find the table") ||
+    details.includes("schema cache") ||
+    hint.includes("schema cache") ||
+    (msg.includes("relation") && msg.includes("does not exist"))
+  );
+}
+
+/**
  * Interface representing the integration health and table checks
  */
 export interface SupabaseHealthStatus {
@@ -110,8 +132,8 @@ export async function syncUserProfileToSupabase(profile: UserProfile): Promise<b
       }, { onConflict: "id" });
 
     if (error) {
-      if (error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'users' table does not exist in Supabase yet. Please execute the SQL schema.");
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] 'users' table does not exist in Supabase yet or not found in schema cache. Please execute the SQL schema.");
       } else {
         console.error("[Nexa Supabase] Error syncing user profile:", error.message);
       }
@@ -173,8 +195,8 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string):
     }
 
     if (error) {
-      if (error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'chats' table does not exist in Supabase yet. Please execute the SQL schema.");
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] 'chats' table does not exist in Supabase yet or not found in schema cache. Please execute the SQL schema.");
       } else {
         console.error("[Nexa Supabase] Error syncing chat:", error.message);
       }
@@ -215,8 +237,8 @@ export async function syncMessageToSupabase(chatId: string, message: Message): P
       }, { onConflict: "id" });
 
     if (error) {
-      if (error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'messages' table does not exist in Supabase yet.");
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] 'messages' table does not exist in Supabase yet or not found in schema cache.");
       } else {
         console.error("[Nexa Supabase] Error syncing message:", error.message);
       }
@@ -438,8 +460,8 @@ export async function fetchChatsFromSupabase(userEmail: string): Promise<ChatSes
     }
 
     if (error) {
-      if (error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'chats' table does not exist. Returning empty.");
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] 'chats' table does not exist or not found in schema cache. Returning empty.");
       } else {
         console.error("[Nexa Supabase] Error fetching chats:", error.message);
       }
@@ -481,8 +503,8 @@ export async function fetchDeletedChatsFromSupabase(userEmail: string): Promise<
       .order("deleted_at", { ascending: false });
 
     if (error) {
-      if (error.code === "42703" || error.message?.includes("column") || error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'is_deleted' column or chats table does not exist yet. Returning empty.");
+      if (error.code === "42703" || error.message?.includes("column") || isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] 'is_deleted' column or chats table does not exist or not found in schema cache yet. Returning empty.");
         return [];
       }
       console.error("[Nexa Supabase] Error fetching deleted chats:", error.message);
@@ -523,8 +545,8 @@ export async function fetchMessagesFromSupabase(chatId: string): Promise<Message
       .order("timestamp", { ascending: true });
 
     if (error) {
-      if (error.code === "42P01") {
-        console.warn("[Nexa Supabase] 'messages' table does not exist.");
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] 'messages' table does not exist or not found in schema cache.");
       } else {
         console.error("[Nexa Supabase] Error fetching messages:", error.message);
       }
@@ -562,7 +584,11 @@ export async function deleteChatFromSupabase(chatId: string): Promise<boolean> {
       .eq("id", chatId);
 
     if (error) {
-      console.error("[Nexa Supabase] Error deleting chat from Supabase:", error.message);
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] Table does not exist or not found in schema cache.");
+      } else {
+        console.error("[Nexa Supabase] Error deleting chat from Supabase:", error.message);
+      }
       return false;
     }
     return true;
@@ -584,7 +610,11 @@ export async function deleteMessageFromSupabase(messageId: string): Promise<bool
       .eq("id", messageId);
 
     if (error) {
-      console.error("[Nexa Supabase] Error deleting message from Supabase:", error.message);
+      if (isMissingTableError(error)) {
+        console.warn("[Nexa Supabase] Table does not exist or not found in schema cache.");
+      } else {
+        console.error("[Nexa Supabase] Error deleting message from Supabase:", error.message);
+      }
       return false;
     }
     return true;

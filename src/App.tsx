@@ -696,15 +696,34 @@ export default function App() {
             // Trigger diagnostic log for verification
             diagnoseSharedSessionFetch(clean, emailToUse, sessionsRef.current, joinedChatId);
 
-            // Fetch session details & history
+            // Fetch session details & history from both API and Supabase
             const res = await safeFetchJson(`/api/share/session/${joinedChatId}?email=${encodeURIComponent(emailToUse)}`);
-            let fetchedMessages: Message[] = [];
+            const sbMessages = await fetchMessagesFromSupabase(joinedChatId);
+
             let sessionTitle = "Collaborative Conversation";
+            let apiMessages: Message[] = [];
 
             if (res.data && res.data.success && res.data.session) {
               if (res.data.session.title) sessionTitle = res.data.session.title;
-              if (Array.isArray(res.data.session.messages)) fetchedMessages = res.data.session.messages;
+              if (Array.isArray(res.data.session.messages)) apiMessages = res.data.session.messages;
             }
+
+            const msgMap = new Map<string, Message>();
+            sbMessages.forEach((m) => msgMap.set(m.id, m));
+            apiMessages.forEach((m) => msgMap.set(m.id, m));
+
+            let combinedMessages = Array.from(msgMap.values());
+            combinedMessages.sort((a, b) => {
+              const getTime = (m: Message) => {
+                if (m.timestamp) {
+                  const parsed = Date.parse(m.timestamp);
+                  if (!isNaN(parsed)) return parsed;
+                }
+                const match = m.id.match(/\d+/);
+                return match ? parseInt(match[0], 10) : 0;
+              };
+              return getTime(a) - getTime(b);
+            });
 
             setSessions((prev) => {
               const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
@@ -713,7 +732,7 @@ export default function App() {
                 updated[existingIdx] = {
                   ...updated[existingIdx],
                   title: sessionTitle,
-                  messages: fetchedMessages.length > 0 ? fetchedMessages : updated[existingIdx].messages,
+                  messages: combinedMessages.length > 0 ? combinedMessages : updated[existingIdx].messages,
                   isShared: true
                 };
                 return updated;
@@ -723,7 +742,7 @@ export default function App() {
                   title: sessionTitle,
                   createdAt: new Date().toISOString(),
                   updatedAt: new Date().toISOString(),
-                  messages: fetchedMessages,
+                  messages: combinedMessages,
                   isPinned: false,
                   mode: "general",
                   userEmail: emailToUse,
@@ -923,26 +942,33 @@ export default function App() {
   }, [activeMode]);
 
   const syncChatSummaryToSupabase = async (chat: ChatSession) => {
-    if (user && (!user.isGuest || isSharedSession) && user.uid) {
-      try {
-        // Synchronize directly to Supabase
-        await syncChatToSupabase(chat, user.email.toLowerCase().trim());
-        console.log("[Nexa Client] Synced chat summary to Supabase:", chat.id);
-      } catch (e) {
-        console.error("Failed to sync chat summary to Supabase:", e);
-      }
+    try {
+      // Synchronize directly to Supabase
+      await syncChatToSupabase(chat, user?.email ? user.email.toLowerCase().trim() : "guest@nexa.ai");
+      console.log("[Nexa Client] Synced chat summary to Supabase:", chat.id);
+    } catch (e) {
+      console.error("Failed to sync chat summary to Supabase:", e);
     }
   };
 
   const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
-    if (user && (!user.isGuest || isSharedSession) && user.uid) {
-      try {
-        // Synchronize directly to Supabase (using imported syncMessageToSupabase function)
-        await syncMessageToSupabase(chatId, message);
-        console.log("[Nexa Client] Synced message to Supabase via imported client helper:", message.id);
-      } catch (e) {
-        console.error("Failed to sync message to Supabase:", e);
-      }
+    try {
+      // 1. Synchronize directly to Supabase
+      await syncMessageToSupabase(chatId, message);
+      console.log("[Nexa Client] Synced message to Supabase:", message.id);
+
+      // 2. Synchronize to Serverless Share DB
+      safeFetchJson("/api/share/sync-messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chatId,
+          messages: [message],
+          ownerEmail: user?.email || "guest@nexa.ai"
+        })
+      }).catch((e) => console.warn("[Nexa Client] API share sync-messages failed non-blockingly:", e));
+    } catch (e) {
+      console.error("Failed to sync message to Supabase:", e);
     }
   };
 
@@ -1244,24 +1270,24 @@ export default function App() {
         try {
           let fetchedMessages: Message[] = [];
 
-          // 1. Fetch from Supabase if authenticated user
-          if (user && !user.isGuest && user.uid) {
+          // 1. Fetch directly from Supabase for all users
+          try {
             fetchedMessages = await fetchMessagesFromSupabase(activeSessionId);
+          } catch (sbErr) {
+            console.warn("[Nexa Client] Error fetching messages from Supabase:", sbErr);
           }
 
-          // 2. Fetch from /api/share/session if no messages found or isSharedSession
+          // 2. Fetch from /api/share/session and merge
           const currentSess = sessions.find((s) => s.id === activeSessionId);
-          if (fetchedMessages.length === 0 || isSharedSession || currentSess?.isShared) {
-            const effectiveEmail = user?.email || "guest@nexa.ai";
-            const res = await safeFetchJson(`/api/share/session/${activeSessionId}?email=${encodeURIComponent(effectiveEmail)}`);
-            if (res.data && res.data.success && res.data.session && Array.isArray(res.data.session.messages)) {
-              const sharedMsgs = res.data.session.messages;
-              if (sharedMsgs.length > 0) {
-                const msgMap = new Map<string, Message>();
-                fetchedMessages.forEach((m) => msgMap.set(m.id, m));
-                sharedMsgs.forEach((m: any) => msgMap.set(m.id, m));
-                fetchedMessages = Array.from(msgMap.values());
-              }
+          const effectiveEmail = user?.email || "guest@nexa.ai";
+          const res = await safeFetchJson(`/api/share/session/${activeSessionId}?email=${encodeURIComponent(effectiveEmail)}`);
+          if (res.data && res.data.success && res.data.session && Array.isArray(res.data.session.messages)) {
+            const sharedMsgs = res.data.session.messages;
+            if (sharedMsgs.length > 0) {
+              const msgMap = new Map<string, Message>();
+              fetchedMessages.forEach((m) => msgMap.set(m.id, m));
+              sharedMsgs.forEach((m: any) => msgMap.set(m.id, m));
+              fetchedMessages = Array.from(msgMap.values());
             }
           }
 
@@ -1274,11 +1300,15 @@ export default function App() {
           if (fetchedMessages.length > 0) {
             // Chronological sorting of messages
             fetchedMessages.sort((a, b) => {
-              const getNum = (id: string) => {
-                const match = id.match(/\d+/);
+              const getTime = (m: Message) => {
+                if (m.timestamp) {
+                  const parsed = Date.parse(m.timestamp);
+                  if (!isNaN(parsed)) return parsed;
+                }
+                const match = m.id.match(/\d+/);
                 return match ? parseInt(match[0], 10) : 0;
               };
-              return getNum(a.id) - getNum(b.id);
+              return getTime(a) - getTime(b);
             });
 
             setSessions((prevSessions) => {
@@ -1295,11 +1325,15 @@ export default function App() {
                 const combined = Array.from(msgMap.values());
 
                 combined.sort((a, b) => {
-                  const getNum = (id: string) => {
-                    const match = id.match(/\d+/);
+                  const getTime = (m: Message) => {
+                    if (m.timestamp) {
+                      const parsed = Date.parse(m.timestamp);
+                      if (!isNaN(parsed)) return parsed;
+                    }
+                    const match = m.id.match(/\d+/);
                     return match ? parseInt(match[0], 10) : 0;
                   };
-                  return getNum(a.id) - getNum(b.id);
+                  return getTime(a) - getTime(b);
                 });
 
                 if (JSON.stringify(s.messages) !== JSON.stringify(combined)) {
@@ -4609,45 +4643,66 @@ export default function App() {
             diagnoseSharedSessionFetch(joinedChatId, effectiveEmail, sessionsRef.current, joinedChatId);
 
             const res = await safeFetchJson(`/api/share/session/${joinedChatId}?email=${encodeURIComponent(effectiveEmail)}`);
-            console.log("[Nexa App] /api/share/session response on join:", res);
-            
+            const sbMessages = await fetchMessagesFromSupabase(joinedChatId);
+
+            let sessionTitle = "Collaborative Conversation";
+            let apiMessages: Message[] = [];
+
             if (res.data && res.data.success && res.data.session) {
-              const joinedSessionData = res.data.session;
-              const fetchedMessages = Array.isArray(joinedSessionData.messages) ? joinedSessionData.messages : [];
-              const sessionTitle = joinedSessionData.title || "Collaborative Conversation";
+              if (res.data.session.title) sessionTitle = res.data.session.title;
+              if (Array.isArray(res.data.session.messages)) apiMessages = res.data.session.messages;
+            }
 
-              setSessions((prev) => {
-                const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
-                if (existingIdx !== -1) {
-                  const updated = [...prev];
-                  updated[existingIdx] = {
-                    ...updated[existingIdx],
-                    title: sessionTitle,
-                    messages: fetchedMessages.length > 0 ? fetchedMessages : updated[existingIdx].messages,
-                    isShared: true
-                  };
-                  return updated;
-                } else {
-                  const newSession = {
-                    id: joinedChatId,
-                    title: sessionTitle,
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                    messages: fetchedMessages,
-                    isPinned: false,
-                    mode: "general" as const,
-                    userEmail: effectiveEmail,
-                    isShared: true
-                  };
-                  return [newSession, ...prev];
+            const msgMap = new Map<string, Message>();
+            sbMessages.forEach((m) => msgMap.set(m.id, m));
+            apiMessages.forEach((m) => msgMap.set(m.id, m));
+
+            let combinedMessages = Array.from(msgMap.values());
+            combinedMessages.sort((a, b) => {
+              const getTime = (m: Message) => {
+                if (m.timestamp) {
+                  const parsed = Date.parse(m.timestamp);
+                  if (!isNaN(parsed)) return parsed;
                 }
-              });
+                const match = m.id.match(/\d+/);
+                return match ? parseInt(match[0], 10) : 0;
+              };
+              return getTime(a) - getTime(b);
+            });
 
-              setIsSharedSession(true);
-              setSharedRole(res.data.role || 'editor');
-              if (res.data.config?.participants) {
-                setSharedParticipants(res.data.config.participants);
+            setSessions((prev) => {
+              const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
+              if (existingIdx !== -1) {
+                const updated = [...prev];
+                updated[existingIdx] = {
+                  ...updated[existingIdx],
+                  title: sessionTitle,
+                  messages: combinedMessages.length > 0 ? combinedMessages : updated[existingIdx].messages,
+                  isShared: true
+                };
+                return updated;
+              } else {
+                const newSession = {
+                  id: joinedChatId,
+                  title: sessionTitle,
+                  createdAt: new Date().toISOString(),
+                  updatedAt: new Date().toISOString(),
+                  messages: combinedMessages,
+                  isPinned: false,
+                  mode: "general" as const,
+                  userEmail: effectiveEmail,
+                  isShared: true
+                };
+                return [newSession, ...prev];
               }
+            });
+
+            setIsSharedSession(true);
+            if (res.data && res.data.role) {
+              setSharedRole(res.data.role);
+            }
+            if (res.data && res.data.config?.participants) {
+              setSharedParticipants(res.data.config.participants);
             }
           } catch (err) {
             console.error("[Nexa App] Error loading joined session details:", err);

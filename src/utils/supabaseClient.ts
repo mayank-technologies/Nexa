@@ -243,7 +243,6 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
     const payload: any = {
       id: message.id,
       chat_id: chatId,
-      conversation_id: chatId,
       role: message.role,
       content: message.content || "",
       timestamp: message.timestamp || new Date().toISOString(),
@@ -350,34 +349,7 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
           return true;
         }
 
-        if (fallbackResponse.error && (fallbackResponse.error.code === "42703" || fallbackResponse.error.message?.includes("column"))) {
-          console.warn("🔄 [Nexa Supabase DEBUG] Retrying with 'conversation_id' column instead of 'chat_id'...");
-          const convPayload: any = {
-            id: message.id,
-            conversation_id: chatId,
-            role: message.role,
-            content: message.content || "",
-            timestamp: message.timestamp || new Date().toISOString()
-          };
-          if (userId) convPayload.user_id = userId;
-
-          const convResponse = await supabase
-            .from("messages")
-            .upsert(convPayload, { onConflict: "id" })
-            .select();
-
-          console.log("[Nexa Supabase DEBUG] Conversation Column Fallback Data:", convResponse.data);
-          console.log("[Nexa Supabase DEBUG] Conversation Column Fallback Error:", convResponse.error);
-
-          if (!convResponse.error && convResponse.data && convResponse.data.length > 0) {
-            console.log("✅ [Nexa Supabase SUCCESS] Fallback message with conversation_id inserted successfully!");
-            console.log("==================================================");
-            return true;
-          }
-          finalError = convResponse.error || finalError;
-        } else {
-          finalError = fallbackResponse.error || finalError;
-        }
+        finalError = fallbackResponse.error || finalError;
       }
 
       console.error("❌ [Nexa Supabase FINAL ERROR] Unable to insert message into Supabase 'messages' table.");
@@ -737,40 +709,12 @@ export async function fetchAllChatsWithMessagesFromSupabase(userEmail: string, u
  */
 export async function fetchMessagesFromSupabase(chatId: string): Promise<Message[]> {
   try {
-    console.log("[Nexa Supabase] Fetching messages for chat/conversation:", chatId);
-    let { data, error } = await supabase
+    console.log("[Nexa Supabase] Fetching messages for chat:", chatId);
+    const { data, error } = await supabase
       .from("messages")
       .select("*")
-      .or(`chat_id.eq.${chatId},conversation_id.eq.${chatId}`)
+      .eq("chat_id", chatId)
       .order("timestamp", { ascending: true });
-
-    if (error) {
-      // Fallback 1: try chat_id filter directly
-      let { data: chatData, error: chatError } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("chat_id", chatId)
-        .order("timestamp", { ascending: true });
-
-      if (!chatError && chatData) {
-        data = chatData;
-        error = null;
-      } else {
-        // Fallback 2: try conversation_id filter directly
-        let { data: convData, error: convError } = await supabase
-          .from("messages")
-          .select("*")
-          .eq("conversation_id", chatId)
-          .order("timestamp", { ascending: true });
-
-        if (!convError && convData) {
-          data = convData;
-          error = null;
-        } else {
-          error = chatError || convError || error;
-        }
-      }
-    }
 
     if (error) {
       if (isMissingTableError(error)) {

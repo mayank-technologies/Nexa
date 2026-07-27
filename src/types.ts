@@ -102,6 +102,8 @@ export interface UserProfile {
   fullName: string;
   isGuest: boolean;
   avatarUrl?: string;
+  isPremium?: boolean;
+  plan?: string;
   preferences?: {
     primaryLanguage: string;
     rememberPersonalization: boolean;

@@ -20,14 +20,17 @@ import {
   ExternalLink
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { ChatSession } from "../types";
+import { ChatSession, UserProfile } from "../types";
 import { playUiSound } from "../utils/sounds";
+import { isPremiumUser } from "../utils/premium";
 
 interface ConversationHeaderMenuProps {
   activeSession: ChatSession;
   isSharedSession: boolean;
   sharedRole: "owner" | "editor" | "viewer" | null;
   sharedParticipants: Array<{ email: string; name: string; role: string; isTyping?: boolean }>;
+  isPremium?: boolean;
+  user?: UserProfile;
   onPinToggle: (id: string) => void;
   onOpenShare: (id: string) => void;
   onArchiveToggle: (id: string) => void;
@@ -42,6 +45,8 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
   isSharedSession,
   sharedRole,
   sharedParticipants,
+  isPremium,
+  user,
   onPinToggle,
   onOpenShare,
   onArchiveToggle,
@@ -342,7 +347,9 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
   const isFavorite = (activeSession as any).isFavorite || false;
   const isArchived = (activeSession as any).isArchived || false;
 
-  const menuItems = [
+  const userIsPremium = isPremium !== undefined ? isPremium : isPremiumUser(user);
+
+  const rawMenuItems = [
     {
       label: isPinned ? "Unpin Chat" : "Pin Chat",
       icon: Pin,
@@ -394,6 +401,8 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
       },
     },
   ];
+
+  const menuItems = userIsPremium ? rawMenuItems : rawMenuItems.filter((item) => item.label !== "Share Chat");
 
   return (
     <div className="relative shrink-0">

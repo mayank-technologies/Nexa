@@ -227,6 +227,47 @@ const findSharedConfigAsync = async (input: string) => {
   return null;
 };
 
+async function checkServerPremium(req: any, body: any): Promise<boolean> {
+  const premiumHeader = req.headers ? (req.headers["x-nexa-premium"] || req.headers["x-is-premium"] || req.headers["x-user-plan"]) : undefined;
+  if (premiumHeader === "true" || premiumHeader === "premium" || premiumHeader === "Premium") {
+    return true;
+  }
+
+  if (body?.isPremium === true || body?.isPremium === "true" || body?.plan === "premium" || body?.plan === "Premium") {
+    return true;
+  }
+  if (req.query?.isPremium === "true" || req.query?.plan === "premium" || req.query?.plan === "Premium") {
+    return true;
+  }
+
+  const email = body?.email || body?.ownerEmail || (req.query ? req.query.email : undefined);
+  if (email && typeof email === "string" && email.trim()) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const supabase = getSupabaseServer();
+    if (supabase) {
+      try {
+        const { data: wl } = await supabase
+          .from("waitlist")
+          .select("email")
+          .eq("email", normalizedEmail)
+          .maybeSingle();
+        if (wl) return true;
+
+        const { data: usr } = await supabase
+          .from("users")
+          .select("preferences")
+          .eq("email", normalizedEmail)
+          .maybeSingle();
+        if (usr?.preferences?.isPremium || usr?.preferences?.plan === "premium") return true;
+      } catch (e) {
+        console.warn("[Nexa Share Serverless] Error checking premium status in DB:", e);
+      }
+    }
+  }
+
+  return false;
+}
+
 export default async function handler(req: any, res: any) {
   res.setHeader("Content-Type", "application/json");
 
@@ -251,6 +292,17 @@ export default async function handler(req: any, res: any) {
   const body = req.body || {};
 
   console.log(`[Nexa Share Serverless] ${method} action="${action}" targetId="${targetId}" subAction="${subAction}"`);
+
+  // Protect all Share APIs with Premium access check
+  const isPremium = await checkServerPremium(req, body);
+  if (!isPremium) {
+    console.warn(`[Nexa Share Serverless] Blocked free user request to action="${action}". Returning 403 Forbidden.`);
+    return res.status(403).json({
+      success: false,
+      error: "Premium subscription required.",
+      message: "Premium subscription required.",
+    });
+  }
 
   try {
     // 1. CREATE or ENABLE sharing

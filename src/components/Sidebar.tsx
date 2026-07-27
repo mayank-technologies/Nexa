@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence, Reorder } from "motion/react";
 import { ChatSession, UserProfile, SearchHistoryItem } from "../types";
+import { isPremiumUser } from "../utils/premium";
 import { Logo } from "./Logo";
 import { copyToClipboard, safeStorage } from "../utils/storage";
 
@@ -723,7 +724,7 @@ export function Sidebar({
           </AnimatePresence>
         )}
 
-        {!isCollapsed && onOpenJoinCollaboration && (
+        {!isCollapsed && onOpenJoinCollaboration && isPremiumUser(user) && (
           <button
             onClick={onOpenJoinCollaboration}
             className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#C96A3D]/10 hover:bg-[#C96A3D]/20 text-[#C96A3D] rounded-xl border border-[#C96A3D]/20 text-xs font-black transition-all active:scale-98 cursor-pointer shadow-3xs"
@@ -1362,17 +1363,19 @@ export function Sidebar({
                 <span>Rename Chat</span>
               </button>
 
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleShareSession(activeMenu.session);
-                  setActiveMenu(null);
-                }}
-                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>Share Chat</span>
-              </button>
+              {isPremiumUser(user) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleShareSession(activeMenu.session);
+                    setActiveMenu(null);
+                  }}
+                  className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share Chat</span>
+                </button>
+              )}
 
               <button
                 onClick={(e) => {

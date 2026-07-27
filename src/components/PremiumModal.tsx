@@ -42,11 +42,13 @@ interface PremiumModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: UserProfile;
-  source: "header" | "sidebar" | "unknown";
+  source: "header" | "sidebar" | "share" | "unknown" | string;
   onOpenAuth?: () => void;
+  featureContext?: "share" | "general" | string;
 }
 
-export function PremiumModal({ isOpen, onClose, user, source, onOpenAuth }: PremiumModalProps) {
+export function PremiumModal({ isOpen, onClose, user, source, onOpenAuth, featureContext }: PremiumModalProps) {
+  const isShareContext = source === "share" || featureContext === "share";
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [waitlistStatus, setWaitlistStatus] = useState<"idle" | "joined" | "already_registered" | "error" | "left_success">("idle");
@@ -272,10 +274,14 @@ export function PremiumModal({ isOpen, onClose, user, source, onOpenAuth }: Prem
       if (syncResult.alreadyExists) {
         setWaitlistStatus("already_registered");
         safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+        safeStorage.setItem("nexa_is_premium", "true");
+        safeStorage.setItem("nexa_user_plan", "premium");
         playUiSound("success");
       } else {
         setWaitlistStatus("joined");
         safeStorage.setItem("nexa_premium_waitlist_joined", "true");
+        safeStorage.setItem("nexa_is_premium", "true");
+        safeStorage.setItem("nexa_user_plan", "premium");
         playUiSound("waitlist_joined");
 
         // Send confirmation email via server in background to keep UI ultra-snappy
@@ -415,21 +421,27 @@ export function PremiumModal({ isOpen, onClose, user, source, onOpenAuth }: Prem
           <div className="text-center max-w-2xl mx-auto mb-10 mt-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#C96A3D]/10 dark:bg-[#C96A3D]/15 border border-[#C96A3D]/20 dark:border-[#C96A3D]/30 rounded-full mb-4 animate-pulse">
               <span className="w-2 h-2 rounded-full bg-[#C96A3D]" />
-              <span className="text-[10px] font-bold text-[#C96A3D] uppercase tracking-widest">Coming Soon</span>
+              <span className="text-[10px] font-bold text-[#C96A3D] uppercase tracking-widest">
+                {isShareContext ? "Premium Exclusive" : "Coming Soon"}
+              </span>
             </div>
 
-            <h1 id="premium-title" className="text-4xl sm:text-5xl font-black tracking-tight text-slate-900 dark:text-white flex items-center justify-center gap-3">
+            <h1 id="premium-title" className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 dark:text-white flex items-center justify-center gap-3">
               <span className="bg-gradient-to-r from-[#C96A3D] via-amber-500 to-orange-500 bg-clip-text text-transparent">
-                🚀 Nexa Premium
+                {isShareContext ? "Share Chat is a Premium Feature" : "🚀 Nexa Premium"}
               </span>
             </h1>
 
-            <p className="text-lg sm:text-xl font-bold text-slate-700 dark:text-slate-200 mt-3">
-              Unlock the Next Generation of AI.
-            </p>
+            {!isShareContext && (
+              <p className="text-lg sm:text-xl font-bold text-slate-700 dark:text-slate-200 mt-3">
+                Unlock the Next Generation of AI.
+              </p>
+            )}
 
-            <p className="text-sm text-slate-500 dark:text-slate-400 mt-4 leading-relaxed font-normal">
-              Nexa Premium is currently under development. Join the waitlist today and be among the first users to experience premium AI tools, exclusive companion experiences, advanced productivity features and future innovations.
+            <p className="text-sm text-slate-600 dark:text-slate-300 mt-4 leading-relaxed font-normal">
+              {isShareContext
+                ? "Share your AI conversations using secure links or access codes, collaborate with others in real time, and manage shared conversations with Nexa Premium."
+                : "Nexa Premium is currently under development. Join the waitlist today and be among the first users to experience premium AI tools, exclusive companion experiences, advanced productivity features and future innovations."}
             </p>
           </div>
 
@@ -719,14 +731,30 @@ export function PremiumModal({ isOpen, onClose, user, source, onOpenAuth }: Prem
                       </p>
                     )}
 
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="w-full flex justify-center items-center gap-2 bg-[#C96A3D] hover:bg-[#b0582d] text-white font-bold py-2.5 rounded-xl transition-all text-xs uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-sm active:scale-98"
-                    >
-                      {isSubmitting ? "Securing Spot..." : "Join Waitlist"}
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
+                    <div className="pt-2 flex flex-col gap-2">
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="w-full flex justify-center items-center gap-2 bg-[#C96A3D] hover:bg-[#b0582d] text-white font-bold py-2.5 rounded-xl transition-all text-xs uppercase tracking-wider disabled:opacity-50 cursor-pointer shadow-sm active:scale-98"
+                      >
+                        {isSubmitting
+                          ? "Securing Spot..."
+                          : isShareContext
+                          ? "Upgrade to Premium"
+                          : "Join Waitlist"}
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+
+                      {isShareContext && (
+                        <button
+                          type="button"
+                          onClick={onClose}
+                          className="w-full py-2.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white font-semibold text-xs transition-colors cursor-pointer text-center"
+                        >
+                          Maybe Later
+                        </button>
+                      )}
+                    </div>
                   </form>
                 </motion.div>
               )}

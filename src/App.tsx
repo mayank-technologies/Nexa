@@ -78,6 +78,7 @@ import { ArchiveView } from "./components/ArchiveView";
 import { ConversationHeaderMenu } from "./components/ConversationHeaderMenu";
 import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
 import { safeStorage, copyToClipboard } from "./utils/storage";
+import { isPremiumUser } from "./utils/premium";
 import { soundManager, playUiSound } from "./utils/sounds";
 import { diagnoseSharedSessionFetch } from "./utils/sharedDiagnostic";
 
@@ -232,7 +233,8 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [showPremium, setShowPremium] = useState(false);
-  const [premiumSource, setPremiumSource] = useState<"header" | "sidebar" | "unknown">("unknown");
+  const [premiumSource, setPremiumSource] = useState<"header" | "sidebar" | "share" | "unknown" | string>("unknown");
+  const [premiumFeatureContext, setPremiumFeatureContext] = useState<"share" | "general" | string>("general");
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
@@ -673,6 +675,19 @@ export default function App() {
       if (extractedTokenOrCode) {
         const clean = extractedTokenOrCode.trim();
         console.log("[Nexa Share Client] Share/code detected from URL:", clean);
+
+        // Free users cannot join shared conversations
+        if (!isPremiumUser(user)) {
+          console.log("[Nexa Share Client] Blocked free user URL share join. Triggering Premium Upgrade Modal.");
+          setPremiumSource("share");
+          setPremiumFeatureContext("share");
+          setShowPremium(true);
+          if (window.location.hash) {
+            history.replaceState(null, "", window.location.pathname + window.location.search);
+          }
+          return;
+        }
+
         setJoinTokenInput(clean);
         isJoiningSharedRef.current = true;
 
@@ -821,6 +836,17 @@ export default function App() {
 
   // Real-time states
   const [isSharedSession, setIsSharedSession] = useState(false);
+
+  // Failsafe enforcement: Block non-premium users from opening share modals
+  useEffect(() => {
+    if ((showShareModal || showJoinModal) && !isPremiumUser(user)) {
+      setShowShareModal(false);
+      setShowJoinModal(false);
+      setPremiumSource("share");
+      setPremiumFeatureContext("share");
+      setShowPremium(true);
+    }
+  }, [showShareModal, showJoinModal, user]);
   const [syncStatus, setSyncStatus] = useState<"Connected" | "Syncing..." | "Reconnecting">("Connected");
   const [sharedRole, setSharedRole] = useState<'owner' | 'editor' | 'viewer' | null>(null);
   const [sharedParticipants, setSharedParticipants] = useState<any[]>([]);
@@ -2699,6 +2725,12 @@ export default function App() {
   // Message Quick Actions (Bookmark, share, translate, export)
   const handleMessageAction = (action: string, msgId: string) => {
     if (action === "share") {
+      if (!isPremiumUser(user)) {
+        setPremiumSource("share");
+        setPremiumFeatureContext("share");
+        setShowPremium(true);
+        return;
+      }
       copyToClipboard(`${window.location.origin}/share/thread/${activeSessionId}#${msgId}`);
       alert("Shareable thread link copied to clipboard successfully!");
     } else if (action === "bookmark") {
@@ -3658,11 +3690,22 @@ export default function App() {
             onSelectArchive={() => setCurrentView("archive")}
             isArchiveActive={currentView === "archive"}
             onOpenShare={(id) => {
-              console.log("[Nexa App] Sidebar onOpenShare triggered with sessionId:", id, "current activeSessionId:", activeSessionId);
+              if (!isPremiumUser(user)) {
+                setPremiumSource("share");
+                setPremiumFeatureContext("share");
+                setShowPremium(true);
+                return;
+              }
               setActiveSessionId(id);
               setShowShareModal(true);
             }}
             onOpenJoinCollaboration={() => {
+              if (!isPremiumUser(user)) {
+                setPremiumSource("share");
+                setPremiumFeatureContext("share");
+                setShowPremium(true);
+                return;
+              }
               setShowJoinModal(true);
             }}
             onReRunQuery={(query) => {
@@ -3734,11 +3777,24 @@ export default function App() {
                   }}
                   isArchiveActive={currentView === "archive"}
                   onOpenShare={(id) => {
-                    console.log("[Nexa App] Mobile Sidebar onOpenShare triggered with sessionId:", id, "current activeSessionId:", activeSessionId);
+                    if (!isPremiumUser(user)) {
+                      setPremiumSource("share");
+                      setPremiumFeatureContext("share");
+                      setShowPremium(true);
+                      setIsMobileSidebarOpen(false);
+                      return;
+                    }
                     setActiveSessionId(id);
                     setShowShareModal(true);
                   }}
                   onOpenJoinCollaboration={() => {
+                    if (!isPremiumUser(user)) {
+                      setPremiumSource("share");
+                      setPremiumFeatureContext("share");
+                      setShowPremium(true);
+                      setIsMobileSidebarOpen(false);
+                      return;
+                    }
                     setShowJoinModal(true);
                   }}
                   onReRunQuery={(query) => {
@@ -3910,14 +3966,35 @@ export default function App() {
                       )}
                     </button>
 
+                    {isPremiumUser(user) && (
+                      <button
+                        onClick={() => {
+                          setActiveSessionId(activeSession.id);
+                          setShowShareModal(true);
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-white/40 dark:bg-slate-900/30 hover:border-[#C96A3D] dark:hover:border-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900/80 text-[10px] font-black text-slate-600 dark:text-slate-300 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] cursor-pointer transition-all active:scale-95 shadow-2xs"
+                        title="Share Chat"
+                      >
+                        <Share2 className="w-3.5 h-3.5 text-[#C96A3D] shrink-0" />
+                        <span>Share</span>
+                      </button>
+                    )}
+
                     <ConversationHeaderMenu
                       activeSession={activeSession}
                       isSharedSession={isSharedSession}
                       sharedRole={sharedRole}
                       sharedParticipants={sharedParticipants}
+                      isPremium={isPremiumUser(user)}
+                      user={user}
                       onPinToggle={handlePinSession}
                       onOpenShare={(id) => {
-                        console.log("[Nexa App] ConversationHeaderMenu onOpenShare triggered with sessionId:", id, "current activeSessionId:", activeSessionId);
+                        if (!isPremiumUser(user)) {
+                          setPremiumSource("share");
+                          setPremiumFeatureContext("share");
+                          setShowPremium(true);
+                          return;
+                        }
                         setActiveSessionId(id);
                         setShowShareModal(true);
                       }}
@@ -4524,9 +4601,13 @@ export default function App() {
       {/* Premium Waitlist Modal */}
       <PremiumModal
         isOpen={showPremium}
-        onClose={() => setShowPremium(false)}
+        onClose={() => {
+          setShowPremium(false);
+          setPremiumFeatureContext("general");
+        }}
         user={user}
         source={premiumSource}
+        featureContext={premiumFeatureContext}
         onOpenAuth={() => setShowAuth(true)}
       />
 

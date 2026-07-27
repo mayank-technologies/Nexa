@@ -1014,17 +1014,10 @@ export default function App() {
   const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
     try {
       console.log("[Nexa Client] syncMessageSummaryToSupabase triggered for chatId:", chatId, "messageId:", message?.id, "user:", user?.email, "uid:", user?.uid, "isGuest:", user?.isGuest);
-      if (!user) {
-        console.warn("[Nexa Client] Cannot sync message to Supabase: User is null");
-        return;
-      }
-      if (user.isGuest) {
-        console.warn("[Nexa Client] Cannot sync message to Supabase: User is in Guest mode");
-        return;
-      }
+      const effectiveUserId = user?.uid || "guest";
 
       console.log("[Nexa Client] Calling syncMessageToSupabase now...");
-      const result = await syncMessageToSupabase(chatId, message, user.uid);
+      const result = await syncMessageToSupabase(chatId, message, effectiveUserId);
       console.log("[Nexa Client] Finished syncMessageToSupabase call. Result:", result);
 
       // 2. Synchronize to Serverless Share DB
@@ -1034,7 +1027,7 @@ export default function App() {
         body: JSON.stringify({
           chatId,
           messages: [message],
-          ownerEmail: user.email || "guest@nexa.ai"
+          ownerEmail: user?.email || "guest@nexa.ai"
         })
       }).catch((e) => console.warn("[Nexa Client] API share sync-messages failed non-blockingly:", e));
     } catch (e) {

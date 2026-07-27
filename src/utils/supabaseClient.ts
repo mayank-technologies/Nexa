@@ -255,10 +255,6 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
       reaction: message.reaction || null
     };
 
-    if (userId) {
-      payload.user_id = userId;
-    }
-
     console.log("[Nexa Supabase DEBUG] 📦 EXACT PAYLOAD BEING SENT TO SUPABASE:");
     console.log(JSON.stringify(payload, null, 2));
 
@@ -331,7 +327,6 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
           content: message.content || "",
           timestamp: message.timestamp || new Date().toISOString()
         };
-        if (userId) basicPayload.user_id = userId;
 
         console.log("[Nexa Supabase DEBUG] Fallback Basic Payload:", JSON.stringify(basicPayload, null, 2));
 

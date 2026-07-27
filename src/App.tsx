@@ -674,6 +674,7 @@ export default function App() {
         const clean = extractedTokenOrCode.trim();
         console.log("[Nexa Share Client] Share/code detected from URL:", clean);
         setJoinTokenInput(clean);
+        isJoiningSharedRef.current = true;
 
         // Attempt automatic join via API
         try {
@@ -692,6 +693,9 @@ export default function App() {
           if (data && data.success && data.chatId) {
             console.log("[Nexa Share Client] Auto-joined conversation successfully:", data.chatId);
             const joinedChatId = data.chatId;
+
+            console.log("[Join Debug] Share Code received:", clean);
+            console.log("[Join Debug] activeConversationId before join:", activeSessionIdRef.current, "state:", activeSessionId);
 
             // Trigger diagnostic log for verification
             diagnoseSharedSessionFetch(clean, emailToUse, sessionsRef.current, joinedChatId);
@@ -725,9 +729,12 @@ export default function App() {
               return getTime(a) - getTime(b);
             });
 
+            console.log("[Join Debug] Share Code validation result: SUCCESS. Shared Conversation ID found:", joinedChatId);
+            console.log("[Join Debug] Messages fetched count:", combinedMessages.length);
+
+            let updatedList: ChatSession[] = [];
             setSessions((prev) => {
               const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
-              let updatedList: ChatSession[];
               if (existingIdx !== -1) {
                 updatedList = [...prev];
                 updatedList[existingIdx] = {
@@ -754,6 +761,21 @@ export default function App() {
               return updatedList;
             });
 
+            // Synchronously persist joined session to safeStorage so Guest/loadChats background tasks do not wipe it
+            const uidKey = user?.isGuest ? "guest@nexa.ai" : (user?.uid || "guest@nexa.ai");
+            try {
+              if (updatedList.length > 0) {
+                safeStorage.setItem(`nexa_sessions_${uidKey}`, JSON.stringify(updatedList));
+                safeStorage.setItem("nexa_sessions", JSON.stringify(updatedList));
+                safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedList));
+              }
+              safeStorage.setItem(`nexa_active_session_id_${uidKey}`, joinedChatId);
+              safeStorage.setItem("nexa_active_session_id", joinedChatId);
+              safeStorage.setItem("nexa_active_session_id_guest@nexa.ai", joinedChatId);
+            } catch (e) {
+              console.warn("[Join Debug] safeStorage synchronous persist error:", e);
+            }
+
             setIsSharedSession(true);
             setSharedRole(data.role || "editor");
             if (data.config?.participants) {
@@ -763,8 +785,9 @@ export default function App() {
             activeSessionIdRef.current = joinedChatId;
             setActiveSessionId(joinedChatId);
             setCurrentView("chat");
-            const uidKey = user?.isGuest ? "guest@nexa.ai" : (user?.uid || "guest@nexa.ai");
-            safeStorage.setItem(`nexa_active_session_id_${uidKey}`, joinedChatId);
+
+            console.log("[Join Debug] activeConversationId after join:", joinedChatId);
+            console.log("[Join Debug] selectedConversationId:", joinedChatId, "Current route/view:", "chat");
             playUiSound("success");
           } else {
             setShowJoinModal(true);
@@ -772,6 +795,10 @@ export default function App() {
         } catch (e) {
           console.error("[Nexa Share Client] Auto-join exception:", e);
           setShowJoinModal(true);
+        } finally {
+          setTimeout(() => {
+            isJoiningSharedRef.current = false;
+          }, 500);
         }
       }
     };
@@ -921,6 +948,7 @@ export default function App() {
 
   const activeSessionIdRef = useRef(activeSessionId);
   const sessionsRef = useRef(sessions);
+  const isJoiningSharedRef = useRef<boolean>(false);
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -1086,6 +1114,10 @@ export default function App() {
       }
 
       const loadChats = async () => {
+        if (isJoiningSharedRef.current) {
+          console.log("[Nexa Client] Skip loadChats because isJoiningSharedRef lock is active.");
+          return;
+        }
         if (isLoadingRef.current || isGeneratingRef.current) {
           console.log("[Nexa Client] Skip loadChats during active stream (start).");
           return;
@@ -1104,8 +1136,8 @@ export default function App() {
             console.warn("[Nexa Client] Could not fetch user shared sessions:", e);
           }
 
-          if (isLoadingRef.current || isGeneratingRef.current) {
-            console.log("[Nexa Client] Skip loadChats during active stream (post-fetch).");
+          if (isJoiningSharedRef.current || isLoadingRef.current || isGeneratingRef.current) {
+            console.log("[Nexa Client] Skip loadChats during active stream or join lock (post-fetch).");
             return;
           }
 
@@ -1118,8 +1150,8 @@ export default function App() {
           });
 
           if (allSummaries.length === 0) {
-            if (sessionsRef.current.length > 0 || activeSessionIdRef.current) {
-              console.log("[Nexa Client] summaries is empty, but local sessions or active session exist. Skipping seeding default chat.");
+            if (isJoiningSharedRef.current || sessionsRef.current.length > 0 || activeSessionIdRef.current) {
+              console.log("[Nexa Client] summaries is empty, but joining or local sessions or active session exist. Skipping seeding default chat.");
               return;
             }
             const localCheck = safeStorage.getItem(`nexa_sessions_${currentUid}`);
@@ -1166,7 +1198,7 @@ export default function App() {
 
           let mergedSessionsResult: ChatSession[] = [];
           setSessions((prevSessions) => {
-            if (isLoadingRef.current || isGeneratingRef.current) {
+            if (isJoiningSharedRef.current || isLoadingRef.current || isGeneratingRef.current) {
               return prevSessions;
             }
             const merged = allSummaries.map((summary) => {
@@ -1188,7 +1220,7 @@ export default function App() {
 
           // Ensure activeSessionId remains preserved on existing sessions
           setActiveSessionId((currentId) => {
-            if (isLoadingRef.current || isGeneratingRef.current) {
+            if (isJoiningSharedRef.current || isLoadingRef.current || isGeneratingRef.current) {
               return currentId;
             }
             const targetId = currentId || activeSessionIdRef.current;
@@ -1249,8 +1281,17 @@ export default function App() {
         }
       }
 
-      // If no guest sessions, seed a default one
-      if (loadedSessions.length === 0) {
+      // Preserve any in-memory joined sessions in sessionsRef.current
+      if (sessionsRef.current.length > 0) {
+        sessionsRef.current.forEach((s) => {
+          if (!loadedSessions.some((ls) => ls.id === s.id)) {
+            loadedSessions.unshift(s);
+          }
+        });
+      }
+
+      // If no guest sessions, seed a default one (unless joining a shared conversation)
+      if (loadedSessions.length === 0 && !activeSessionIdRef.current && !isJoiningSharedRef.current) {
         const newId = `session-${Date.now()}`;
         loadedSessions = [{
           id: newId,
@@ -1264,6 +1305,7 @@ export default function App() {
       }
 
       setSessions(loadedSessions);
+      sessionsRef.current = loadedSessions;
 
       // Load guest deleted sessions from local storage
       let loadedDeleted: ChatSession[] = [];
@@ -1277,12 +1319,16 @@ export default function App() {
       }
       setDeletedSessions(loadedDeleted);
 
-      // Restore activeSessionId for Guest
-      const cachedActiveId = safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
-      if (cachedActiveId && loadedSessions.some((s) => s.id === cachedActiveId)) {
-        setActiveSessionId(cachedActiveId);
-      } else {
-        setActiveSessionId(loadedSessions[0].id);
+      // Restore activeSessionId for Guest, preferring activeSessionIdRef.current if set
+      if (!isJoiningSharedRef.current) {
+        const cachedActiveId = activeSessionIdRef.current || safeStorage.getItem("nexa_active_session_id_guest@nexa.ai") || safeStorage.getItem("nexa_active_session_id");
+        if (cachedActiveId && loadedSessions.some((s) => s.id === cachedActiveId)) {
+          setActiveSessionId(cachedActiveId);
+          activeSessionIdRef.current = cachedActiveId;
+        } else if (loadedSessions.length > 0 && !activeSessionIdRef.current) {
+          setActiveSessionId(loadedSessions[0].id);
+          activeSessionIdRef.current = loadedSessions[0].id;
+        }
       }
     }
 
@@ -1651,15 +1697,21 @@ export default function App() {
 
   // Auto-repair activeSessionId if out of sync with sessions list
   useEffect(() => {
+    if (isJoiningSharedRef.current) return;
     if (sessions.length > 0 && (!activeSessionId || !sessions.some((s) => s.id === activeSessionId))) {
       const activeToUse = activeSessionId || activeSessionIdRef.current;
-      if (activeToUse && sessionsRef.current.some((s) => s.id === activeToUse)) {
-        if (!activeSessionId) {
-          setActiveSessionId(activeToUse);
+      if (activeToUse) {
+        const inState = sessions.some((s) => s.id === activeToUse);
+        const inRef = sessionsRef.current.some((s) => s.id === activeToUse);
+        if (inState || inRef) {
+          if (!activeSessionId && activeToUse) {
+            setActiveSessionId(activeToUse);
+            activeSessionIdRef.current = activeToUse;
+          }
+          return;
         }
-        return;
       }
-      console.log("[Nexa Fix] Repairing activeSessionId to match existing session:", sessions[0].id);
+      console.log(`[AutoRepair Debug] Repairing activeSessionId from "${activeSessionId}" (ref: "${activeSessionIdRef.current}") to existing session "${sessions[0].id}" (src/App.tsx, line 1687)`);
       setActiveSessionId(sessions[0].id);
       activeSessionIdRef.current = sessions[0].id;
     }
@@ -1846,6 +1898,11 @@ export default function App() {
 
   // Chat Session management controls
   const handleNewSession = (mode: ChatSession["mode"] = "general") => {
+    if (isJoiningSharedRef.current) {
+      console.log("[Nexa Lifecycle] handleNewSession blocked while joining shared conversation.");
+      return;
+    }
+    console.log("[NewChat Debug] handleNewSession called at src/App.tsx line 1887 with mode:", mode, "Stack:", new Error().stack);
     console.log("[Nexa Debug] [createConversation] handleNewSession called with mode:", mode);
     
     // Check if current active session is already empty
@@ -4685,6 +4742,10 @@ export default function App() {
         initialToken={joinTokenInput}
         onJoinSuccess={async (joinedChatId) => {
           console.log("[Nexa App] Joined shared session via modal. chatId:", joinedChatId);
+          isJoiningSharedRef.current = true;
+          
+          console.log("[Join Debug] [JoinModal] Joined Chat ID:", joinedChatId);
+          console.log("[Join Debug] [JoinModal] activeConversationId before join:", activeSessionIdRef.current, "state:", activeSessionId);
           
           try {
             const effectiveEmail = user?.email || "guest@nexa.ai";
@@ -4719,9 +4780,11 @@ export default function App() {
               return getTime(a) - getTime(b);
             });
 
+            console.log("[Join Debug] [JoinModal] Messages fetched count:", combinedMessages.length);
+
+            let updatedList: ChatSession[] = [];
             setSessions((prev) => {
               const existingIdx = prev.findIndex((s) => s.id === joinedChatId);
-              let updatedList: ChatSession[];
               if (existingIdx !== -1) {
                 updatedList = [...prev];
                 updatedList[existingIdx] = {
@@ -4748,6 +4811,21 @@ export default function App() {
               return updatedList;
             });
 
+            // Synchronously persist joined session to safeStorage so Guest/loadChats background tasks do not wipe it
+            const uidKey = user?.isGuest ? "guest@nexa.ai" : (user?.uid || "guest@nexa.ai");
+            try {
+              if (updatedList.length > 0) {
+                safeStorage.setItem(`nexa_sessions_${uidKey}`, JSON.stringify(updatedList));
+                safeStorage.setItem("nexa_sessions", JSON.stringify(updatedList));
+                safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedList));
+              }
+              safeStorage.setItem(`nexa_active_session_id_${uidKey}`, joinedChatId);
+              safeStorage.setItem("nexa_active_session_id", joinedChatId);
+              safeStorage.setItem("nexa_active_session_id_guest@nexa.ai", joinedChatId);
+            } catch (e) {
+              console.warn("[Join Debug] safeStorage synchronous persist error in JoinModal:", e);
+            }
+
             setIsSharedSession(true);
             if (res.data && res.data.role) {
               setSharedRole(res.data.role);
@@ -4757,13 +4835,18 @@ export default function App() {
             }
           } catch (err) {
             console.error("[Nexa App] Error loading joined session details:", err);
+          } finally {
+            setTimeout(() => {
+              isJoiningSharedRef.current = false;
+            }, 500);
           }
 
           activeSessionIdRef.current = joinedChatId;
           setActiveSessionId(joinedChatId);
           setCurrentView("chat");
-          const uidKey = user?.isGuest ? "guest@nexa.ai" : (user?.uid || "guest@nexa.ai");
-          safeStorage.setItem(`nexa_active_session_id_${uidKey}`, joinedChatId);
+
+          console.log("[Join Debug] [JoinModal] activeConversationId after join:", joinedChatId);
+          console.log("[Join Debug] [JoinModal] selectedConversationId:", joinedChatId, "Current route/view:", "chat");
           playUiSound("success");
         }}
       />

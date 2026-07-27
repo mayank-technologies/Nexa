@@ -1013,9 +1013,19 @@ export default function App() {
 
   const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
     try {
-      // 1. Synchronize directly to Supabase
-      await syncMessageToSupabase(chatId, message);
-      console.log("[Nexa Client] Synced message to Supabase:", message.id);
+      console.log("[Nexa Client] syncMessageSummaryToSupabase triggered for chatId:", chatId, "messageId:", message?.id, "user:", user?.email, "uid:", user?.uid, "isGuest:", user?.isGuest);
+      if (!user) {
+        console.warn("[Nexa Client] Cannot sync message to Supabase: User is null");
+        return;
+      }
+      if (user.isGuest) {
+        console.warn("[Nexa Client] Cannot sync message to Supabase: User is in Guest mode");
+        return;
+      }
+
+      console.log("[Nexa Client] Calling syncMessageToSupabase now...");
+      const result = await syncMessageToSupabase(chatId, message, user.uid);
+      console.log("[Nexa Client] Finished syncMessageToSupabase call. Result:", result);
 
       // 2. Synchronize to Serverless Share DB
       safeFetchJson("/api/share/sync-messages", {
@@ -1024,11 +1034,11 @@ export default function App() {
         body: JSON.stringify({
           chatId,
           messages: [message],
-          ownerEmail: user?.email || "guest@nexa.ai"
+          ownerEmail: user.email || "guest@nexa.ai"
         })
       }).catch((e) => console.warn("[Nexa Client] API share sync-messages failed non-blockingly:", e));
     } catch (e) {
-      console.error("Failed to sync message to Supabase:", e);
+      console.error("[Nexa Client] Exception in syncMessageSummaryToSupabase:", e);
     }
   };
 
@@ -1191,7 +1201,7 @@ export default function App() {
                     await syncChatToSupabase(s, user.email || "", user.uid);
                     if (s.messages && s.messages.length > 0) {
                       for (const m of s.messages) {
-                        await syncMessageToSupabase(s.id, m);
+                        await syncMessageToSupabase(s.id, m, user.uid);
                       }
                     }
                   }
@@ -2389,7 +2399,7 @@ export default function App() {
     // Duplicate messages in db too
     original.messages.forEach((msg) => {
       if (user && !user.isGuest && user.uid) {
-        syncMessageToSupabase(duplicateId, msg);
+        syncMessageToSupabase(duplicateId, msg, user.uid);
       }
     });
 

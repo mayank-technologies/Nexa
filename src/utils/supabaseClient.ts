@@ -151,13 +151,17 @@ export async function syncUserProfileToSupabase(profile: UserProfile): Promise<b
 /**
  * Sync a chat session metadata to Supabase.
  */
-export async function syncChatToSupabase(chat: ChatSession, userEmail?: string): Promise<boolean> {
+export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, userId?: string): Promise<boolean> {
   if (!chat || !chat.id) return false;
 
   try {
-    console.log("[Nexa Supabase] Syncing chat session metadata:", chat.id);
+    const effectiveEmail = (userEmail || chat.userEmail || "").toLowerCase().trim() || null;
+    const effectiveUserId = userId || (chat as any).userId || null;
+
+    console.log("[Nexa Supabase] Syncing chat session metadata:", chat.id, "User ID:", effectiveUserId, "Email:", effectiveEmail);
     const payload: any = {
       id: chat.id,
+      user_id: effectiveUserId,
       title: chat.title || "Untitled Session",
       created_at: chat.createdAt || new Date().toISOString(),
       updated_at: chat.updatedAt || new Date().toISOString(),
@@ -165,7 +169,7 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string):
       pin_order: chat.pinOrder || null,
       mode: chat.mode || "general",
       selected_engine_id: chat.selectedEngineId || null,
-      user_email: userEmail || chat.userEmail || null
+      user_email: effectiveEmail
     };
 
     if (chat.isDeleted !== undefined) {
@@ -183,20 +187,28 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string):
       .upsert(payload, { onConflict: "id" });
 
     if (error && (error.code === "42703" || error.message?.includes("column"))) {
-      console.warn("[Nexa Supabase] Soft delete columns do not exist yet. Retrying sync without them...");
+      console.warn("[Nexa Supabase] Column missing in schema. Retrying sync without optional columns...");
       const fallbackPayload = { ...payload };
       delete fallbackPayload.is_deleted;
       delete fallbackPayload.deleted_at;
       delete fallbackPayload.auto_delete_at;
+      delete fallbackPayload.user_id;
       const { error: retryError } = await supabase
         .from("chats")
         .upsert(fallbackPayload, { onConflict: "id" });
       error = retryError;
     }
 
+    // Mirror to conversations table if present
+    try {
+      await supabase.from("conversations").upsert(payload, { onConflict: "id" });
+    } catch (e) {
+      // Ignored if table does not exist
+    }
+
     if (error) {
       if (isMissingTableError(error)) {
-        console.warn("[Nexa Supabase] 'chats' table does not exist in Supabase yet or not found in schema cache. Please execute the SQL schema.");
+        console.warn("[Nexa Supabase] 'chats' table does not exist in Supabase yet or not found in schema cache.");
       } else {
         console.error("[Nexa Supabase] Error syncing chat:", error.message);
       }
@@ -434,38 +446,48 @@ CREATE POLICY "Allow public read and write access for all" ON public.waitlist FO
 `;
 
 /**
- * Fetch all chat summaries from Supabase for a specific user email (excluding deleted chats)
+ * Fetch all chat summaries from Supabase for a specific user ID or user email (excluding deleted chats)
  */
-export async function fetchChatsFromSupabase(userEmail: string): Promise<ChatSession[]> {
+export async function fetchChatsFromSupabase(userEmail: string, userId?: string): Promise<ChatSession[]> {
   try {
-    console.log("[Nexa Supabase] Fetching active chats for:", userEmail);
-    // Attempt to exclude deleted chats using OR condition
-    let { data, error } = await supabase
-      .from("chats")
-      .select("*")
-      .eq("user_email", userEmail.toLowerCase().trim())
+    const normalizedEmail = (userEmail || "").toLowerCase().trim();
+    console.log("[Nexa Supabase] Fetching active chats for email:", normalizedEmail, "userId:", userId);
+    
+    let query = supabase.from("chats").select("*");
+
+    if (userId && normalizedEmail) {
+      query = query.or(`user_id.eq.${userId},user_email.ilike.${normalizedEmail},user_email.eq.${normalizedEmail}`);
+    } else if (userId) {
+      query = query.eq("user_id", userId);
+    } else if (normalizedEmail) {
+      query = query.or(`user_email.ilike.${normalizedEmail},user_email.eq.${normalizedEmail}`);
+    } else {
+      return [];
+    }
+
+    let { data, error } = await query
       .or("is_deleted.eq.false,is_deleted.is.null")
       .order("updated_at", { ascending: false });
 
-    // Fallback if is_deleted column does not exist yet in database schema
-    if (error && (error.code === "42703" || error.message?.includes("column"))) {
-      console.warn("[Nexa Supabase] 'is_deleted' column does not exist yet. Falling back to simple fetch.");
-      const { data: fallbackData, error: fallbackError } = await supabase
-        .from("chats")
-        .select("*")
-        .eq("user_email", userEmail.toLowerCase().trim())
-        .order("updated_at", { ascending: false });
-      data = fallbackData;
-      error = fallbackError;
-    }
-
+    // Fallback if is_deleted column or OR query filter fails
     if (error) {
-      if (isMissingTableError(error)) {
-        console.warn("[Nexa Supabase] 'chats' table does not exist or not found in schema cache. Returning empty.");
+      console.warn("[Nexa Supabase] Query with is_deleted filter failed, attempting fallback query. Error:", error.message);
+      let fallbackQuery = supabase.from("chats").select("*");
+      if (userId) {
+        fallbackQuery = fallbackQuery.eq("user_id", userId);
+      } else if (normalizedEmail) {
+        fallbackQuery = fallbackQuery.eq("user_email", normalizedEmail);
       } else {
-        console.error("[Nexa Supabase] Error fetching chats:", error.message);
+        return [];
       }
-      return [];
+      const { data: fallbackData, error: fallbackError } = await fallbackQuery.order("updated_at", { ascending: false });
+      if (fallbackError) {
+        if (!isMissingTableError(fallbackError)) {
+          console.error("[Nexa Supabase] Fallback fetch error:", fallbackError.message);
+        }
+        return [];
+      }
+      data = fallbackData;
     }
 
     return (data || []).map((row) => ({
@@ -478,10 +500,11 @@ export async function fetchChatsFromSupabase(userEmail: string): Promise<ChatSes
       mode: row.mode || "general",
       selectedEngineId: row.selected_engine_id,
       userEmail: row.user_email,
+      userId: row.user_id,
       isDeleted: row.is_deleted || false,
       deletedAt: row.deleted_at,
       autoDeleteAt: row.auto_delete_at,
-      messages: [] // loaded separately
+      messages: [] // loaded separately or via fetchAllChatsWithMessagesFromSupabase
     })) as ChatSession[];
   } catch (err) {
     console.error("[Nexa Supabase] Failed to fetch chats:", err);
@@ -490,15 +513,26 @@ export async function fetchChatsFromSupabase(userEmail: string): Promise<ChatSes
 }
 
 /**
- * Fetch all deleted chat summaries from Supabase for a specific user email
+ * Fetch all deleted chat summaries from Supabase for a specific user ID or user email
  */
-export async function fetchDeletedChatsFromSupabase(userEmail: string): Promise<ChatSession[]> {
+export async function fetchDeletedChatsFromSupabase(userEmail: string, userId?: string): Promise<ChatSession[]> {
   try {
-    console.log("[Nexa Supabase] Fetching deleted chats for:", userEmail);
-    const { data, error } = await supabase
-      .from("chats")
-      .select("*")
-      .eq("user_email", userEmail.toLowerCase().trim())
+    const normalizedEmail = (userEmail || "").toLowerCase().trim();
+    console.log("[Nexa Supabase] Fetching deleted chats for email:", normalizedEmail, "userId:", userId);
+    
+    let query = supabase.from("chats").select("*");
+
+    if (userId && normalizedEmail) {
+      query = query.or(`user_id.eq.${userId},user_email.ilike.${normalizedEmail},user_email.eq.${normalizedEmail}`);
+    } else if (userId) {
+      query = query.eq("user_id", userId);
+    } else if (normalizedEmail) {
+      query = query.or(`user_email.ilike.${normalizedEmail},user_email.eq.${normalizedEmail}`);
+    } else {
+      return [];
+    }
+
+    const { data, error } = await query
       .eq("is_deleted", true)
       .order("deleted_at", { ascending: false });
 
@@ -521,13 +555,44 @@ export async function fetchDeletedChatsFromSupabase(userEmail: string): Promise<
       mode: row.mode || "general",
       selectedEngineId: row.selected_engine_id,
       userEmail: row.user_email,
+      userId: row.user_id,
       isDeleted: row.is_deleted || false,
       deletedAt: row.deleted_at,
       autoDeleteAt: row.auto_delete_at,
-      messages: [] // loaded separately
+      messages: []
     })) as ChatSession[];
   } catch (err) {
     console.error("[Nexa Supabase] Failed to fetch deleted chats:", err);
+    return [];
+  }
+}
+
+/**
+ * Fetch all active chats AND their messages for a specific user from Supabase
+ */
+export async function fetchAllChatsWithMessagesFromSupabase(userEmail: string, userId?: string): Promise<ChatSession[]> {
+  try {
+    const chats = await fetchChatsFromSupabase(userEmail, userId);
+    if (!chats || chats.length === 0) return [];
+
+    const chatsWithMessages = await Promise.all(
+      chats.map(async (chat) => {
+        try {
+          const msgs = await fetchMessagesFromSupabase(chat.id);
+          return {
+            ...chat,
+            messages: msgs
+          };
+        } catch (err) {
+          console.error("[Nexa Supabase] Failed to load messages for chat:", chat.id, err);
+          return chat;
+        }
+      })
+    );
+
+    return chatsWithMessages;
+  } catch (err) {
+    console.error("[Nexa Supabase] Failed to fetch all chats with messages:", err);
     return [];
   }
 }

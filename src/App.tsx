@@ -76,7 +76,7 @@ import { ShareModal } from "./components/ShareModal";
 import { JoinModal } from "./components/JoinModal";
 import { ArchiveView } from "./components/ArchiveView";
 import { ConversationHeaderMenu } from "./components/ConversationHeaderMenu";
-import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
+import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchAllChatsWithMessagesFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
 import { safeStorage, copyToClipboard } from "./utils/storage";
 import { isPremiumUser } from "./utils/premium";
 import { soundManager, playUiSound } from "./utils/sounds";
@@ -1002,8 +1002,9 @@ export default function App() {
 
   const syncChatSummaryToSupabase = async (chat: ChatSession) => {
     try {
+      if (!user || user.isGuest) return;
       // Synchronize directly to Supabase
-      await syncChatToSupabase(chat, user?.email ? user.email.toLowerCase().trim() : "guest@nexa.ai");
+      await syncChatToSupabase(chat, user.email ? user.email.toLowerCase().trim() : "guest@nexa.ai", user.uid);
       console.log("[Nexa Client] Synced chat summary to Supabase:", chat.id);
     } catch (e) {
       console.error("Failed to sync chat summary to Supabase:", e);
@@ -1150,7 +1151,7 @@ export default function App() {
         }
         try {
           const userEmail = user.email || "guest@nexa.ai";
-          const summaries = await fetchChatsFromSupabase(userEmail);
+          const summaries = await fetchAllChatsWithMessagesFromSupabase(userEmail, user.uid);
           
           let sharedSummaries: ChatSession[] = [];
           try {
@@ -1185,7 +1186,15 @@ export default function App() {
               try {
                 const parsedLocal = JSON.parse(localCheck);
                 if (Array.isArray(parsedLocal) && parsedLocal.length > 0) {
-                  console.log("[Nexa Client] summaries is empty, but localStorage sessions exist. Skipping seeding default chat.");
+                  console.log("[Nexa Client] summaries is empty, but localStorage sessions exist. Syncing local sessions to Supabase.");
+                  for (const s of parsedLocal) {
+                    await syncChatToSupabase(s, user.email || "", user.uid);
+                    if (s.messages && s.messages.length > 0) {
+                      for (const m of s.messages) {
+                        await syncMessageToSupabase(s.id, m);
+                      }
+                    }
+                  }
                   return;
                 }
               } catch (e) {}
@@ -1204,7 +1213,7 @@ export default function App() {
               userEmail: user.email || "",
               messages: [],
             };
-            await syncChatToSupabase(defaultChat, user.email || "");
+            await syncChatToSupabase(defaultChat, user.email || "", user.uid);
             setSessions([defaultChat]);
             sessionsRef.current = [defaultChat];
             setActiveSessionId(defaultId);
@@ -1229,9 +1238,17 @@ export default function App() {
             }
             const merged = allSummaries.map((summary) => {
               const existing = prevSessions.find((s) => s.id === summary.id);
+              const existingMsgs = existing?.messages || [];
+              const summaryMsgs = summary.messages || [];
+
+              const msgMap = new Map<string, Message>();
+              summaryMsgs.forEach((m) => msgMap.set(m.id, m));
+              existingMsgs.forEach((m) => msgMap.set(m.id, m));
+              const combinedMsgs = Array.from(msgMap.values());
+
               return {
                 ...summary,
-                messages: existing && existing.messages && existing.messages.length > 0 ? existing.messages : summary.messages,
+                messages: combinedMsgs,
               };
             });
 
@@ -1241,6 +1258,7 @@ export default function App() {
 
             mergedSessionsResult = [...localOnly, ...merged];
             sessionsRef.current = mergedSessionsResult;
+            safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(mergedSessionsResult));
             return mergedSessionsResult;
           });
 
@@ -1277,7 +1295,7 @@ export default function App() {
         // Fetch deleted chats on load or user update
         try {
           setIsDeletedLoading(true);
-          const deleted = await fetchDeletedChatsAndMessages(user.email || "");
+          const deleted = await fetchDeletedChatsAndMessages(user.email || "", user.uid);
           setDeletedSessions(deleted);
         } catch (e) {
           console.error("[Nexa Client] Failed to load deleted chats on user change:", e);
@@ -1288,7 +1306,22 @@ export default function App() {
 
       loadChats();
       const pollInterval = setInterval(loadChats, 3500);
-      chatsUnsubscribeRef.current = () => clearInterval(pollInterval);
+
+      // Realtime listener for cross-device updates
+      const channel = supabase
+        .channel(`user-sync-${user.uid}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => {
+          loadChats();
+        })
+        .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
+          loadChats();
+        })
+        .subscribe();
+
+      chatsUnsubscribeRef.current = () => {
+        clearInterval(pollInterval);
+        supabase.removeChannel(channel);
+      };
     } else {
       // User is Guest Mode
       console.log("[Nexa Client] [LOG] Entering Guest Mode. Subscribing to cached guest sessions.");
@@ -1974,13 +2007,13 @@ export default function App() {
     setCurrentView("chat");
 
     if (user && !user.isGuest && user.email) {
-      syncChatToSupabase(newChat, user.email);
+      syncChatToSupabase(newChat, user.email, user.uid);
     }
   };
 
-  const fetchDeletedChatsAndMessages = async (email: string) => {
+  const fetchDeletedChatsAndMessages = async (email: string, userId?: string) => {
     try {
-      const deletedChats = await fetchDeletedChatsFromSupabase(email);
+      const deletedChats = await fetchDeletedChatsFromSupabase(email, userId);
       const chatsWithMessages = await Promise.all(
         deletedChats.map(async (chat) => {
           try {
@@ -2018,7 +2051,7 @@ export default function App() {
 
     if (user && !user.isGuest && user.uid) {
       try {
-        await syncChatToSupabase(updatedSession, user.email || "");
+        await syncChatToSupabase(updatedSession, user.email || "", user.uid);
         console.log("[Nexa Client] Soft deleted session in Supabase:", id);
       } catch (e) {
         console.error("Failed to soft delete session in Supabase:", e);
@@ -2048,7 +2081,7 @@ export default function App() {
       setActiveSessionId(freshId);
       setActiveMode("general");
       if (user && !user.isGuest && user.uid) {
-        await syncChatToSupabase(freshSession, user.email || "");
+        await syncChatToSupabase(freshSession, user.email || "", user.uid);
       }
     } else {
       setSessions(remaining);
@@ -2069,7 +2102,7 @@ export default function App() {
 
     if (user && !user.isGuest && user.uid) {
       try {
-        const deleted = await fetchDeletedChatsAndMessages(user.email || "");
+        const deleted = await fetchDeletedChatsAndMessages(user.email || "", user.uid);
         setDeletedSessions(deleted);
       } catch (err) {
         console.error("Error reloading deleted chats:", err);
@@ -2096,10 +2129,10 @@ export default function App() {
 
     if (user && !user.isGuest && user.uid) {
       try {
-        await syncChatToSupabase(restoredSession, user.email || "");
+        await syncChatToSupabase(restoredSession, user.email || "", user.uid);
         console.log("[Nexa Client] Restored chat session in Supabase:", id);
         
-        const activeSummaries = await fetchChatsFromSupabase(user.email || "");
+        const activeSummaries = await fetchAllChatsWithMessagesFromSupabase(user.email || "", user.uid);
         setSessions(() => {
           return activeSummaries.map((summary) => {
             if (summary.id === id && chatToRestore) {
@@ -2200,7 +2233,7 @@ export default function App() {
 
     if (user && !user.isGuest && user.uid) {
       try {
-        const deleted = await fetchDeletedChatsFromSupabase(user.email || "");
+        const deleted = await fetchDeletedChatsFromSupabase(user.email || "", user.uid);
         const expired = deleted.filter((chat) => {
           if (!chat.autoDeleteAt) return false;
           return new Date(chat.autoDeleteAt).getTime() <= now;
@@ -2210,7 +2243,7 @@ export default function App() {
           console.log(`[Nexa Client] Found ${expired.length} expired chats to auto-purge:`, expired.map(e => e.id));
           await Promise.all(expired.map((chat) => deleteChatFromSupabase(chat.id)));
           
-          const refreshedDeleted = await fetchDeletedChatsAndMessages(user.email || "");
+          const refreshedDeleted = await fetchDeletedChatsAndMessages(user.email || "", user.uid);
           setDeletedSessions(refreshedDeleted);
         }
       } catch (e) {

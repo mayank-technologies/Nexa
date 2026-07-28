@@ -1021,6 +1021,7 @@ export default function App() {
       
       const effectiveUserId = user?.uid || "guest";
 
+      console.log("BEFORE syncMessageToSupabase");
       console.log("[Nexa Client] ⚡ EXECUTING: await syncMessageToSupabase(chatId, message, effectiveUserId)");
       const result = await syncMessageToSupabase(chatId, message, effectiveUserId);
       console.log("[Nexa Client] 📥 syncMessageToSupabase COMPLETED with result:", result);

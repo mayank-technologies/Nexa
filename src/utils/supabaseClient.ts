@@ -19,6 +19,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   }
 });
 
+console.log("Supabase URL:", SUPABASE_URL);
+
 /**
  * Helper to identify whether a Supabase query error is due to missing tables or uninitialized schema cache.
  */
@@ -227,6 +229,7 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
  * Sync an individual chat message to Supabase.
  */
 export async function syncMessageToSupabase(chatId: string, message: Message, userId?: string): Promise<boolean> {
+  console.log("INSIDE syncMessageToSupabase");
   console.log("==================================================");
   console.log("[Nexa Supabase DEBUG] 🚀 syncMessageToSupabase INVOCATION STARTED");
   console.log("[Nexa Supabase DEBUG] Target Chat ID:", chatId);
@@ -259,11 +262,14 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
     console.log(JSON.stringify(payload, null, 2));
 
     console.log("[Nexa Supabase DEBUG] ⚡ EXECUTING: supabase.from('messages').upsert(payload, { onConflict: 'id' }).select()");
+    console.log("BEFORE upsert");
     
     const response = await supabase
       .from("messages")
       .upsert(payload, { onConflict: "id" })
       .select();
+
+    console.log("AFTER upsert", response.data, response.error);
 
     console.log("[Nexa Supabase DEBUG] 📥 SUPABASE QUERY RESPONSE:");
     console.log("   Status:", response.status, "Status Text:", response.statusText);

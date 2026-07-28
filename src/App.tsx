@@ -1002,23 +1002,28 @@ export default function App() {
 
   const syncChatSummaryToSupabase = async (chat: ChatSession) => {
     try {
-      if (!user || user.isGuest) return;
-      // Synchronize directly to Supabase
-      await syncChatToSupabase(chat, user.email ? user.email.toLowerCase().trim() : "guest@nexa.ai", user.uid);
-      console.log("[Nexa Client] Synced chat summary to Supabase:", chat.id);
+      const email = user?.email ? user.email.toLowerCase().trim() : "guest@nexa.ai";
+      const uid = user?.uid || "guest";
+      console.log("[Nexa Client] 📤 Syncing chat summary to Supabase for chatId:", chat.id, "email:", email);
+      await syncChatToSupabase(chat, email, uid);
+      console.log("[Nexa Client] ✅ Synced chat summary to Supabase:", chat.id);
     } catch (e) {
-      console.error("Failed to sync chat summary to Supabase:", e);
+      console.error("[Nexa Client] ❌ Failed to sync chat summary to Supabase:", e);
     }
   };
 
   const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
     try {
-      console.log("[Nexa Client] syncMessageSummaryToSupabase triggered for chatId:", chatId, "messageId:", message?.id, "user:", user?.email, "uid:", user?.uid, "isGuest:", user?.isGuest);
+      console.log("[Nexa Client] 🚀 syncMessageSummaryToSupabase TRIGGERED");
+      console.log("[Nexa Client]    Target Chat ID:", chatId);
+      console.log("[Nexa Client]    Target Message ID:", message?.id, "Role:", message?.role);
+      console.log("[Nexa Client]    User Email:", user?.email || "guest@nexa.ai", "UID:", user?.uid || "guest");
+      
       const effectiveUserId = user?.uid || "guest";
 
-      console.log("[Nexa Client] Calling syncMessageToSupabase now...");
+      console.log("[Nexa Client] ⚡ EXECUTING: await syncMessageToSupabase(chatId, message, effectiveUserId)");
       const result = await syncMessageToSupabase(chatId, message, effectiveUserId);
-      console.log("[Nexa Client] Finished syncMessageToSupabase call. Result:", result);
+      console.log("[Nexa Client] 📥 syncMessageToSupabase COMPLETED with result:", result);
 
       // 2. Synchronize to Serverless Share DB
       safeFetchJson("/api/share/sync-messages", {
@@ -1031,7 +1036,7 @@ export default function App() {
         })
       }).catch((e) => console.warn("[Nexa Client] API share sync-messages failed non-blockingly:", e));
     } catch (e) {
-      console.error("[Nexa Client] Exception in syncMessageSummaryToSupabase:", e);
+      console.error("[Nexa Client] ❌ Exception in syncMessageSummaryToSupabase:", e);
     }
   };
 
@@ -3358,8 +3363,19 @@ export default function App() {
     const isFirstAssistantResponse = currentSession.messages.length === 0;
     const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : currentSession.title;
     
-    // Save user message immediately to Supabase subcollection & update parent metadata
-    syncMessageSummaryToSupabase(targetChatId, newUserMsg);
+    const updatedParentChat: ChatSession = {
+      ...currentSession,
+      title: titleRename,
+      updatedAt: new Date().toISOString()
+    };
+    
+    // Save parent chat first to ensure foreign key constraints are met
+    await syncChatSummaryToSupabase(updatedParentChat);
+
+    // Save user message immediately to Supabase
+    console.log("[Nexa Client] 📤 Syncing user message to Supabase:", newUserMsg.id);
+    await syncMessageSummaryToSupabase(targetChatId, newUserMsg);
+
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
         type: "message-sync",
@@ -3367,12 +3383,6 @@ export default function App() {
         message: newUserMsg
       }));
     }
-    
-    const updatedParentChat: ChatSession = {
-      ...currentSession,
-      title: titleRename,
-      updatedAt: new Date().toISOString()
-    };
     syncChatSummaryToSupabase(updatedParentChat);
 
     setSessions((prev) =>
@@ -3477,7 +3487,7 @@ export default function App() {
         setIsGenerating(false);
         const finalMsg = { ...newAssistantMsg, content: fullContent };
         triggerVoiceIfNeeded(finalMsg);
-        syncMessageSummaryToSupabase(targetChatId, finalMsg);
+        await syncMessageSummaryToSupabase(targetChatId, finalMsg);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
             type: "message-sync",
@@ -3489,7 +3499,7 @@ export default function App() {
           ...updatedParentChat,
           updatedAt: new Date().toISOString()
         };
-        syncChatSummaryToSupabase(finalParentChat);
+        await syncChatSummaryToSupabase(finalParentChat);
         if (isFirstAssistantResponse) {
           generateAndSetAutomatedTitle(targetChatId, promptToSend, fullContent);
         }
@@ -3526,7 +3536,7 @@ export default function App() {
           minTokens = 4;
         }
 
-        streamIntervalRef.current = setInterval(() => {
+        streamIntervalRef.current = setInterval(async () => {
           if (currentTokenIdx >= tokens.length) {
             clearInterval(streamIntervalRef.current);
             streamIntervalRef.current = null;
@@ -3538,7 +3548,7 @@ export default function App() {
             triggerVoiceIfNeeded(finalMsg);
 
             // Sync complete message to Supabase
-            syncMessageSummaryToSupabase(targetChatId, finalMsg);
+            await syncMessageSummaryToSupabase(targetChatId, finalMsg);
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
                 type: "message-sync",
@@ -3550,7 +3560,7 @@ export default function App() {
               ...updatedParentChat,
               updatedAt: new Date().toISOString()
             };
-            syncChatSummaryToSupabase(finalParentChat);
+            await syncChatSummaryToSupabase(finalParentChat);
 
             if (isFirstAssistantResponse) {
               generateAndSetAutomatedTitle(targetChatId, promptToSend, fullContent);

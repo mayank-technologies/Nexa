@@ -2058,22 +2058,20 @@ export default function App() {
 
     const remaining = sessions.filter((s) => s.id !== id);
 
-    if (user && !user.isGuest && user.uid) {
-      try {
-        await syncChatToSupabase(updatedSession, user.email || "", user.uid);
-        console.log("[Nexa Client] Soft deleted session in Supabase:", id);
-      } catch (e) {
-        console.error("Failed to soft delete session in Supabase:", e);
-      }
-    } else {
-      // Guest local storage soft delete
-      const updatedDeletedSessions = [updatedSession, ...deletedSessions];
-      setDeletedSessions(updatedDeletedSessions);
-      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(updatedDeletedSessions));
-      
-      const updatedActiveSessions = remaining.length === 0 ? [] : remaining;
-      safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedActiveSessions));
+    // Sync soft-deleted chat to Supabase unconditionally
+    try {
+      await syncChatSummaryToSupabase(updatedSession);
+      console.log("[Nexa Client] Soft deleted session in Supabase:", id);
+    } catch (e) {
+      console.error("Failed to soft delete session in Supabase:", e);
     }
+
+    const updatedDeletedSessions = [updatedSession, ...deletedSessions];
+    setDeletedSessions(updatedDeletedSessions);
+    safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(updatedDeletedSessions));
+    
+    const updatedActiveSessions = remaining.length === 0 ? [] : remaining;
+    safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedActiveSessions));
 
     if (remaining.length === 0) {
       const freshId = `session-${Date.now()}`;
@@ -2089,9 +2087,7 @@ export default function App() {
       setSessions([freshSession]);
       setActiveSessionId(freshId);
       setActiveMode("general");
-      if (user && !user.isGuest && user.uid) {
-        await syncChatToSupabase(freshSession, user.email || "", user.uid);
-      }
+      await syncChatSummaryToSupabase(freshSession);
     } else {
       setSessions(remaining);
       if (activeSessionId === id) {
@@ -2109,13 +2105,13 @@ export default function App() {
       actionLabel: "Undo",
     });
 
-    if (user && !user.isGuest && user.uid) {
-      try {
-        const deleted = await fetchDeletedChatsAndMessages(user.email || "", user.uid);
+    try {
+      const deleted = await fetchDeletedChatsAndMessages(user?.email || "guest@nexa.ai", user?.uid || "guest");
+      if (deleted && deleted.length > 0) {
         setDeletedSessions(deleted);
-      } catch (err) {
-        console.error("Error reloading deleted chats:", err);
       }
+    } catch (err) {
+      console.error("Error reloading deleted chats:", err);
     }
   };
 
@@ -2136,43 +2132,24 @@ export default function App() {
     const remainingDeleted = deletedSessions.filter((s) => s.id !== id);
     setDeletedSessions(remainingDeleted);
 
-    if (user && !user.isGuest && user.uid) {
-      try {
-        await syncChatToSupabase(restoredSession, user.email || "", user.uid);
-        console.log("[Nexa Client] Restored chat session in Supabase:", id);
-        
-        const activeSummaries = await fetchAllChatsWithMessagesFromSupabase(user.email || "", user.uid);
-        setSessions(() => {
-          return activeSummaries.map((summary) => {
-            if (summary.id === id && chatToRestore) {
-              return {
-                ...summary,
-                messages: chatToRestore.messages || [],
-              };
-            }
-            return summary;
-          });
-        });
-        
-        setActiveSessionId(id);
-        setCurrentView("chat");
-        setActiveMode(restoredSession.mode || "general");
-      } catch (e) {
-        console.error("Failed to restore chat session in Supabase:", e);
-      }
-    } else {
-      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(remainingDeleted));
-
-      const currentActive = sessions.filter(s => s.messages.length > 0 || s.id !== activeSessionId);
-      const updatedActive = [restoredSession, ...currentActive];
-      
-      setSessions(updatedActive);
-      safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedActive));
-      
-      setActiveSessionId(id);
-      setCurrentView("chat");
-      setActiveMode(restoredSession.mode || "general");
+    try {
+      await syncChatSummaryToSupabase(restoredSession);
+      console.log("[Nexa Client] Restored chat session in Supabase:", id);
+    } catch (e) {
+      console.error("Failed to restore chat session in Supabase:", e);
     }
+
+    safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(remainingDeleted));
+
+    const currentActive = sessions.filter(s => s.messages.length > 0 || s.id !== activeSessionId);
+    const updatedActive = [restoredSession, ...currentActive];
+    
+    setSessions(updatedActive);
+    safeStorage.setItem("nexa_sessions_guest@nexa.ai", JSON.stringify(updatedActive));
+    
+    setActiveSessionId(id);
+    setCurrentView("chat");
+    setActiveMode(restoredSession.mode || "general");
 
     setUndoToast({
       message: `Chat "${restoredSession.title}" restored successfully.`,
@@ -2192,16 +2169,14 @@ export default function App() {
     const remainingDeleted = deletedSessions.filter((s) => s.id !== id);
     setDeletedSessions(remainingDeleted);
 
-    if (user && !user.isGuest && user.uid) {
-      try {
-        await deleteChatFromSupabase(id);
-        console.log("[Nexa Client] Permanently deleted chat from Supabase:", id);
-      } catch (e) {
-        console.error("Failed to permanently delete chat from Supabase:", e);
-      }
-    } else {
-      safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(remainingDeleted));
+    try {
+      await deleteChatFromSupabase(id);
+      console.log("[Nexa Client] Permanently deleted chat from Supabase:", id);
+    } catch (e) {
+      console.error("Failed to permanently delete chat from Supabase:", e);
     }
+
+    safeStorage.setItem("nexa_deleted_sessions_guest", JSON.stringify(remainingDeleted));
 
     setUndoToast({
       message: `Chat "${title}" deleted permanently.`,

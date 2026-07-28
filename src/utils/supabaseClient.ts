@@ -157,8 +157,8 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
   if (!chat || !chat.id) return false;
 
   try {
-    const effectiveEmail = (userEmail || chat.userEmail || "").toLowerCase().trim() || null;
-    const effectiveUserId = userId || (chat as any).userId || null;
+    const effectiveEmail = (userEmail || chat.userEmail || "guest@nexa.ai").toLowerCase().trim();
+    const effectiveUserId = userId || (chat as any).userId || "guest";
 
     console.log("[Nexa Supabase] Syncing chat session metadata:", chat.id, "User ID:", effectiveUserId, "Email:", effectiveEmail);
     const payload: any = {
@@ -206,6 +206,35 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       await supabase.from("conversations").upsert(payload, { onConflict: "id" });
     } catch (e) {
       // Ignored if table does not exist
+    }
+
+    // If chat is soft-deleted, mirror to deleted_conversations and deleted_chats tables
+    if (chat.isDeleted) {
+      try {
+        await supabase.from("deleted_conversations").upsert({
+          id: chat.id,
+          chat_id: chat.id,
+          user_id: effectiveUserId,
+          user_email: effectiveEmail,
+          title: chat.title || "Deleted Session",
+          deleted_at: chat.deletedAt || new Date().toISOString(),
+          created_at: chat.createdAt || new Date().toISOString(),
+          updated_at: chat.updatedAt || new Date().toISOString(),
+          is_deleted: true
+        }, { onConflict: "id" });
+      } catch (e) {}
+
+      try {
+        await supabase.from("deleted_chats").upsert({
+          id: chat.id,
+          chat_id: chat.id,
+          user_id: effectiveUserId,
+          user_email: effectiveEmail,
+          title: chat.title || "Deleted Session",
+          deleted_at: chat.deletedAt || new Date().toISOString(),
+          is_deleted: true
+        }, { onConflict: "id" });
+      } catch (e) {}
     }
 
     if (error) {

@@ -211,9 +211,10 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
     // If chat is soft-deleted, mirror to deleted_conversations and deleted_chats tables
     if (chat.isDeleted) {
       try {
-        await supabase.from("deleted_conversations").upsert({
+        const delConvPayload = {
           id: chat.id,
           chat_id: chat.id,
+          conversation_id: chat.id,
           user_id: effectiveUserId,
           user_email: effectiveEmail,
           title: chat.title || "Deleted Session",
@@ -221,11 +222,38 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
           created_at: chat.createdAt || new Date().toISOString(),
           updated_at: chat.updatedAt || new Date().toISOString(),
           is_deleted: true
-        }, { onConflict: "id" });
-      } catch (e) {}
+        };
+        const { error: delConvErr } = await supabase.from("deleted_conversations").upsert(delConvPayload, { onConflict: "id" });
+        if (delConvErr) {
+          console.warn("[Nexa Supabase] deleted_conversations upsert error:", delConvErr.message, "Retrying basic fallback...");
+          const fbConv = await supabase.from("deleted_conversations").upsert({
+            id: chat.id,
+            chat_id: chat.id,
+            user_id: effectiveUserId,
+            user_email: effectiveEmail,
+            title: chat.title || "Deleted Session",
+            deleted_at: chat.deletedAt || new Date().toISOString(),
+            is_deleted: true
+          }, { onConflict: "id" });
+          
+          if (fbConv.error) {
+            try {
+              await supabase.from("deleted_conversations").insert({
+                id: chat.id,
+                title: chat.title || "Deleted Session",
+                user_email: effectiveEmail
+              });
+            } catch (e) {}
+          }
+        } else {
+          console.log("[Nexa Supabase] ✅ Soft-deleted chat synced to 'deleted_conversations' table:", chat.id);
+        }
+      } catch (e) {
+        console.warn("[Nexa Supabase] deleted_conversations mirror exception:", e);
+      }
 
       try {
-        await supabase.from("deleted_chats").upsert({
+        const delChatsPayload = {
           id: chat.id,
           chat_id: chat.id,
           user_id: effectiveUserId,
@@ -233,8 +261,41 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
           title: chat.title || "Deleted Session",
           deleted_at: chat.deletedAt || new Date().toISOString(),
           is_deleted: true
-        }, { onConflict: "id" });
-      } catch (e) {}
+        };
+        const { error: delChatsErr } = await supabase.from("deleted_chats").upsert(delChatsPayload, { onConflict: "id" });
+        if (delChatsErr) {
+          console.warn("[Nexa Supabase] deleted_chats upsert error:", delChatsErr.message, "Retrying basic...");
+          const fbChat = await supabase.from("deleted_chats").upsert({
+            id: chat.id,
+            title: chat.title || "Deleted Session",
+            user_email: effectiveEmail
+          }, { onConflict: "id" });
+          if (fbChat.error) {
+            try {
+              await supabase.from("deleted_chats").insert({
+                id: chat.id,
+                title: chat.title || "Deleted Session",
+                user_email: effectiveEmail
+              });
+            } catch (e) {}
+          }
+        } else {
+          console.log("[Nexa Supabase] ✅ Soft-deleted chat synced to 'deleted_chats' table:", chat.id);
+        }
+      } catch (e) {
+        console.warn("[Nexa Supabase] deleted_chats mirror exception:", e);
+      }
+    }
+
+    // Sync all messages inside chat if present
+    if (chat.messages && Array.isArray(chat.messages) && chat.messages.length > 0) {
+      for (const msg of chat.messages) {
+        try {
+          await syncMessageToSupabase(chat.id, msg, effectiveUserId);
+        } catch (mErr) {
+          console.warn("[Nexa Supabase] Error syncing individual message during chat sync:", mErr);
+        }
+      }
     }
 
     if (error) {
@@ -267,137 +328,153 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
 
   if (!chatId || !message || !message.id) {
     console.warn("⚠️ [Nexa Supabase DEBUG] ABORTED: Missing required parameters (chatId, message, or message.id)", { chatId, message });
-    console.log("==================================================");
     return false;
   }
 
   try {
+    const effectiveUserId = userId || "guest";
+
+    // Proactively ensure parent chat exists in 'chats' and 'conversations' tables
+    try {
+      const parentPayload = {
+        id: chatId,
+        user_id: effectiveUserId,
+        title: "Conversation",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        user_email: "guest@nexa.ai"
+      };
+      await supabase.from("chats").upsert(parentPayload, { onConflict: "id" });
+      try {
+        await supabase.from("conversations").upsert(parentPayload, { onConflict: "id" });
+      } catch (e) {}
+    } catch (e) {
+      console.warn("[Nexa Supabase] Non-blocking parent chat pre-upsert warning:", e);
+    }
+
     const payload: any = {
       id: message.id,
       chat_id: chatId,
+      conversation_id: chatId,
+      user_id: effectiveUserId,
+      user_email: "guest@nexa.ai",
       role: message.role,
       content: message.content || "",
       timestamp: message.timestamp || new Date().toISOString(),
+      created_at: message.timestamp || new Date().toISOString(),
       engine_id: message.engineId || null,
-      sources: message.sources || null,
-      fact_check: message.factCheck || null,
-      research_report: message.researchReport || null,
-      quiz: message.quiz || null,
-      attachment: message.attachment || null,
+      sources: message.sources ? JSON.parse(JSON.stringify(message.sources)) : null,
+      fact_check: message.factCheck ? JSON.parse(JSON.stringify(message.factCheck)) : null,
+      research_report: message.researchReport ? JSON.parse(JSON.stringify(message.researchReport)) : null,
+      quiz: message.quiz ? JSON.parse(JSON.stringify(message.quiz)) : null,
+      attachment: message.attachment ? JSON.parse(JSON.stringify(message.attachment)) : null,
       reaction: message.reaction || null
     };
 
     console.log("[Nexa Supabase DEBUG] 📦 EXACT PAYLOAD BEING SENT TO SUPABASE:");
     console.log(JSON.stringify(payload, null, 2));
 
-    console.log("[Nexa Supabase DEBUG] ⚡ EXECUTING: supabase.from('messages').upsert(payload, { onConflict: 'id' }).select()");
-    console.log("BEFORE upsert");
-    
-    const response = await supabase
+    let response = await supabase
       .from("messages")
       .upsert(payload, { onConflict: "id" })
       .select();
 
     console.log("AFTER upsert", response.data, response.error);
 
-    console.log("[Nexa Supabase DEBUG] 📥 SUPABASE QUERY RESPONSE:");
-    console.log("   Status:", response.status, "Status Text:", response.statusText);
-    console.log("   Data Returned:", JSON.stringify(response.data, null, 2));
-    console.log("   Error Returned:", response.error);
-
     let finalError = response.error;
 
     if (finalError) {
-      console.error("❌ [Nexa Supabase ERROR] Message Upsert Failed!");
-      console.error("   error.code:", finalError.code);
-      console.error("   error.message:", finalError.message);
-      console.error("   error.details:", finalError.details);
-      console.error("   error.hint:", finalError.hint);
+      console.warn("⚠️ [Nexa Supabase WARNING] Initial message upsert failed, code:", finalError.code, "msg:", finalError.message);
 
-      // Handle Foreign Key Constraint Violation (Code 23503)
-      if (finalError.code === "23503" || finalError.message?.includes("foreign key") || finalError.message?.includes("violates foreign key constraint")) {
-        console.warn("🔄 [Nexa Supabase DEBUG] Foreign key error detected. Auto-creating parent conversation record...");
-        
-        const parentPayload = {
-          id: chatId,
-          user_id: userId || null,
-          title: "New Conversation",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-
-        const chatParentRes = await supabase.from("chats").upsert(parentPayload, { onConflict: "id" }).select();
-        console.log("[Nexa Supabase DEBUG] Parent 'chats' upsert response:", chatParentRes);
-
-        try {
-          const convParentRes = await supabase.from("conversations").upsert(parentPayload, { onConflict: "id" }).select();
-          console.log("[Nexa Supabase DEBUG] Parent 'conversations' upsert response:", convParentRes);
-        } catch (e) {}
-
-        console.log("[Nexa Supabase DEBUG] ⚡ RETRYING: Message upsert after parent record creation...");
-        const fkRetryResponse = await supabase
-          .from("messages")
-          .upsert(payload, { onConflict: "id" })
-          .select();
-
-        console.log("[Nexa Supabase DEBUG] FK Retry Response Data:", fkRetryResponse.data);
-        console.log("[Nexa Supabase DEBUG] FK Retry Response Error:", fkRetryResponse.error);
-
-        if (!fkRetryResponse.error && fkRetryResponse.data && fkRetryResponse.data.length > 0) {
-          console.log("✅ [Nexa Supabase SUCCESS] Message inserted successfully after creating parent conversation!");
-          console.log("==================================================");
-          return true;
-        }
-        finalError = fkRetryResponse.error || finalError;
+      // Fallback 1: Standard payload without complex JSON metadata
+      const stdPayload: any = {
+        id: message.id,
+        chat_id: chatId,
+        conversation_id: chatId,
+        user_id: effectiveUserId,
+        user_email: "guest@nexa.ai",
+        role: message.role,
+        content: message.content || "",
+        timestamp: message.timestamp || new Date().toISOString(),
+        created_at: message.timestamp || new Date().toISOString()
+      };
+      let fb = await supabase.from("messages").upsert(stdPayload, { onConflict: "id" }).select();
+      if (!fb.error) {
+        console.log("✅ [Nexa Supabase SUCCESS] Message inserted with standard payload!");
+        return true;
       }
 
-      // Handle Missing Column Error (Code 42703)
-      if (finalError && (finalError.code === "42703" || finalError.message?.includes("column"))) {
-        console.warn("🔄 [Nexa Supabase DEBUG] Schema column missing. Retrying message insert with basic payload...");
-        
-        const basicPayload: any = {
-          id: message.id,
-          chat_id: chatId,
-          role: message.role,
-          content: message.content || "",
-          timestamp: message.timestamp || new Date().toISOString()
-        };
-
-        console.log("[Nexa Supabase DEBUG] Fallback Basic Payload:", JSON.stringify(basicPayload, null, 2));
-
-        const fallbackResponse = await supabase
-          .from("messages")
-          .upsert(basicPayload, { onConflict: "id" })
-          .select();
-
-        console.log("[Nexa Supabase DEBUG] Fallback Response Data:", fallbackResponse.data);
-        console.log("[Nexa Supabase DEBUG] Fallback Response Error:", fallbackResponse.error);
-
-        if (!fallbackResponse.error && fallbackResponse.data && fallbackResponse.data.length > 0) {
-          console.log("✅ [Nexa Supabase SUCCESS] Basic fallback message inserted successfully!");
-          console.log("==================================================");
-          return true;
-        }
-
-        finalError = fallbackResponse.error || finalError;
+      // Fallback 2: Basic payload with user_id and timestamp
+      const basicPayload: any = {
+        id: message.id,
+        chat_id: chatId,
+        user_id: effectiveUserId,
+        role: message.role,
+        content: message.content || "",
+        timestamp: message.timestamp || new Date().toISOString()
+      };
+      fb = await supabase.from("messages").upsert(basicPayload, { onConflict: "id" }).select();
+      if (!fb.error) {
+        console.log("✅ [Nexa Supabase SUCCESS] Basic fallback message inserted successfully!");
+        return true;
       }
 
-      console.error("❌ [Nexa Supabase FINAL ERROR] Unable to insert message into Supabase 'messages' table.");
-      console.error("   Final error code:", finalError?.code);
-      console.error("   Final error message:", finalError?.message);
-      console.error("   Final error details:", finalError?.details);
-      console.error("   Final error hint:", finalError?.hint);
-      console.log("==================================================");
+      // Fallback 3: Basic payload with created_at instead of timestamp
+      const basicCreatedAtPayload: any = {
+        id: message.id,
+        chat_id: chatId,
+        user_id: effectiveUserId,
+        role: message.role,
+        content: message.content || "",
+        created_at: message.timestamp || new Date().toISOString()
+      };
+      fb = await supabase.from("messages").upsert(basicCreatedAtPayload, { onConflict: "id" }).select();
+      if (!fb.error) {
+        console.log("✅ [Nexa Supabase SUCCESS] Basic created_at message inserted successfully!");
+        return true;
+      }
+
+      // Fallback 4: Minimal payload with chat_id
+      const minimalPayload: any = {
+        id: message.id,
+        chat_id: chatId,
+        role: message.role,
+        content: message.content || ""
+      };
+      fb = await supabase.from("messages").upsert(minimalPayload, { onConflict: "id" }).select();
+      if (!fb.error) {
+        console.log("✅ [Nexa Supabase SUCCESS] Minimal fallback message inserted successfully!");
+        return true;
+      }
+
+      // Fallback 5: Minimal payload with conversation_id
+      const convMinPayload: any = {
+        id: message.id,
+        conversation_id: chatId,
+        role: message.role,
+        content: message.content || ""
+      };
+      fb = await supabase.from("messages").upsert(convMinPayload, { onConflict: "id" }).select();
+      if (!fb.error) {
+        console.log("✅ [Nexa Supabase SUCCESS] Conversation_id minimal message inserted successfully!");
+        return true;
+      }
+
+      // Fallback 6: Direct insert
+      const directInsert = await supabase.from("messages").insert(minimalPayload).select();
+      if (!directInsert.error) {
+        console.log("✅ [Nexa Supabase SUCCESS] Direct insert message succeeded!");
+        return true;
+      }
+
+      console.error("❌ [Nexa Supabase FINAL ERROR] Unable to insert message into 'messages' table:", finalError?.message);
       return false;
     }
 
     console.log("✅ [Nexa Supabase SUCCESS] Message inserted/upserted into 'messages' table!");
-    console.log("[Nexa Supabase SUCCESS] Returned data:", response.data);
-    console.log("==================================================");
     return true;
   } catch (err: any) {
     console.error("❌ [Nexa Supabase UNCAUGHT EXCEPTION] Exception during message sync:", err);
-    console.log("==================================================");
     return false;
   }
 }
@@ -555,7 +632,31 @@ CREATE TABLE IF NOT EXISTS public.messages (
     reaction TEXT
 );
 
--- 4. Create Waitlist Table (Updated)
+-- 4. Create Deleted Conversations Table
+CREATE TABLE IF NOT EXISTS public.deleted_conversations (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT,
+    user_id TEXT,
+    user_email TEXT,
+    title TEXT,
+    deleted_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    created_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    is_deleted BOOLEAN DEFAULT TRUE
+);
+
+-- 5. Create Deleted Chats Table
+CREATE TABLE IF NOT EXISTS public.deleted_chats (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT,
+    user_id TEXT,
+    user_email TEXT,
+    title TEXT,
+    deleted_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    is_deleted BOOLEAN DEFAULT TRUE
+);
+
+-- 6. Create Waitlist Table (Updated)
 CREATE TABLE IF NOT EXISTS public.waitlist (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT NOT NULL CONSTRAINT unique_waitlist_email UNIQUE,
@@ -568,17 +669,23 @@ CREATE TABLE IF NOT EXISTS public.waitlist (
 alter publication supabase_realtime add table public.users;
 alter publication supabase_realtime add table public.chats;
 alter publication supabase_realtime add table public.messages;
+alter publication supabase_realtime add table public.deleted_conversations;
+alter publication supabase_realtime add table public.deleted_chats;
 alter publication supabase_realtime add table public.waitlist;
 
 -- Set up Row Level Security (RLS) Rules (Optional - or disable RLS for direct client operations)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deleted_conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deleted_chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.waitlist ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public read and write access for all" ON public.users FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read and write access for all" ON public.chats FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read and write access for all" ON public.messages FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read and write access for all" ON public.deleted_conversations FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public read and write access for all" ON public.deleted_chats FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public read and write access for all" ON public.waitlist FOR ALL USING (true) WITH CHECK (true);
 `;
 
@@ -657,6 +764,8 @@ export async function fetchDeletedChatsFromSupabase(userEmail: string, userId?: 
     const normalizedEmail = (userEmail || "").toLowerCase().trim();
     console.log("[Nexa Supabase] Fetching deleted chats for email:", normalizedEmail, "userId:", userId);
     
+    let resultsMap: Record<string, ChatSession> = {};
+
     let query = supabase.from("chats").select("*");
 
     if (userId && normalizedEmail) {
@@ -665,39 +774,81 @@ export async function fetchDeletedChatsFromSupabase(userEmail: string, userId?: 
       query = query.eq("user_id", userId);
     } else if (normalizedEmail) {
       query = query.or(`user_email.ilike.${normalizedEmail},user_email.eq.${normalizedEmail}`);
-    } else {
-      return [];
     }
 
     const { data, error } = await query
       .eq("is_deleted", true)
       .order("deleted_at", { ascending: false });
 
-    if (error) {
-      if (error.code === "42703" || error.message?.includes("column") || isMissingTableError(error)) {
-        console.warn("[Nexa Supabase] 'is_deleted' column or chats table does not exist or not found in schema cache yet. Returning empty.");
-        return [];
+    if (!error && data && data.length > 0) {
+      for (const row of data) {
+        resultsMap[row.id] = {
+          id: row.id,
+          title: row.title || "Deleted Session",
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          isPinned: row.is_pinned || false,
+          pinOrder: row.pin_order,
+          mode: row.mode || "general",
+          selectedEngineId: row.selected_engine_id,
+          userEmail: row.user_email,
+          isDeleted: true,
+          deletedAt: row.deleted_at,
+          autoDeleteAt: row.auto_delete_at,
+          messages: []
+        };
       }
-      console.error("[Nexa Supabase] Error fetching deleted chats:", error.message);
-      return [];
     }
 
-    return (data || []).map((row) => ({
-      id: row.id,
-      title: row.title,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      isPinned: row.is_pinned || false,
-      pinOrder: row.pin_order,
-      mode: row.mode || "general",
-      selectedEngineId: row.selected_engine_id,
-      userEmail: row.user_email,
-      userId: row.user_id,
-      isDeleted: row.is_deleted || false,
-      deletedAt: row.deleted_at,
-      autoDeleteAt: row.auto_delete_at,
-      messages: []
-    })) as ChatSession[];
+    // Secondary fetch from deleted_conversations
+    try {
+      const { data: delConvData } = await supabase.from("deleted_conversations").select("*");
+      if (delConvData && delConvData.length > 0) {
+        for (const row of delConvData) {
+          const id = row.id || row.chat_id || row.conversation_id;
+          if (id && !resultsMap[id]) {
+            resultsMap[id] = {
+              id: id,
+              title: row.title || "Deleted Session",
+              createdAt: row.created_at || new Date().toISOString(),
+              updatedAt: row.updated_at || new Date().toISOString(),
+              isPinned: false,
+              mode: "general",
+              userEmail: row.user_email || normalizedEmail,
+              isDeleted: true,
+              deletedAt: row.deleted_at || new Date().toISOString(),
+              messages: []
+            };
+          }
+        }
+      }
+    } catch (e) {}
+
+    // Secondary fetch from deleted_chats
+    try {
+      const { data: delChatsData } = await supabase.from("deleted_chats").select("*");
+      if (delChatsData && delChatsData.length > 0) {
+        for (const row of delChatsData) {
+          const id = row.id || row.chat_id;
+          if (id && !resultsMap[id]) {
+            resultsMap[id] = {
+              id: id,
+              title: row.title || "Deleted Session",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              isPinned: false,
+              mode: "general",
+              userEmail: row.user_email || normalizedEmail,
+              isDeleted: true,
+              deletedAt: row.deleted_at || new Date().toISOString(),
+              messages: []
+            };
+          }
+        }
+      }
+    } catch (e) {}
+
+    return Object.values(resultsMap);
   } catch (err) {
     console.error("[Nexa Supabase] Failed to fetch deleted chats:", err);
     return [];

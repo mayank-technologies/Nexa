@@ -659,17 +659,6 @@ export function Sidebar({
                 >
                   <Plus className="w-5 h-5" />
                 </button>
-
-                {/* 4. Upgrade to Premium (Icon in collapsed view for non-premium users) */}
-                {onOpenPremium && !isPremiumUser(user) && (
-                  <button
-                    onClick={onOpenPremium}
-                    className="p-2 rounded-xl text-amber-500 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
-                    title="Upgrade to Premium"
-                  >
-                    <Sparkles className="w-5 h-5 text-amber-500" />
-                  </button>
-                )}
               </div>
             </div>
           )}
@@ -720,16 +709,6 @@ export function Sidebar({
               </motion.div>
             )}
           </AnimatePresence>
-        )}
-
-        {!isCollapsed && onOpenPremium && !isPremiumUser(user) && (
-          <button
-            onClick={onOpenPremium}
-            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-[#C96A3D] via-[#e25714] to-[#f47c36] hover:brightness-110 text-white rounded-xl text-xs font-black transition-all active:scale-98 cursor-pointer shadow-3xs"
-          >
-            <span className="text-amber-300">✨</span>
-            <span>Upgrade to Premium</span>
-          </button>
         )}
       </div>
 

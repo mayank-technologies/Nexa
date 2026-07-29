@@ -65,6 +65,14 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
+  // Component Lifecycle Audit Logging
+  useEffect(() => {
+    console.log("[Nexa HeaderMenu Audit] 🟢 ConversationHeaderMenu mounted for session:", activeSession?.id);
+    return () => {
+      console.log("[Nexa HeaderMenu Audit] 🔴 ConversationHeaderMenu unmounted for session:", activeSession?.id);
+    };
+  }, [activeSession?.id]);
+
   // Check viewport size
   useEffect(() => {
     const checkViewport = () => {
@@ -85,6 +93,7 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
         triggerRef.current &&
         !triggerRef.current.contains(e.target as Node)
       ) {
+        console.log("[Nexa HeaderMenu Audit] 🔒 Outside click detected. Closing menu.");
         setIsOpen(false);
       }
     };
@@ -95,47 +104,100 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
   // Handle ESC key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && isOpen) {
+        console.log("[Nexa HeaderMenu Audit] ⌨️ Escape key pressed. Closing menu.");
         setIsOpen(false);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isOpen]);
 
-  const handleToggle = () => {
-    setIsOpen(!isOpen);
-    playUiSound("success");
+  const handleToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log("[Nexa HeaderMenu Audit] 🔘 Three-dot button clicked.");
+    console.log("[Nexa HeaderMenu Audit] 📊 Menu open state before toggle:", isOpen);
+    setIsOpen((prev) => {
+      const nextState = !prev;
+      console.log("[Nexa HeaderMenu Audit] 📊 Menu open state after toggle:", nextState);
+      return nextState;
+    });
+    try {
+      playUiSound("success");
+    } catch (err) {
+      console.warn("[Nexa HeaderMenu Audit] Sound playback warning:", err);
+    }
   };
 
   const handlePinAction = () => {
-    onPinToggle(activeSession.id);
-    setIsOpen(false);
+    try {
+      console.log("[Nexa HeaderMenu Audit] Executing Pin Toggle for session:", activeSession.id);
+      onPinToggle(activeSession.id);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handlePinAction:", err);
+    }
   };
 
   const handleFavoriteAction = () => {
-    onFavoriteToggle(activeSession.id);
-    setIsOpen(false);
+    try {
+      console.log("[Nexa HeaderMenu Audit] Executing Favorite Toggle for session:", activeSession.id);
+      onFavoriteToggle(activeSession.id);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handleFavoriteAction:", err);
+    }
   };
 
   const handleArchiveAction = () => {
-    onArchiveToggle(activeSession.id);
-    setIsOpen(false);
+    try {
+      console.log("[Nexa HeaderMenu Audit] Executing Archive Toggle for session:", activeSession.id);
+      onArchiveToggle(activeSession.id);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handleArchiveAction:", err);
+    }
   };
 
   const handleDeleteAction = () => {
-    onDeleteToggle(activeSession.id);
-    setIsOpen(false);
+    try {
+      console.log("[Nexa HeaderMenu Audit] Executing Delete Toggle for session:", activeSession.id);
+      onDeleteToggle(activeSession.id);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handleDeleteAction:", err);
+    }
   };
 
   const handleShareAction = () => {
-    onOpenShare(activeSession.id);
-    setIsOpen(false);
+    try {
+      console.log("[Nexa HeaderMenu Audit] Executing Share Action for session:", activeSession.id);
+      onOpenShare(activeSession.id);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handleShareAction:", err);
+    }
   };
 
   const handleDuplicateAction = () => {
-    onDuplicateSession(activeSession.id);
-    setIsOpen(false);
+    try {
+      console.log("[Nexa HeaderMenu Audit] Executing Duplicate Action for session:", activeSession.id);
+      onDuplicateSession(activeSession.id);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handleDuplicateAction:", err);
+    }
+  };
+
+  const handleDetailsAction = () => {
+    try {
+      console.log("[Nexa HeaderMenu Audit] Opening Chat Analytics & Details for session:", activeSession.id);
+      setShowDetails(true);
+      setIsOpen(false);
+    } catch (err) {
+      console.error("[Nexa HeaderMenu Audit] Exception in handleDetailsAction:", err);
+    }
   };
 
   const handleRenameInit = () => {
@@ -349,8 +411,10 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
 
   const userIsPremium = isPremium !== undefined ? isPremium : isPremiumUser(user);
 
-  const rawMenuItems = [
+  // Define explicit quick actions without relying on fragile array index numbers
+  const manageActions = [
     {
+      id: "pin",
       label: isPinned ? "Unpin Chat" : "Pin Chat",
       icon: Pin,
       action: handlePinAction,
@@ -358,6 +422,7 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
       activeColor: "text-[#C96A3D]",
     },
     {
+      id: "favorite",
       label: isFavorite ? "Remove from Favorites" : "Add to Favorites",
       icon: Star,
       action: handleFavoriteAction,
@@ -365,44 +430,48 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
       activeColor: "text-amber-500 fill-amber-500",
     },
     {
+      id: "rename",
       label: "Rename Chat",
       icon: Edit2,
       action: handleRenameInit,
     },
     {
+      id: "duplicate",
       label: "Duplicate Chat",
       icon: Copy,
       action: handleDuplicateAction,
     },
+    ...(userIsPremium
+      ? [
+          {
+            id: "share",
+            label: "Share Chat",
+            icon: Share2,
+            action: handleShareAction,
+          },
+        ]
+      : []),
     {
-      label: "Share Chat",
-      icon: Share2,
-      action: handleShareAction,
-    },
-    {
+      id: "archive",
       label: "Archive Chat",
       icon: Archive,
       action: handleArchiveAction,
       active: isArchived,
       activeColor: "text-amber-500",
     },
-    {
-      label: "Delete Chat",
-      icon: Trash2,
-      action: handleDeleteAction,
-      danger: true,
-    },
-    {
-      label: "Chat Details",
-      icon: Info,
-      action: () => {
-        setShowDetails(true);
-        setIsOpen(false);
-      },
-    },
   ];
 
-  const menuItems = userIsPremium ? rawMenuItems : rawMenuItems.filter((item) => item.label !== "Share Chat");
+  // Audit log every menu item when opened
+  useEffect(() => {
+    if (isOpen) {
+      console.log(`[Nexa HeaderMenu Audit] 🎨 Rendering menu options for session: ${activeSession.id}`);
+      manageActions.forEach((item) => {
+        console.log(`[Nexa HeaderMenu Audit]   ├─ Item rendered: "${item.label}" (Active: ${!!item.active})`);
+      });
+      console.log(`[Nexa HeaderMenu Audit]   ├─ Item rendered: "Delete Chat"`);
+      console.log(`[Nexa HeaderMenu Audit]   ├─ Item rendered: "Chat Analytics & Details"`);
+    }
+  }, [isOpen, activeSession.id, userIsPremium, isPinned, isFavorite, isArchived]);
 
   return (
     <div className="relative shrink-0">
@@ -434,16 +503,14 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
               Manage Chat
             </div>
             
-            {menuItems.slice(0, 7).map((item, index) => {
+            {manageActions.map((item) => {
               const Icon = item.icon;
               return (
                 <button
-                  key={index}
+                  key={item.id}
                   onClick={item.action}
                   className={`w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-900/60 transition-colors text-left cursor-pointer ${
-                    item.danger
-                      ? "text-rose-500 hover:text-rose-600 hover:bg-rose-50/30 dark:hover:bg-rose-500/10"
-                      : item.active
+                    item.active
                       ? item.activeColor
                       : "text-slate-650 dark:text-slate-200"
                   }`}
@@ -456,6 +523,16 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
                 </button>
               );
             })}
+
+            <button
+              onClick={handleDeleteAction}
+              className="w-full flex items-center justify-between px-3.5 py-2 text-xs font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50/30 dark:hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-2.5">
+                <Trash2 className="w-3.5 h-3.5 shrink-0 text-rose-500" />
+                <span>Delete Chat</span>
+              </div>
+            </button>
 
             <div className="border-t border-slate-150 dark:border-slate-800 my-1.5" />
 
@@ -489,7 +566,7 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
 
             {/* Details */}
             <button
-              onClick={menuItems[7].action}
+              onClick={handleDetailsAction}
               className="w-full flex items-center gap-2.5 px-3.5 py-2 text-xs font-semibold text-slate-650 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-900/60 transition-colors cursor-pointer"
             >
               <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -536,11 +613,11 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
 
               {/* Mobile Actions Grid */}
               <div className="grid grid-cols-2 gap-2.5 mb-5">
-                {menuItems.slice(0, 6).map((item, index) => {
+                {manageActions.map((item) => {
                   const Icon = item.icon;
                   return (
                     <button
-                      key={index}
+                      key={item.id}
                       onClick={item.action}
                       className={`flex flex-col items-center justify-center p-3 rounded-2xl border text-center transition-all ${
                         item.active
@@ -558,7 +635,7 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
               {/* Danger & Info rows */}
               <div className="space-y-1.5 mb-5 border-t border-slate-100 dark:border-slate-850 pt-3">
                 <button
-                  onClick={menuItems[6].action}
+                  onClick={handleDeleteAction}
                   className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/10 font-bold text-xs"
                 >
                   <span className="flex items-center gap-2">
@@ -569,7 +646,7 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
                 </button>
 
                 <button
-                  onClick={menuItems[7].action}
+                  onClick={handleDetailsAction}
                   className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900/20 text-slate-700 dark:text-slate-200 border border-slate-100 dark:border-slate-800 font-bold text-xs"
                 >
                   <span className="flex items-center gap-2">

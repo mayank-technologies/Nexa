@@ -178,6 +178,10 @@ export function Sidebar({
   const [isArchiveExpanded, setIsArchiveExpanded] = useState(true);
   const [isSearchHistoryExpanded, setIsSearchHistoryExpanded] = useState(true);
 
+  useEffect(() => {
+    console.log("[Archive] Sidebar rebuilt");
+  }, [sessions]);
+
   // Search History local storage state
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>(() => {
     const saved = safeStorage.getItem("nexa_search_history");

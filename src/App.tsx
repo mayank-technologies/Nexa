@@ -2294,48 +2294,75 @@ export default function App() {
   };
 
   const handleToggleArchive = (id: string) => {
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id === id) {
-          const isArchived = !(s as any).isArchived;
-          const updatedChat = {
-            ...s,
-            isArchived,
-            updatedAt: new Date().toISOString(),
-          };
-          syncChatSummaryToSupabase(updatedChat);
-          
-          setCustomToast({
-            title: isArchived ? "Chat Archived" : "Chat Restored",
-            message: isArchived 
-              ? `"${s.title}" has been moved to your archive.` 
-              : `"${s.title}" has been restored to your recent chats.`,
-            type: "success",
-          });
-          
-          return updatedChat;
+    console.log("[Archive] Clicked");
+    console.log("[Archive] Selected Chat ID:", id);
+
+    let nextActiveId: string | null = null;
+    let nextActiveMode: ChatSession["mode"] = "general";
+    let shouldCreateNew = false;
+    let targetUpdatedChat: ChatSession | null = null;
+
+    setSessions((prevSessions) => {
+      const targetSession = prevSessions.find((s) => s.id === id);
+      if (!targetSession) {
+        console.warn("[Archive] Target session not found for ID:", id);
+        return prevSessions;
+      }
+
+      const newIsArchived = !(targetSession as any).isArchived;
+
+      const updatedChat: ChatSession = {
+        ...targetSession,
+        isArchived: newIsArchived,
+        updatedAt: new Date().toISOString(),
+      };
+      targetUpdatedChat = updatedChat;
+
+      const updatedSessions = prevSessions.map((s) => (s.id === id ? updatedChat : s));
+
+      if (newIsArchived) {
+        console.log("[Archive] Local session removed:", id);
+      } else {
+        console.log("[Archive] Local session restored:", id);
+      }
+
+      // If the chat being archived is the currently active one
+      if (newIsArchived && activeSessionId === id) {
+        const remainingActive = updatedSessions.filter(
+          (s) => !(s as any).isArchived && !s.isDeleted
+        );
+        if (remainingActive.length > 0) {
+          nextActiveId = remainingActive[0].id;
+          nextActiveMode = remainingActive[0].mode || "general";
+        } else {
+          shouldCreateNew = true;
         }
-        return s;
-      })
-    );
-    
-    // If the archived chat is currently active, switch to the first remaining active chat
-    setTimeout(() => {
-      setSessions((currentSessions) => {
-        const active = currentSessions.find((s) => s.id === activeSessionId);
-        if (active && (active as any).isArchived) {
-          const remainingActive = currentSessions.filter((s) => !(s as any).isArchived);
-          if (remainingActive.length > 0) {
-            setActiveSessionId(remainingActive[0].id);
-            setActiveMode(remainingActive[0].mode || "general");
-          } else {
-            // Create fresh session if no active sessions remain
-            handleNewSession("general");
-          }
-        }
-        return currentSessions;
+      }
+
+      setCustomToast({
+        title: newIsArchived ? "Chat Archived" : "Chat Restored",
+        message: newIsArchived
+          ? `"${targetSession.title}" has been moved to your archive.`
+          : `"${targetSession.title}" has been restored to your recent chats.`,
+        type: "success",
       });
-    }, 50);
+
+      return updatedSessions;
+    });
+
+    if (targetUpdatedChat) {
+      syncChatSummaryToSupabase(targetUpdatedChat);
+      console.log("[Archive] Archived table updated");
+    }
+
+    if (nextActiveId) {
+      console.log("[Archive] Active session switched");
+      setActiveSessionId(nextActiveId);
+      setActiveMode(nextActiveMode);
+    } else if (shouldCreateNew) {
+      console.log("[Archive] handleNewSession invoked");
+      handleNewSession("general");
+    }
   };
 
   const handleToggleFavorite = (id: string) => {

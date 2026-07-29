@@ -44,6 +44,23 @@ export function isMissingTableError(error: any): boolean {
 }
 
 /**
+ * Helper to identify network connectivity issues or fetch failure exceptions from Supabase.
+ */
+export function isFetchOrNetworkError(error: any): boolean {
+  if (!error) return false;
+  const msg = typeof error === "string" ? error.toLowerCase() : (error.message || "").toLowerCase();
+  const name = (error.name || "").toLowerCase();
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("fetcherror") ||
+    msg.includes("networkerror") ||
+    msg.includes("network error") ||
+    name.includes("typeerror") ||
+    msg.includes("typeerror")
+  );
+}
+
+/**
  * Interface representing the integration health and table checks
  */
 export interface SupabaseHealthStatus {
@@ -136,6 +153,8 @@ export async function syncUserProfileToSupabase(profile: UserProfile): Promise<b
     if (error) {
       if (isMissingTableError(error)) {
         console.warn("[Nexa Supabase] 'users' table does not exist in Supabase yet or not found in schema cache. Please execute the SQL schema.");
+      } else if (isFetchOrNetworkError(error)) {
+        console.warn("[Nexa Supabase] Network connection to Supabase unavailable when syncing user profile:", error.message);
       } else {
         console.error("[Nexa Supabase] Error syncing user profile:", error.message);
       }
@@ -144,8 +163,12 @@ export async function syncUserProfileToSupabase(profile: UserProfile): Promise<b
 
     console.log("[Nexa Supabase] Successfully synced user profile to Supabase!");
     return true;
-  } catch (err) {
-    console.error("[Nexa Supabase] Unexpected error during profile sync:", err);
+  } catch (err: any) {
+    if (isFetchOrNetworkError(err)) {
+      console.warn("[Nexa Supabase] Network exception during user profile sync:", err?.message || err);
+    } else {
+      console.error("[Nexa Supabase] Unexpected error during profile sync:", err);
+    }
     return false;
   }
 }
@@ -183,6 +206,12 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
     if (chat.autoDeleteAt !== undefined) {
       payload.auto_delete_at = chat.autoDeleteAt;
     }
+    if ((chat as any).isArchived !== undefined) {
+      payload.is_archived = (chat as any).isArchived;
+    }
+    if ((chat as any).isFavorite !== undefined) {
+      payload.is_favorite = (chat as any).isFavorite;
+    }
 
     let { error } = await supabase
       .from("chats")
@@ -206,6 +235,40 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       await supabase.from("conversations").upsert(payload, { onConflict: "id" });
     } catch (e) {
       // Ignored if table does not exist
+    }
+
+    // Mirror to archived_conversations table if chat is archived
+    if ((chat as any).isArchived) {
+      try {
+        const archivedPayload = {
+          id: chat.id,
+          chat_id: chat.id,
+          conversation_id: chat.id,
+          user_id: effectiveUserId,
+          user_email: effectiveEmail,
+          title: chat.title || "Archived Session",
+          archived_at: new Date().toISOString(),
+          created_at: chat.createdAt || new Date().toISOString(),
+          updated_at: chat.updatedAt || new Date().toISOString(),
+          is_archived: true
+        };
+        const { error: archErr } = await supabase.from("archived_conversations").upsert(archivedPayload, { onConflict: "id" });
+        if (archErr) {
+          console.warn("[Archive] archived_conversations upsert error:", archErr.message, "Retrying basic...");
+          await supabase.from("archived_conversations").upsert({
+            id: chat.id,
+            title: chat.title || "Archived Session",
+            user_email: effectiveEmail
+          }, { onConflict: "id" });
+        }
+        console.log("[Archive] Archived table updated for chat:", chat.id);
+      } catch (e) {
+        console.warn("[Archive] archived_conversations mirror exception:", e);
+      }
+    } else {
+      try {
+        await supabase.from("archived_conversations").delete().eq("id", chat.id);
+      } catch (e) {}
     }
 
     // If chat is soft-deleted, mirror to deleted_conversations and deleted_chats tables
@@ -301,6 +364,8 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
     if (error) {
       if (isMissingTableError(error)) {
         console.warn("[Nexa Supabase] 'chats' table does not exist in Supabase yet or not found in schema cache.");
+      } else if (isFetchOrNetworkError(error)) {
+        console.warn("[Nexa Supabase] Network connection to Supabase unavailable when syncing chat:", error.message);
       } else {
         console.error("[Nexa Supabase] Error syncing chat:", error.message);
       }
@@ -309,8 +374,12 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
 
     console.log("[Nexa Supabase] Successfully synced chat to Supabase!");
     return true;
-  } catch (err) {
-    console.error("[Nexa Supabase] Unexpected error during chat sync:", err);
+  } catch (err: any) {
+    if (isFetchOrNetworkError(err)) {
+      console.warn("[Nexa Supabase] Network exception during chat sync:", err?.message || err);
+    } else {
+      console.error("[Nexa Supabase] Unexpected error during chat sync:", err);
+    }
     return false;
   }
 }
@@ -740,6 +809,8 @@ export async function fetchChatsFromSupabase(userEmail: string, userId?: string)
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       isPinned: row.is_pinned || false,
+      isArchived: row.is_archived || false,
+      isFavorite: row.is_favorite || false,
       pinOrder: row.pin_order,
       mode: row.mode || "general",
       selectedEngineId: row.selected_engine_id,
@@ -900,6 +971,8 @@ export async function fetchMessagesFromSupabase(chatId: string): Promise<Message
     if (error) {
       if (isMissingTableError(error)) {
         console.warn("[Nexa Supabase] 'messages' table does not exist or not found in schema cache.");
+      } else if (isFetchOrNetworkError(error)) {
+        console.warn("[Nexa Supabase] Network connection to Supabase unavailable when fetching messages. Falling back to local state:", error.message);
       } else {
         console.error("[Nexa Supabase] Error fetching messages:", error.message);
       }
@@ -919,8 +992,12 @@ export async function fetchMessagesFromSupabase(chatId: string): Promise<Message
       attachment: row.attachment,
       reaction: row.reaction
     })) as Message[];
-  } catch (err) {
-    console.error("[Nexa Supabase] Failed to fetch messages:", err);
+  } catch (err: any) {
+    if (isFetchOrNetworkError(err)) {
+      console.warn("[Nexa Supabase] Network/Supabase fetch exception when fetching messages:", err?.message || err);
+    } else {
+      console.error("[Nexa Supabase] Failed to fetch messages:", err);
+    }
     return [];
   }
 }

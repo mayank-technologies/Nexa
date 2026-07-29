@@ -80,6 +80,8 @@ export interface ChatSession {
   deletedAt?: string;
   autoDeleteAt?: string;
   isShared?: boolean;
+  isArchived?: boolean;
+  isFavorite?: boolean;
 }
 
 export interface GamificationState {

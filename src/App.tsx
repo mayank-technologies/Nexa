@@ -3721,15 +3721,6 @@ export default function App() {
               setActiveSessionId(id);
               setShowShareModal(true);
             }}
-            onOpenJoinCollaboration={() => {
-              if (!isPremiumUser(user)) {
-                setPremiumSource("share");
-                setPremiumFeatureContext("share");
-                setShowPremium(true);
-                return;
-              }
-              setShowJoinModal(true);
-            }}
             onReRunQuery={(query) => {
               setCurrentView("chat");
               handleChatSubmit(query);
@@ -3808,16 +3799,6 @@ export default function App() {
                     }
                     setActiveSessionId(id);
                     setShowShareModal(true);
-                  }}
-                  onOpenJoinCollaboration={() => {
-                    if (!isPremiumUser(user)) {
-                      setPremiumSource("share");
-                      setPremiumFeatureContext("share");
-                      setShowPremium(true);
-                      setIsMobileSidebarOpen(false);
-                      return;
-                    }
-                    setShowJoinModal(true);
                   }}
                   onReRunQuery={(query) => {
                     setCurrentView("chat");

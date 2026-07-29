@@ -93,7 +93,6 @@ interface SidebarProps {
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
   onOpenShare?: (sessionId: string) => void;
-  onOpenJoinCollaboration?: () => void;
   onReRunQuery?: (query: string) => void;
 }
 
@@ -123,7 +122,6 @@ export function Sidebar({
   isCollapsed = false,
   onToggleCollapse,
   onOpenShare,
-  onOpenJoinCollaboration,
   onReRunQuery,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -662,14 +660,14 @@ export function Sidebar({
                   <Plus className="w-5 h-5" />
                 </button>
 
-                {/* 4. Join Collaboration (Icon in collapsed view) */}
-                {onOpenJoinCollaboration && (
+                {/* 4. Upgrade to Premium (Icon in collapsed view for non-premium users) */}
+                {onOpenPremium && !isPremiumUser(user) && (
                   <button
-                    onClick={onOpenJoinCollaboration}
-                    className="p-2 rounded-xl text-slate-400 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
-                    title="Join Collaboration"
+                    onClick={onOpenPremium}
+                    className="p-2 rounded-xl text-amber-500 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] hover:bg-slate-50 dark:hover:bg-slate-900 transition-all cursor-pointer active:scale-95"
+                    title="Upgrade to Premium"
                   >
-                    <Users className="w-5 h-5" />
+                    <Sparkles className="w-5 h-5 text-amber-500" />
                   </button>
                 )}
               </div>
@@ -724,13 +722,13 @@ export function Sidebar({
           </AnimatePresence>
         )}
 
-        {!isCollapsed && onOpenJoinCollaboration && isPremiumUser(user) && (
+        {!isCollapsed && onOpenPremium && !isPremiumUser(user) && (
           <button
-            onClick={onOpenJoinCollaboration}
-            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#C96A3D]/10 hover:bg-[#C96A3D]/20 text-[#C96A3D] rounded-xl border border-[#C96A3D]/20 text-xs font-black transition-all active:scale-98 cursor-pointer shadow-3xs"
+            onClick={onOpenPremium}
+            className="mt-2 w-full flex items-center justify-center gap-2 px-3 py-2 bg-gradient-to-r from-[#C96A3D] via-[#e25714] to-[#f47c36] hover:brightness-110 text-white rounded-xl text-xs font-black transition-all active:scale-98 cursor-pointer shadow-3xs"
           >
-            <span>🔑</span>
-            <span>Join Shared Chat</span>
+            <span className="text-amber-300">✨</span>
+            <span>Upgrade to Premium</span>
           </button>
         )}
       </div>

@@ -1000,45 +1000,58 @@ export default function App() {
     console.log("[Nexa Debug] [Navigation Event] Active mode changed to:", activeMode);
   }, [activeMode]);
 
-  const syncChatSummaryToSupabase = async (chat: ChatSession) => {
-    try {
-      const email = user?.email ? user.email.toLowerCase().trim() : "guest@nexa.ai";
-      const uid = user?.uid || "guest";
-      console.log("[Nexa Client] 📤 Syncing chat summary to Supabase for chatId:", chat.id, "email:", email);
-      await syncChatToSupabase(chat, email, uid);
-      console.log("[Nexa Client] ✅ Synced chat summary to Supabase:", chat.id);
-    } catch (e) {
-      console.error("[Nexa Client] ❌ Failed to sync chat summary to Supabase:", e);
-    }
+  const syncChatSummaryToSupabase = (chat: ChatSession, retries = 2) => {
+    (async () => {
+      try {
+        const email = user?.email ? user.email.toLowerCase().trim() : "guest@nexa.ai";
+        const uid = user?.uid || "guest";
+        console.log("[Nexa Client Background Sync] 📤 Syncing chat summary:", chat.id);
+        const success = await syncChatToSupabase(chat, email, uid);
+        if (!success && retries > 0) {
+          console.warn(`[Nexa Sync] Chat sync failed for ${chat.id}. Retrying in 2s... (${retries} retries left)`);
+          setTimeout(() => syncChatSummaryToSupabase(chat, retries - 1), 2000);
+        } else if (success) {
+          console.log("[Nexa Client Background Sync] ✅ Synced chat summary:", chat.id);
+        }
+      } catch (e) {
+        console.error("[Nexa Client Background Sync] ❌ Failed to sync chat summary:", e);
+        if (retries > 0) {
+          setTimeout(() => syncChatSummaryToSupabase(chat, retries - 1), 2000);
+        }
+      }
+    })();
   };
 
-  const syncMessageSummaryToSupabase = async (chatId: string, message: Message) => {
-    try {
-      console.log("[Nexa Client] 🚀 syncMessageSummaryToSupabase TRIGGERED");
-      console.log("[Nexa Client]    Target Chat ID:", chatId);
-      console.log("[Nexa Client]    Target Message ID:", message?.id, "Role:", message?.role);
-      console.log("[Nexa Client]    User Email:", user?.email || "guest@nexa.ai", "UID:", user?.uid || "guest");
-      
-      const effectiveUserId = user?.uid || "guest";
+  const syncMessageSummaryToSupabase = (chatId: string, message: Message, retries = 2) => {
+    (async () => {
+      try {
+        const effectiveUserId = user?.uid || "guest";
+        console.log("[Nexa Client Background Sync] 🚀 Syncing message:", message?.id);
+        const result = await syncMessageToSupabase(chatId, message, effectiveUserId);
+        if (!result && retries > 0) {
+          console.warn(`[Nexa Sync] Message sync failed for ${message?.id}. Retrying in 2s... (${retries} retries left)`);
+          setTimeout(() => syncMessageSummaryToSupabase(chatId, message, retries - 1), 2000);
+        } else if (result) {
+          console.log("[Nexa Client Background Sync] ✅ Synced message:", message?.id);
+        }
 
-      console.log("BEFORE syncMessageToSupabase");
-      console.log("[Nexa Client] ⚡ EXECUTING: await syncMessageToSupabase(chatId, message, effectiveUserId)");
-      const result = await syncMessageToSupabase(chatId, message, effectiveUserId);
-      console.log("[Nexa Client] 📥 syncMessageToSupabase COMPLETED with result:", result);
-
-      // 2. Synchronize to Serverless Share DB
-      safeFetchJson("/api/share/sync-messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId,
-          messages: [message],
-          ownerEmail: user?.email || "guest@nexa.ai"
-        })
-      }).catch((e) => console.warn("[Nexa Client] API share sync-messages failed non-blockingly:", e));
-    } catch (e) {
-      console.error("[Nexa Client] ❌ Exception in syncMessageSummaryToSupabase:", e);
-    }
+        // Synchronize to Serverless Share DB non-blockingly
+        safeFetchJson("/api/share/sync-messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chatId,
+            messages: [message],
+            ownerEmail: user?.email || "guest@nexa.ai"
+          })
+        }).catch((e) => console.warn("[Nexa Client] API share sync-messages failed non-blockingly:", e));
+      } catch (e) {
+        console.error("[Nexa Client Background Sync] ❌ Exception in syncMessageSummaryToSupabase:", e);
+        if (retries > 0) {
+          setTimeout(() => syncMessageSummaryToSupabase(chatId, message, retries - 1), 2000);
+        }
+      }
+    })();
   };
 
   const generateAndSetAutomatedTitle = async (chatId: string, prompt: string, response: string) => {
@@ -1197,12 +1210,18 @@ export default function App() {
                 if (Array.isArray(parsedLocal) && parsedLocal.length > 0) {
                   console.log("[Nexa Client] summaries is empty, but localStorage sessions exist. Syncing local sessions to Supabase.");
                   for (const s of parsedLocal) {
-                    await syncChatToSupabase(s, user.email || "", user.uid);
+                    syncChatToSupabase(s, user.email || "", user.uid).catch((e) => console.warn(e));
                     if (s.messages && s.messages.length > 0) {
                       for (const m of s.messages) {
-                        await syncMessageToSupabase(s.id, m, user.uid);
+                        syncMessageToSupabase(s.id, m, user.uid).catch((e) => console.warn(e));
                       }
                     }
+                  }
+                  setSessions(parsedLocal);
+                  sessionsRef.current = parsedLocal;
+                  if (parsedLocal.length > 0) {
+                    setActiveSessionId(parsedLocal[0].id);
+                    activeSessionIdRef.current = parsedLocal[0].id;
                   }
                   return;
                 }
@@ -1222,7 +1241,7 @@ export default function App() {
               userEmail: user.email || "",
               messages: [],
             };
-            await syncChatToSupabase(defaultChat, user.email || "", user.uid);
+            syncChatToSupabase(defaultChat, user.email || "", user.uid).catch((e) => console.warn(e));
             setSessions([defaultChat]);
             sessionsRef.current = [defaultChat];
             setActiveSessionId(defaultId);
@@ -2060,7 +2079,7 @@ export default function App() {
 
     // Sync soft-deleted chat to Supabase unconditionally
     try {
-      await syncChatSummaryToSupabase(updatedSession);
+      syncChatSummaryToSupabase(updatedSession);
       console.log("[Nexa Client] Soft deleted session in Supabase:", id);
     } catch (e) {
       console.error("Failed to soft delete session in Supabase:", e);
@@ -2087,7 +2106,7 @@ export default function App() {
       setSessions([freshSession]);
       setActiveSessionId(freshId);
       setActiveMode("general");
-      await syncChatSummaryToSupabase(freshSession);
+      syncChatSummaryToSupabase(freshSession);
     } else {
       setSessions(remaining);
       if (activeSessionId === id) {
@@ -2133,7 +2152,7 @@ export default function App() {
     setDeletedSessions(remainingDeleted);
 
     try {
-      await syncChatSummaryToSupabase(restoredSession);
+      syncChatSummaryToSupabase(restoredSession);
       console.log("[Nexa Client] Restored chat session in Supabase:", id);
     } catch (e) {
       console.error("Failed to restore chat session in Supabase:", e);
@@ -2842,14 +2861,12 @@ export default function App() {
     syncMessageSummaryToSupabase(activeSessionId, placeholderAssistantMsg);
 
     if (user && !user.isGuest && user.uid) {
-      // Delete obsolete trailing messages from Supabase
+      // Delete obsolete trailing messages from Supabase non-blockingly in background
       for (const ob of obsoleteMsgs) {
         if (ob.id !== assistantId) {
-          try {
-            await deleteMessageFromSupabase(ob.id);
-          } catch (e) {
+          deleteMessageFromSupabase(ob.id).catch((e) => {
             console.error("Failed to delete obsolete message from Supabase:", e);
-          }
+          });
         }
       }
     }
@@ -3281,6 +3298,8 @@ export default function App() {
 
   // Submit Main Chat Trigger
   const handleChatSubmit = async (customPrompt?: string, customAttachment?: any) => {
+    const tClick = performance.now(); // 1. CLICK
+
     const promptToSend = customPrompt || inputPrompt;
     if (!promptToSend.trim() && !customAttachment) return;
 
@@ -3291,43 +3310,12 @@ export default function App() {
     if (!currentSession && sessions.length > 0) {
       currentSession = sessions[0];
       targetChatId = currentSession.id;
-      setActiveSessionId(targetChatId);
-    }
-
-    if (!currentSession) {
-      const newId = `session-${Date.now()}`;
-      currentSession = {
-        id: newId,
-        title: promptToSend.substring(0, 36) + "...",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [],
-        isPinned: false,
-        mode: activeMode || "general",
-        userEmail: user && !user.isGuest ? user.email || "" : undefined,
-      };
-      targetChatId = newId;
-      setSessions([currentSession]);
-      setActiveSessionId(newId);
-      syncChatSummaryToSupabase(currentSession);
-    } else if (activeSessionId !== targetChatId) {
-      setActiveSessionId(targetChatId);
-    }
-
-    console.log("[Nexa Debug] [Send Message] Target Chat ID:", targetChatId);
-
-    if (voiceModeActiveRef.current) {
-      setVoiceState("processing");
     }
 
     const currentAttachment = customAttachment || attachment;
-    setIsLoading(true);
-    setInputPrompt("");
-    playUiSound("message_sent");
-
     const timestamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-    // Append User Message Log Card
+    // Build the user message
     const newUserMsg: Message = {
       id: `usr-${Date.now()}`,
       role: "user",
@@ -3336,46 +3324,76 @@ export default function App() {
       attachment: currentAttachment ? { ...currentAttachment } : undefined,
     };
 
-    const isFirstAssistantResponse = currentSession.messages.length === 0;
-    const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : currentSession.title;
-    
-    const updatedParentChat: ChatSession = {
-      ...currentSession,
-      title: titleRename,
-      updatedAt: new Date().toISOString()
-    };
-    
-    // Save parent chat first to ensure foreign key constraints are met
-    await syncChatSummaryToSupabase(updatedParentChat);
+    let updatedParentChat: ChatSession;
 
-    // Save user message immediately to Supabase
-    console.log("[Nexa Client] 📤 Syncing user message to Supabase:", newUserMsg.id);
-    await syncMessageSummaryToSupabase(targetChatId, newUserMsg);
+    // 1 & 2. Create message & IMMEDIATELY update active conversation in React state
+    if (!currentSession) {
+      const newId = `session-${Date.now()}`;
+      currentSession = {
+        id: newId,
+        title: promptToSend.substring(0, 36) + "...",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [newUserMsg],
+        isPinned: false,
+        mode: activeMode || "general",
+        userEmail: user && !user.isGuest ? user.email || "" : undefined,
+      };
+      targetChatId = newId;
+      updatedParentChat = currentSession;
+      setSessions([currentSession]);
+      setActiveSessionId(newId);
+    } else {
+      const isFirstAssistantResponse = currentSession.messages.length === 0;
+      const titleRename = isFirstAssistantResponse ? promptToSend.substring(0, 36) + "..." : currentSession.title;
+      
+      updatedParentChat = {
+        ...currentSession,
+        title: titleRename,
+        updatedAt: new Date().toISOString(),
+        messages: [...currentSession.messages, newUserMsg]
+      };
 
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "message-sync",
-        chatId: targetChatId,
-        message: newUserMsg
-      }));
+      setSessions((prev) =>
+        prev.map((s) => {
+          if (s.id === targetChatId) {
+            return updatedParentChat;
+          }
+          return s;
+        })
+      );
+      if (activeSessionId !== targetChatId) {
+        setActiveSessionId(targetChatId);
+      }
     }
-    syncChatSummaryToSupabase(updatedParentChat);
 
-    setSessions((prev) =>
-      prev.map((s) => {
-        if (s.id === targetChatId) {
-          return {
-            ...s,
-            title: titleRename,
-            messages: [...s.messages, newUserMsg],
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return s;
-      })
-    );
-
+    // Immediately update UI inputs and loading indicator
+    setInputPrompt("");
     setAttachment(null);
+    setIsLoading(true);
+
+    const tUserMsgRendered = performance.now(); // 2. USER MESSAGE RENDERED
+
+    // 5. Fire-and-forget Supabase synchronization in background (without awaiting)
+    const tBackgroundCloudSyncStarted = performance.now(); // 5. BACKGROUND CLOUD SYNC STARTED
+    setTimeout(() => {
+      syncChatSummaryToSupabase(updatedParentChat);
+      syncMessageSummaryToSupabase(targetChatId, newUserMsg);
+
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: "message-sync",
+          chatId: targetChatId,
+          message: newUserMsg
+        }));
+      }
+    }, 0);
+
+    // Audio & voice status non-blocking
+    try { playUiSound("message_sent"); } catch (_) {}
+    if (voiceModeActiveRef.current) {
+      setVoiceState("processing");
+    }
 
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -3384,8 +3402,8 @@ export default function App() {
     abortControllerRef.current = controller;
 
     try {
-      // Build previous messages stream context list (limited to last 12 messages)
-      const feedMessages = [...currentSession.messages, newUserMsg].slice(-12);
+      // Build stream payload context
+      const feedMessages = updatedParentChat.messages.slice(-12);
 
       const otherSessionsPayload = sessions
         .filter((s) => s.id !== targetChatId && s.messages && s.messages.length > 0)
@@ -3396,7 +3414,6 @@ export default function App() {
           messages: s.messages.slice(-3).map((m) => ({ role: m.role, content: m.content })),
         }));
 
-      // Call Express Fullstack proxy
       const payload = {
         messages: feedMessages,
         mode: activeMode,
@@ -3409,6 +3426,8 @@ export default function App() {
         otherSessions: otherSessionsPayload,
       };
 
+      // 3. IMMEDIATELY start Gemini API request without waiting for database operations
+      const tGeminiRequestStarted = performance.now(); // 3. GEMINI REQUEST STARTED
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -3417,11 +3436,27 @@ export default function App() {
       });
 
       const data = await response.json();
+      const tFirstTokenReceived = performance.now(); // 4. FIRST TOKEN RECEIVED
+
+      // Print comprehensive pipeline timing report
+      console.log(
+        `%c📊 [Nexa Message Pipeline Timing Report]\n` +
+        `CLICK: 0.00 ms\n` +
+        `↓\n` +
+        `USER MESSAGE RENDERED: +${(tUserMsgRendered - tClick).toFixed(2)} ms\n` +
+        `↓\n` +
+        `GEMINI REQUEST STARTED: +${(tGeminiRequestStarted - tClick).toFixed(2)} ms (Delta from render: ${(tGeminiRequestStarted - tUserMsgRendered).toFixed(2)} ms)\n` +
+        `↓\n` +
+        `FIRST TOKEN RECEIVED: +${(tFirstTokenReceived - tClick).toFixed(2)} ms (API latency: ${(tFirstTokenReceived - tGeminiRequestStarted).toFixed(2)} ms)\n` +
+        `↓\n` +
+        `BACKGROUND CLOUD SYNC STARTED: +${(tBackgroundCloudSyncStarted - tClick).toFixed(2)} ms`,
+        "color: #06b6d4; font-weight: bold; font-size: 13px;"
+      );
 
       if (data.content?.includes("![") || data.engineId === "vision") {
-        playUiSound("image_generated");
+        try { playUiSound("image_generated"); } catch (_) {}
       } else {
-        playUiSound("ai_response_start");
+        try { playUiSound("ai_response_start"); } catch (_) {}
       }
 
       setIsLoading(false);
@@ -3440,7 +3475,7 @@ export default function App() {
         quiz: data.quiz || undefined,
       };
 
-      // Append assistant message placeholder immediately
+      // Append assistant message placeholder
       setSessions((prev) =>
         prev.map((s) => {
           if (s.id === targetChatId) {
@@ -3454,16 +3489,19 @@ export default function App() {
         })
       );
 
-      // Start tokenized streaming
+      // 4. Stream AI response as soon as first token is received
       const fullContent = data.content || "";
       const speedSetting = settingsRef.current.renderingSpeed || "turbo";
+      const isFirstAssistantResponse = currentSession ? currentSession.messages.length === 0 : true;
 
       if (speedSetting === "instant") {
         updateMessageContent(targetChatId, assistantMsgId, fullContent);
         setIsGenerating(false);
         const finalMsg = { ...newAssistantMsg, content: fullContent };
         triggerVoiceIfNeeded(finalMsg);
-        await syncMessageSummaryToSupabase(targetChatId, finalMsg);
+        
+        // Non-blocking fire-and-forget sync
+        syncMessageSummaryToSupabase(targetChatId, finalMsg);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({
             type: "message-sync",
@@ -3475,7 +3513,8 @@ export default function App() {
           ...updatedParentChat,
           updatedAt: new Date().toISOString()
         };
-        await syncChatSummaryToSupabase(finalParentChat);
+        syncChatSummaryToSupabase(finalParentChat);
+
         if (isFirstAssistantResponse) {
           generateAndSetAutomatedTitle(targetChatId, promptToSend, fullContent);
         }
@@ -3487,8 +3526,6 @@ export default function App() {
         if (streamIntervalRef.current) {
           clearInterval(streamIntervalRef.current);
         }
-
-        console.log("[Nexa Debug] [Streaming Start] Initiating streaming for Conversation ID:", targetChatId);
 
         let intervalMs = 20;
         let divisor = 80;
@@ -3512,19 +3549,17 @@ export default function App() {
           minTokens = 4;
         }
 
-        streamIntervalRef.current = setInterval(async () => {
+        streamIntervalRef.current = setInterval(() => {
           if (currentTokenIdx >= tokens.length) {
             clearInterval(streamIntervalRef.current);
             streamIntervalRef.current = null;
             setIsGenerating(false);
 
-            console.log("[Nexa Debug] [Stream Finished] Conversation ID after stream finishes:", targetChatId, "Full content length:", fullContent.length);
-
             const finalMsg = { ...newAssistantMsg, content: fullContent };
             triggerVoiceIfNeeded(finalMsg);
 
-            // Sync complete message to Supabase
-            await syncMessageSummaryToSupabase(targetChatId, finalMsg);
+            // Sync complete message to Supabase in background (fire-and-forget)
+            syncMessageSummaryToSupabase(targetChatId, finalMsg);
             if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
               wsRef.current.send(JSON.stringify({
                 type: "message-sync",
@@ -3536,7 +3571,7 @@ export default function App() {
               ...updatedParentChat,
               updatedAt: new Date().toISOString()
             };
-            await syncChatSummaryToSupabase(finalParentChat);
+            syncChatSummaryToSupabase(finalParentChat);
 
             if (isFirstAssistantResponse) {
               generateAndSetAutomatedTitle(targetChatId, promptToSend, fullContent);
@@ -3552,28 +3587,27 @@ export default function App() {
         }, intervalMs);
       }
 
-      // Track routing updates inside Admin Metric streams
-      const routeId = data.engineId || "core";
-      setAdminMetrics((prev) => ({
-        ...prev,
-        totalQueriesToday: prev.totalQueriesToday + 1,
-        engineRoutingStats: {
-          ...prev.engineRoutingStats,
-          [routeId]: prev.engineRoutingStats[routeId as NexaEngineId] + 1,
-        },
-      }));
+      // Track routing updates asynchronously
+      setTimeout(() => {
+        const routeId = data.engineId || "core";
+        setAdminMetrics((prev) => ({
+          ...prev,
+          totalQueriesToday: prev.totalQueriesToday + 1,
+          engineRoutingStats: {
+            ...prev.engineRoutingStats,
+            [routeId]: (prev.engineRoutingStats[routeId as NexaEngineId] || 0) + 1,
+          },
+        }));
+        triggerActionTracking("send_message", { engineId: routeId });
 
-      // Track gamification progress
-      const resolvedEngineId = data.engineId || "core";
-      triggerActionTracking("send_message", { engineId: resolvedEngineId });
-
-      if (activeMode === "research" || data.researchReport) {
-        triggerActionTracking("complete_research");
-      } else if (activeMode === "study" || resolvedEngineId === "learning") {
-        triggerActionTracking("complete_study");
-      } else if (activeMode === "factcheck" || data.factCheck) {
-        triggerActionTracking("complete_fact_check");
-      }
+        if (activeMode === "research" || data.researchReport) {
+          triggerActionTracking("complete_research");
+        } else if (activeMode === "study" || routeId === "learning") {
+          triggerActionTracking("complete_study");
+        } else if (activeMode === "factcheck" || data.factCheck) {
+          triggerActionTracking("complete_fact_check");
+        }
+      }, 0);
 
     } catch (err: any) {
       if (err.name === "AbortError" || err.message?.includes("aborted")) {

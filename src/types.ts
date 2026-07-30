@@ -99,6 +99,7 @@ export interface GamificationState {
 }
 
 export interface UserProfile {
+  id?: string;
   uid?: string;
   email: string;
   fullName: string;

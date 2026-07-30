@@ -242,26 +242,16 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       try {
         const archivedPayload = {
           id: chat.id,
-          chat_id: chat.id,
-          conversation_id: chat.id,
           user_id: effectiveUserId,
-          user_email: effectiveEmail,
-          title: chat.title || "Archived Session",
-          archived_at: new Date().toISOString(),
-          created_at: chat.createdAt || new Date().toISOString(),
-          updated_at: chat.updatedAt || new Date().toISOString(),
-          is_archived: true
+          chat_id: chat.id,
+          archived_at: new Date().toISOString()
         };
         const { error: archErr } = await supabase.from("archived_conversations").upsert(archivedPayload, { onConflict: "id" });
         if (archErr) {
-          console.warn("[Archive] archived_conversations upsert error:", archErr.message, "Retrying basic...");
-          await supabase.from("archived_conversations").upsert({
-            id: chat.id,
-            title: chat.title || "Archived Session",
-            user_email: effectiveEmail
-          }, { onConflict: "id" });
+          console.warn("[Archive] archived_conversations upsert error:", archErr.message);
+        } else {
+          console.log("[Archive] Archived table updated for chat:", chat.id);
         }
-        console.log("[Archive] Archived table updated for chat:", chat.id);
       } catch (e) {
         console.warn("[Archive] archived_conversations mirror exception:", e);
       }

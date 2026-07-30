@@ -2293,6 +2293,41 @@ export default function App() {
     );
   };
 
+  const archiveChat = async (chatId: string) => {
+    console.log("ARCHIVE CLICKED");
+    console.log("CHAT ID", chatId);
+    const userId = user?.id || user?.uid || "guest";
+    console.log("USER ID", userId);
+    console.log("BEFORE ARCHIVE INSERT");
+
+    try {
+      const result = await supabase
+        .from("archived_conversations")
+        .insert({
+          id: chatId,
+          user_id: userId,
+          chat_id: chatId,
+          archived_at: new Date().toISOString()
+        });
+
+      console.log("AFTER ARCHIVE INSERT", result.data, result.error);
+
+      if (result.error && (result.error.code === "23505" || result.error.message?.includes("duplicate"))) {
+        const upsertResult = await supabase
+          .from("archived_conversations")
+          .upsert({
+            id: chatId,
+            user_id: userId,
+            chat_id: chatId,
+            archived_at: new Date().toISOString()
+          }, { onConflict: "id" });
+        console.log("AFTER ARCHIVE UPSERT FALLBACK", upsertResult.data, upsertResult.error);
+      }
+    } catch (err) {
+      console.error("[Archive] Exception during archive insert:", err);
+    }
+  };
+
   const handleToggleArchive = (id: string) => {
     console.log("[Archive] Clicked");
     console.log("[Archive] Selected Chat ID:", id);
@@ -2301,6 +2336,7 @@ export default function App() {
     let nextActiveMode: ChatSession["mode"] = "general";
     let shouldCreateNew = false;
     let targetUpdatedChat: ChatSession | null = null;
+    let isArchiving = false;
 
     setSessions((prevSessions) => {
       const targetSession = prevSessions.find((s) => s.id === id);
@@ -2310,6 +2346,7 @@ export default function App() {
       }
 
       const newIsArchived = !(targetSession as any).isArchived;
+      isArchiving = newIsArchived;
 
       const updatedChat: ChatSession = {
         ...targetSession,
@@ -2349,6 +2386,19 @@ export default function App() {
 
       return updatedSessions;
     });
+
+    if (isArchiving) {
+      archiveChat(id);
+    } else {
+      (async () => {
+        try {
+          await supabase.from("archived_conversations").delete().eq("id", id);
+          console.log("[Archive] Removed from archived_conversations table");
+        } catch (err) {
+          console.warn("[Archive] Delete error:", err);
+        }
+      })();
+    }
 
     if (targetUpdatedChat) {
       syncChatSummaryToSupabase(targetUpdatedChat);

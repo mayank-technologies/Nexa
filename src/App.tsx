@@ -2404,6 +2404,7 @@ export default function App() {
   };
 
   const handleToggleArchive = (id: string) => {
+    console.log("ARCHIVE FUNCTION ENTERED");
     const targetSession = sessions.find((s) => s.id === id);
     const isCurrentlyArchived = (targetSession as any)?.isArchived || false;
 
@@ -3824,6 +3825,7 @@ export default function App() {
             }}
             onNewSession={handleNewSession}
             onDeleteSession={handleDeleteSession}
+            onArchiveSession={handleToggleArchive}
             onRenameSession={handleRenameSession}
             onPinSession={handlePinSession}
             onReorderSessions={handleReorderSessions}
@@ -3895,6 +3897,7 @@ export default function App() {
                   }}
                   onNewSession={handleNewSession}
                   onDeleteSession={handleDeleteSession}
+                  onArchiveSession={handleToggleArchive}
                   onRenameSession={handleRenameSession}
                   onPinSession={handlePinSession}
                   onReorderSessions={handleReorderSessions}

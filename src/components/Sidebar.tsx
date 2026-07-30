@@ -75,6 +75,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewSession: (mode?: ChatSession["mode"]) => void;
   onDeleteSession: (id: string) => void;
+  onArchiveSession?: (id: string) => void;
   onRenameSession: (id: string, newTitle: string) => void;
   onPinSession: (id: string) => void;
   onReorderSessions?: (sessions: ChatSession[]) => void;
@@ -104,6 +105,7 @@ export function Sidebar({
   onSelectSession,
   onNewSession,
   onDeleteSession,
+  onArchiveSession,
   onRenameSession,
   onPinSession,
   onReorderSessions,
@@ -1357,6 +1359,20 @@ export function Sidebar({
                   <span>Share Chat</span>
                 </button>
               )}
+
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  console.log("MENU ITEM CLICKED");
+                  console.log("ARCHIVE HANDLER ENTERED");
+                  onArchiveSession?.(activeMenu.session.id);
+                  setActiveMenu(null);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] transition-colors cursor-pointer"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>{(activeMenu.session as any).isArchived ? "Unarchive Chat" : "Archive Chat"}</span>
+              </button>
 
               <button
                 onClick={(e) => {

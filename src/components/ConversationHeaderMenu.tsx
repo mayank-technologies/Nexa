@@ -152,6 +152,8 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
 
   const handleArchiveAction = () => {
     try {
+      console.log("MENU ITEM CLICKED");
+      console.log("ARCHIVE HANDLER ENTERED");
       console.log("[Nexa HeaderMenu Audit] Executing Archive Toggle for session:", activeSession.id);
       onArchiveToggle(activeSession.id);
       setIsOpen(false);

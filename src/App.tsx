@@ -2301,6 +2301,17 @@ export default function App() {
     console.log("user.id", userId);
     console.log("BEFORE ARCHIVE INSERT");
 
+    console.log("chatId =", chatId);
+    console.log("user =", user);
+    console.log("user.id =", user?.id);
+    console.log("user.uid =", user?.uid);
+    console.log("payload =", {
+      id: chatId,
+      user_id: user?.id || user?.uid || "guest",
+      chat_id: chatId,
+      archived_at: new Date().toISOString()
+    });
+
     let data: any = null;
     let error: any = null;
 
@@ -2314,6 +2325,9 @@ export default function App() {
           archived_at: new Date().toISOString()
         })
         .select();
+
+      console.log(result.data);
+      console.log(result.error);
 
       data = result.data;
       error = result.error;

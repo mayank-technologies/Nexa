@@ -2297,17 +2297,24 @@ export default function App() {
     console.log("ARCHIVE CLICKED");
     console.log("archiveChat START");
     console.log("chat.id", chatId);
-    const userId = user?.id || user?.uid || "guest";
-    console.log("user.id", userId);
-    console.log("BEFORE ARCHIVE INSERT");
 
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+
+    if (!authUser) {
+      console.error("[Archive] No authenticated Supabase user");
+      return;
+    }
+
+    const userId = authUser.id;
+    console.log("BEFORE ARCHIVE INSERT");
     console.log("chatId =", chatId);
-    console.log("user =", user);
-    console.log("user.id =", user?.id);
-    console.log("user.uid =", user?.uid);
+    console.log("authUser =", authUser);
+    console.log("userId =", userId);
     console.log("payload =", {
       id: chatId,
-      user_id: user?.id || user?.uid || "guest",
+      user_id: userId,
       chat_id: chatId,
       archived_at: new Date().toISOString()
     });

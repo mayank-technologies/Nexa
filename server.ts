@@ -64,9 +64,9 @@ async function generateContentWithRetry(params: {
   turboMode?: boolean;
 }): Promise<any> {
   const modelsToTry = [
-    params.initialModel || "gemini-3.5-flash",
-    "gemini-flash-latest",
-    "gemini-3.1-flash-lite"
+    params.initialModel || "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
   ];
   let lastError: any = null;
 
@@ -79,7 +79,7 @@ async function generateContentWithRetry(params: {
       const currentConfig = { ...params.config };
 
       // Set thinkingLevel based on turboMode
-      const isGemini3 = model.includes("gemini-3") || model.includes("gemini-3.5");
+      const isGemini3 = model.includes("gemini-3");
       if (isGemini3) {
         if (params.turboMode !== false) {
           // Bypasses thinking phase completely for near-instant responses
@@ -1330,9 +1330,9 @@ ${res.isPrivateOrError ? `STATUS: Direct fetch blocked or failed (${res.errorMes
         }
       }
 
-      // Choose speed-optimized model: gemini-3.5-flash handles link analysis and complex content better
+      // Choose speed-optimized model: gemini-3.6-flash handles link analysis and complex content better
       const modelName = (mode === "research" || mode === "factcheck" || mode === "quiz" || hasUrls)
-        ? "gemini-3.5-flash"
+        ? "gemini-3.6-flash"
         : "gemini-3.1-flash-lite";
 
       // ----------------------------------------------------

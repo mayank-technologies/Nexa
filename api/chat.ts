@@ -40,9 +40,9 @@ async function generateContentWithRetry(params: {
   initialModel?: string;
 }): Promise<any> {
   const modelsToTry = [
-    params.initialModel || "gemini-3.5-flash",
-    "gemini-flash-latest",
-    "gemini-3.1-flash-lite"
+    params.initialModel || "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
   ];
   let lastError: any = null;
 
@@ -215,7 +215,7 @@ export default async function handler(req: any, res: any) {
 
     // Select speed-optimized Gemini model: gemini-3.1-flash-lite for instant chats
     const modelName = (mode === "research" || mode === "factcheck" || mode === "quiz")
-      ? "gemini-3.5-flash"
+      ? "gemini-3.6-flash"
       : "gemini-3.1-flash-lite";
 
     // ----------------------------------------------------

@@ -830,7 +830,7 @@ export function AdminDashboard({
                   <br />
                   Ingress routing: Nginx reverse-proxy on Port 3000.
                   <br />
-                  Engine Host: models/gemini-3.5-flash (Google GenAI)
+                  Engine Host: models/gemini-3.6-flash (Google GenAI)
                 </p>
               </div>
             </div>

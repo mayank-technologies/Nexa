@@ -2418,6 +2418,7 @@ export default function App() {
   };
 
   const handleToggleArchive = (id: string) => {
+    console.log("[handleToggleArchive] TRIGGERED for session ID:", id);
     console.log("ARCHIVE FUNCTION ENTERED");
     const targetSession = sessions.find((s) => s.id === id);
     const isCurrentlyArchived = (targetSession as any)?.isArchived || false;
@@ -2891,7 +2892,7 @@ export default function App() {
       if (!msg) return;
 
       const title = `Nexa_Intelligence_Report_${msgId.substring(0, 5)}`;
-      const fileContent = `====================================================\nNEXA PROPIRITARY RESEARCH REPORT\n====================================================\nTimestamp: ${msg.timestamp}\nOrigin Thread ID: ${activeSessionId}\nEngine Host: gemini-3.5-flash\n\n${msg.content}\n\n====================================================\nEnd of Nexa Report Document\nGenerated in Secures Sandboxes\n====================================================`;
+      const fileContent = `====================================================\nNEXA PROPIRITARY RESEARCH REPORT\n====================================================\nTimestamp: ${msg.timestamp}\nOrigin Thread ID: ${activeSessionId}\nEngine Host: gemini-3.6-flash\n\n${msg.content}\n\n====================================================\nEnd of Nexa Report Document\nGenerated in Secures Sandboxes\n====================================================`;
       
       const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8" });
       const url = URL.createObjectURL(blob);

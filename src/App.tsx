@@ -2314,6 +2314,17 @@ export default function App() {
       return;
     }
 
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    console.log("[JWT DEBUG] session exists:", !!session);
+    console.log("[JWT DEBUG] session user id:", session?.user?.id);
+    console.log(
+      "[JWT DEBUG] access token exists:",
+      !!session?.access_token
+    );
+
     const archivePayload = {
       id: chatId,
       user_id: authUser?.id,
@@ -2329,6 +2340,11 @@ export default function App() {
       authUser?.id === archivePayload.user_id
     );
     console.log("[RLS DEBUG] payload:", archivePayload);
+
+    const { data: rpcData, error: rpcError } = await supabase.rpc("check_my_auth_uid");
+
+    console.log("[RLS CONTEXT DEBUG] auth.uid from Postgres:", rpcData);
+    console.log("[RLS CONTEXT DEBUG] RPC error:", rpcError);
 
     let data: any = null;
     let error: any = null;

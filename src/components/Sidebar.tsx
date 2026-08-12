@@ -363,9 +363,29 @@ export function Sidebar({
     return matchesTitle || matchesContent;
   });
 
+  console.log("[PIN RENDER DEBUG] pinned sessions:",
+    filteredSessions
+      .filter(s => s.isPinned)
+      .map(s => ({
+        id: s.id,
+        title: s.title,
+        isPinned: s.isPinned,
+        pinOrder: s.pinOrder,
+      }))
+  );
+
   const pinnedChats = filteredSessions
     .filter((s) => s.isPinned && !(s as any).isArchived)
     .sort((a, b) => (a.pinOrder ?? 0) - (b.pinOrder ?? 0));
+
+  console.log("[PIN UI DEBUG] pinnedChats:", pinnedChats.map(s => ({
+    id: s.id,
+    title: s.title,
+    isPinned: s.isPinned,
+    pinOrder: s.pinOrder,
+    isArchived: (s as any).isArchived,
+    isDeleted: (s as any).isDeleted
+  })));
 
   const unpinnedChats = filteredSessions
     .filter((s) => !s.isPinned && !(s as any).isArchived)
@@ -739,7 +759,41 @@ export function Sidebar({
       >
         {!isCollapsed ? (
           <>
-            {/* 1. Collapsible Recent Chats */}
+            {/* 1. Independent Pinned Chats Section */}
+            {pinnedChats.length > 0 && (
+              <div className="space-y-1.5 w-full pl-1">
+                <div className="flex justify-between items-center px-1">
+                  <h5 className="text-[9px] font-black uppercase tracking-widest text-[#C96A3D] flex items-center gap-1">
+                    <Pin className="w-3 h-3 text-[#C96A3D] fill-[#C96A3D]/15 rotate-45 shrink-0" />
+                    <span>Pinned</span>
+                  </h5>
+                  <span className="text-[9px] font-extrabold text-[#C96A3D] font-mono bg-[#C96A3D]/10 px-1.5 py-0.5 rounded-full shrink-0">
+                    {pinnedChats.length}
+                  </span>
+                </div>
+
+                <Reorder.Group
+                  axis="y"
+                  values={pinnedChats}
+                  onReorder={handleReorderPinned}
+                  className="space-y-1 w-full"
+                >
+                  {pinnedChats.map((session) => (
+                    <Reorder.Item
+                      key={session.id}
+                      value={session}
+                      dragListener={!searchQuery.trim()}
+                      className="outline-none w-full"
+                      style={{ position: "relative" }}
+                    >
+                      {renderChatItem(session, true)}
+                    </Reorder.Item>
+                  ))}
+                </Reorder.Group>
+              </div>
+            )}
+
+            {/* 2. Collapsible Recent Chats */}
             <div className="space-y-2 w-full">
               <button
                 onClick={() => setIsRecentChatsExpanded(!isRecentChatsExpanded)}
@@ -754,7 +808,7 @@ export function Sidebar({
                   <span>Recent Chats</span>
                 </div>
                 <span className="text-[9px] font-extrabold text-slate-400 dark:text-slate-500 font-mono bg-slate-50 dark:bg-slate-900/60 px-1.5 py-0.5 rounded-full shrink-0">
-                  {pinnedChats.length + unpinnedChats.length}
+                  {unpinnedChats.length}
                 </span>
               </button>
 
@@ -767,49 +821,7 @@ export function Sidebar({
                     transition={{ duration: 0.25, ease: "easeInOut" }}
                     className="overflow-hidden space-y-4 w-full"
                   >
-                    {/* A: Pinned Chats section */}
-                    {pinnedChats.length > 0 && (
-                      <div className="space-y-1.5 w-full pl-1">
-                        <div className="flex justify-between items-center px-1">
-                          <h5 className="text-[9px] font-black uppercase tracking-widest text-[#C96A3D] flex items-center gap-1">
-                            <Pin className="w-3 h-3 text-[#C96A3D] fill-[#C96A3D]/15 rotate-45 shrink-0" />
-                            <span>Pinned</span>
-                          </h5>
-                        </div>
-
-                        <Reorder.Group
-                          axis="y"
-                          values={pinnedChats}
-                          onReorder={handleReorderPinned}
-                          className="space-y-1 w-full"
-                        >
-                          {(() => {
-                            console.log("[RECENT RENDER DEBUG] source:", "pinnedChats (expanded)");
-                            console.log(
-                              "[RECENT RENDER DEBUG] sessions:",
-                              pinnedChats.map((s) => ({
-                                id: s.id,
-                                title: s.title,
-                                isArchived: (s as any).isArchived,
-                              }))
-                            );
-                            return pinnedChats.map((session) => (
-                              <Reorder.Item
-                                key={session.id}
-                                value={session}
-                                dragListener={!searchQuery.trim()}
-                                className="outline-none w-full"
-                                style={{ position: "relative" }}
-                              >
-                                {renderChatItem(session, true)}
-                              </Reorder.Item>
-                            ));
-                          })()}
-                        </Reorder.Group>
-                      </div>
-                    )}
-
-                    {/* B: Grouped Conversations */}
+                    {/* Grouped Conversations */}
                     {activeGroups.length > 0 ? (
                       activeGroups.map((group) => {
                         console.log("[RECENT RENDER DEBUG] source:", `group.chats [${group.title}]`);
@@ -1382,6 +1394,12 @@ export function Sidebar({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  console.log("[PIN CLICK DEBUG] Pin button clicked", {
+                    sessionId: activeMenu.session.id,
+                    title: activeMenu.session.title,
+                    isPinned: activeMenu.session.isPinned,
+                  });
+                  console.log("[PIN CLICK DEBUG] Calling pin handler", activeMenu.session.id);
                   onPinSession(activeMenu.session.id);
                   setActiveMenu(null);
                 }}

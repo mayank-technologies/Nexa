@@ -132,6 +132,12 @@ export const ConversationHeaderMenu: React.FC<ConversationHeaderMenuProps> = ({
 
   const handlePinAction = () => {
     try {
+      console.log("[PIN CLICK DEBUG] Pin button clicked", {
+        sessionId: activeSession.id,
+        title: activeSession.title,
+        isPinned: activeSession.isPinned,
+      });
+      console.log("[PIN CLICK DEBUG] Calling pin handler", activeSession.id);
       console.log("[Nexa HeaderMenu Audit] Executing Pin Toggle for session:", activeSession.id);
       onPinToggle(activeSession.id);
       setIsOpen(false);

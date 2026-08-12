@@ -1265,6 +1265,15 @@ export default function App() {
             return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
           });
 
+          console.log("[PIN FETCH DEBUG] fetched chat pin state:",
+            allSummaries.map(s => ({
+              id: s.id,
+              title: s.title,
+              isPinned: s.isPinned,
+              pinOrder: s.pinOrder
+            }))
+          );
+
           let mergedSessionsResult: ChatSession[] = [];
           setSessions((prevSessions) => {
             if (isJoiningSharedRef.current || isLoadingRef.current || isGeneratingRef.current) {
@@ -2540,7 +2549,20 @@ export default function App() {
   };
 
   const handlePinSession = (id: string) => {
+    console.log("[PIN HANDLER DEBUG] entered", {
+      id,
+      sessionsFound: sessions.some((s) => s.id === id),
+    });
+
     const sessionToPin = sessions.find((s) => s.id === id);
+
+    console.log("[PIN HANDLER DEBUG] target before", {
+      id: sessionToPin?.id,
+      title: sessionToPin?.title,
+      isPinned: sessionToPin?.isPinned,
+      pinOrder: sessionToPin?.pinOrder,
+    });
+
     if (!sessionToPin) return;
 
     if (!sessionToPin.isPinned) {
@@ -2565,7 +2587,23 @@ export default function App() {
             pinOrder: newPinned ? Date.now() : undefined,
             updatedAt: new Date().toISOString(),
           };
+
+          console.log("[PIN HANDLER DEBUG] target after", {
+            id: updatedChat?.id,
+            isPinned: updatedChat?.isPinned,
+            pinOrder: updatedChat?.pinOrder,
+          });
+
+          console.log("[PIN SUPABASE DEBUG] syncing", {
+            id: updatedChat.id,
+            isPinned: updatedChat.isPinned,
+            pinOrder: updatedChat.pinOrder,
+          });
+
           syncChatSummaryToSupabase(updatedChat);
+
+          console.log("[PIN SUPABASE DEBUG] sync completed");
+
           return updatedChat;
         }
         return s;

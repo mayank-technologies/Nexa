@@ -2375,28 +2375,46 @@ export default function App() {
       console.error("[Archive] Exception during archive insert:", err);
     }
 
-    console.log("Removing chat from active list");
+    console.log("[ARCHIVE UI DEBUG] archiveChat successful:", chatId);
+    const targetSession = sessions.find((s) => s.id === chatId);
+    console.log(
+      "[ARCHIVE UI DEBUG] session before update:",
+      targetSession
+    );
 
-    let nextActiveId: string | null = null;
-    let nextActiveMode: ChatSession["mode"] = "general";
-    let shouldCreateNew = false;
-    let targetUpdatedChat: ChatSession | null = null;
-
-    setSessions((prevSessions) => {
-      const targetSession = prevSessions.find((s) => s.id === chatId);
-      if (!targetSession) {
-        console.warn("[Archive] Target session not found for ID:", chatId);
-        return prevSessions;
-      }
-
+    if (targetSession) {
       const updatedChat: ChatSession = {
         ...targetSession,
         isArchived: true,
         updatedAt: new Date().toISOString(),
       };
-      targetUpdatedChat = updatedChat;
+      syncChatSummaryToSupabase(updatedChat);
+      console.log("[Archive] Archived table and chats table updated in Supabase");
+    }
+
+    let nextActiveId: string | null = null;
+    let nextActiveMode: ChatSession["mode"] = "general";
+    let shouldCreateNew = false;
+
+    setSessions((prevSessions) => {
+      const target = prevSessions.find((s) => s.id === chatId);
+      if (!target) {
+        console.warn("[Archive] Target session not found in state for ID:", chatId);
+        return prevSessions;
+      }
+
+      const updatedChat: ChatSession = {
+        ...target,
+        isArchived: true,
+        updatedAt: new Date().toISOString(),
+      };
 
       const updatedSessions = prevSessions.map((s) => (s.id === chatId ? updatedChat : s));
+
+      console.log(
+        "[ARCHIVE UI DEBUG] archived session after state update:",
+        updatedSessions.find((s) => s.id === chatId)
+      );
 
       // If the archived chat is currently active, switch to another existing active chat
       if (activeSessionId === chatId) {
@@ -2413,7 +2431,7 @@ export default function App() {
 
       setCustomToast({
         title: "Chat Archived",
-        message: `"${targetSession.title}" has been moved to your archive.`,
+        message: `"${target.title}" has been moved to your archive.`,
         type: "success",
       });
 
@@ -2422,11 +2440,6 @@ export default function App() {
 
     console.log("Refreshing archived chats");
     console.log("Refreshing active chats");
-
-    if (targetUpdatedChat) {
-      syncChatSummaryToSupabase(targetUpdatedChat);
-      console.log("[Archive] Archived table updated");
-    }
 
     if (nextActiveId) {
       console.log("[Archive] Active session switched to:", nextActiveId);

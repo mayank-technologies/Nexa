@@ -757,6 +757,27 @@ export async function fetchChatsFromSupabase(userEmail: string, userId?: string)
     const normalizedEmail = (userEmail || "").toLowerCase().trim();
     console.log("[Nexa Supabase] Fetching active chats for email:", normalizedEmail, "userId:", userId);
     
+    console.log("[ARCHIVE FETCH DEBUG] fetching archived chats");
+    console.log("[ARCHIVE FETCH DEBUG] current Supabase user:", userId);
+
+    const archivedChatIds = new Set<string>();
+    if (userId) {
+      const { data: archData, error: archError } = await supabase
+        .from("archived_conversations")
+        .select("chat_id, user_id")
+        .eq("user_id", userId);
+
+      console.log("[ARCHIVE FETCH DEBUG] data:", archData);
+      console.log("[ARCHIVE FETCH DEBUG] error:", archError);
+
+      if (archData && !archError) {
+        archData.forEach((row: any) => {
+          if (row.chat_id) archivedChatIds.add(row.chat_id);
+          if (row.id) archivedChatIds.add(row.id);
+        });
+      }
+    }
+
     let query = supabase.from("chats").select("*");
 
     if (userId && normalizedEmail) {
@@ -800,7 +821,7 @@ export async function fetchChatsFromSupabase(userEmail: string, userId?: string)
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       isPinned: row.is_pinned || false,
-      isArchived: row.is_archived || false,
+      isArchived: row.is_archived || archivedChatIds.has(row.id) || false,
       isFavorite: row.is_favorite || false,
       pinOrder: row.pin_order,
       mode: row.mode || "general",

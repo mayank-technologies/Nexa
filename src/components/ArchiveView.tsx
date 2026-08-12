@@ -116,7 +116,15 @@ export function ArchiveView({
             </motion.div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filtered.map((session) => (
+              {filtered.map((session) => {
+                console.log("[VISIBLE CHAT DEBUG]", {
+                  component: "ArchiveView",
+                  sessionId: session.id,
+                  title: session.title,
+                  isArchived: (session as any).isArchived,
+                  activeSessionId: null,
+                });
+                return (
                 <motion.div
                   key={session.id}
                   layoutId={`archive-${session.id}`}
@@ -177,7 +185,8 @@ export function ArchiveView({
                     </div>
                   </div>
                 </motion.div>
-              ))}
+              );
+            })}
             </div>
           )}
         </AnimatePresence>

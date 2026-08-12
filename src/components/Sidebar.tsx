@@ -371,6 +371,12 @@ export function Sidebar({
     .filter((s) => !s.isPinned && !(s as any).isArchived)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
+  console.log("[RECENT RENDER DEBUG] Sidebar recalculation - isMobileOpen:", isMobileOpen, "isCollapsed:", isCollapsed);
+  console.log("[RECENT RENDER DEBUG] raw sessions:", sessions.map((s) => ({ id: s.id, title: s.title, isArchived: (s as any).isArchived })));
+  console.log("[RECENT RENDER DEBUG] filteredSessions:", filteredSessions.map((s) => ({ id: s.id, title: s.title, isArchived: (s as any).isArchived })));
+  console.log("[RECENT RENDER DEBUG] pinnedChats:", pinnedChats.map((s) => ({ id: s.id, title: s.title, isArchived: (s as any).isArchived })));
+  console.log("[RECENT RENDER DEBUG] unpinnedChats:", unpinnedChats.map((s) => ({ id: s.id, title: s.title, isArchived: (s as any).isArchived })));
+
   // Date-based grouping helpers
   const getGroupTitle = (dateStr: string) => {
     const d = new Date(dateStr);
@@ -430,6 +436,13 @@ export function Sidebar({
 
   // Render a single chat row
   const renderChatItem = (session: ChatSession, isPinnedItem: boolean) => {
+    console.log("[VISIBLE CHAT DEBUG]", {
+      component: "Sidebar -> renderChatItem",
+      sessionId: session.id,
+      title: session.title,
+      isArchived: (session as any).isArchived,
+      activeSessionId,
+    });
     const isActive = session.id === activeSessionId;
     const isEditing = editingId === session.id;
 
@@ -770,40 +783,62 @@ export function Sidebar({
                           onReorder={handleReorderPinned}
                           className="space-y-1 w-full"
                         >
-                          {pinnedChats.map((session) => (
-                            <Reorder.Item
-                              key={session.id}
-                              value={session}
-                              dragListener={!searchQuery.trim()}
-                              className="outline-none w-full"
-                              style={{ position: "relative" }}
-                            >
-                              {renderChatItem(session, true)}
-                            </Reorder.Item>
-                          ))}
+                          {(() => {
+                            console.log("[RECENT RENDER DEBUG] source:", "pinnedChats (expanded)");
+                            console.log(
+                              "[RECENT RENDER DEBUG] sessions:",
+                              pinnedChats.map((s) => ({
+                                id: s.id,
+                                title: s.title,
+                                isArchived: (s as any).isArchived,
+                              }))
+                            );
+                            return pinnedChats.map((session) => (
+                              <Reorder.Item
+                                key={session.id}
+                                value={session}
+                                dragListener={!searchQuery.trim()}
+                                className="outline-none w-full"
+                                style={{ position: "relative" }}
+                              >
+                                {renderChatItem(session, true)}
+                              </Reorder.Item>
+                            ));
+                          })()}
                         </Reorder.Group>
                       </div>
                     )}
 
                     {/* B: Grouped Conversations */}
                     {activeGroups.length > 0 ? (
-                      activeGroups.map((group) => (
-                        <div key={group.title} className="space-y-1.5 w-full pl-1">
-                          <div className="flex justify-between items-center px-1">
-                            <h5 className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                              {group.title}
-                            </h5>
-                          </div>
+                      activeGroups.map((group) => {
+                        console.log("[RECENT RENDER DEBUG] source:", `group.chats [${group.title}]`);
+                        console.log(
+                          "[RECENT RENDER DEBUG] sessions:",
+                          group.chats.map((s) => ({
+                            id: s.id,
+                            title: s.title,
+                            isArchived: (s as any).isArchived,
+                          }))
+                        );
+                        return (
+                          <div key={group.title} className="space-y-1.5 w-full pl-1">
+                            <div className="flex justify-between items-center px-1">
+                              <h5 className="text-[9px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+                                {group.title}
+                              </h5>
+                            </div>
 
-                          <div className="space-y-1.5 w-full">
-                            {group.chats.map((session) => (
-                              <div key={session.id} className="w-full">
-                                {renderChatItem(session, false)}
-                              </div>
-                            ))}
+                            <div className="space-y-1.5 w-full">
+                              {group.chats.map((session) => (
+                                <div key={session.id} className="w-full">
+                                  {renderChatItem(session, false)}
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     ) : (
                       unpinnedChats.length === 0 && (
                         <p className="text-[11px] text-slate-400 italic text-left p-2">
@@ -1017,11 +1052,22 @@ export function Sidebar({
           /* Collapsed Icons Only mode: direct list of icons stacked vertically */
           <div className="flex flex-col items-center gap-3 w-full">
             {/* Pinned items */}
-            {pinnedChats.map((session) => (
-              <div key={session.id} className="w-full flex justify-center">
-                {renderChatItem(session, true)}
-              </div>
-            ))}
+            {(() => {
+              console.log("[RECENT RENDER DEBUG] source:", "pinnedChats (collapsed)");
+              console.log(
+                "[RECENT RENDER DEBUG] sessions:",
+                pinnedChats.map((s) => ({
+                  id: s.id,
+                  title: s.title,
+                  isArchived: (s as any).isArchived,
+                }))
+              );
+              return pinnedChats.map((session) => (
+                <div key={session.id} className="w-full flex justify-center">
+                  {renderChatItem(session, true)}
+                </div>
+              ));
+            })()}
 
             {/* Separator if both pinned and unpinned exist */}
             {pinnedChats.length > 0 && unpinnedChats.length > 0 && (
@@ -1029,11 +1075,22 @@ export function Sidebar({
             )}
 
             {/* Unpinned items */}
-            {unpinnedChats.slice(0, visibleCount).map((session) => (
-              <div key={session.id} className="w-full flex justify-center">
-                {renderChatItem(session, false)}
-              </div>
-            ))}
+            {(() => {
+              console.log("[RECENT RENDER DEBUG] source:", "unpinnedChats (collapsed)");
+              console.log(
+                "[RECENT RENDER DEBUG] sessions:",
+                unpinnedChats.slice(0, visibleCount).map((s) => ({
+                  id: s.id,
+                  title: s.title,
+                  isArchived: (s as any).isArchived,
+                }))
+              );
+              return unpinnedChats.slice(0, visibleCount).map((session) => (
+                <div key={session.id} className="w-full flex justify-center">
+                  {renderChatItem(session, false)}
+                </div>
+              ));
+            })()}
 
             {/* Search History icon separator */}
             <div className="w-8 border-t border-slate-100 dark:border-slate-800/60 my-2" />

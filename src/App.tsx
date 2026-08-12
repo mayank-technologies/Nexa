@@ -2309,146 +2309,130 @@ export default function App() {
       error: authError,
     } = await supabase.auth.getUser();
 
-    if (!authUser) {
-      console.error("[Archive] No authenticated Supabase user");
-      return;
-    }
+    if (authUser) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    console.log("[JWT DEBUG] session exists:", !!session);
-    console.log("[JWT DEBUG] session user id:", session?.user?.id);
-    console.log(
-      "[JWT DEBUG] access token exists:",
-      !!session?.access_token
-    );
-
-    const archivePayload = {
-      id: chatId,
-      user_id: authUser?.id,
-      chat_id: chatId,
-      archived_at: new Date().toISOString(),
-    };
-
-    console.log("[RLS DEBUG] authError:", authError);
-    console.log("[RLS DEBUG] authUser.id:", authUser?.id);
-    console.log("[RLS DEBUG] payload.user_id:", archivePayload.user_id);
-    console.log(
-      "[RLS DEBUG] IDs MATCH:",
-      authUser?.id === archivePayload.user_id
-    );
-    console.log("[RLS DEBUG] payload:", archivePayload);
-
-    const { data: rpcData, error: rpcError } = await supabase.rpc("check_my_auth_uid");
-
-    console.log("[RLS CONTEXT DEBUG] auth.uid from Postgres:", rpcData);
-    console.log("[RLS CONTEXT DEBUG] RPC error:", rpcError);
-
-    let data: any = null;
-    let error: any = null;
-
-    try {
-      const result = await supabase
-        .from("archived_conversations")
-        .insert(archivePayload)
-        .select();
-
-      console.log("[RLS DEBUG] insert data:", result.data);
-      console.log("[RLS DEBUG] insert error:", result.error);
-
-      data = result.data;
-      error = result.error;
-
-      if (error && (error.code === "23505" || error.message?.includes("duplicate"))) {
-        const upsertResult = await supabase
-          .from("archived_conversations")
-          .upsert(archivePayload, { onConflict: "id" })
-          .select();
-        data = upsertResult.data;
-        error = upsertResult.error;
-        console.log("[RLS DEBUG] upsert fallback data:", data);
-        console.log("[RLS DEBUG] upsert fallback error:", error);
-      }
-    } catch (err) {
-      console.error("[Archive] Exception during archive insert:", err);
-    }
-
-    console.log("[ARCHIVE UI DEBUG] archiveChat successful:", chatId);
-    const targetSession = sessions.find((s) => s.id === chatId);
-    console.log(
-      "[ARCHIVE UI DEBUG] session before update:",
-      targetSession
-    );
-
-    if (targetSession) {
-      const updatedChat: ChatSession = {
-        ...targetSession,
-        isArchived: true,
-        updatedAt: new Date().toISOString(),
-      };
-      syncChatSummaryToSupabase(updatedChat);
-      console.log("[Archive] Archived table and chats table updated in Supabase");
-    }
-
-    let nextActiveId: string | null = null;
-    let nextActiveMode: ChatSession["mode"] = "general";
-    let shouldCreateNew = false;
-
-    setSessions((prevSessions) => {
-      const target = prevSessions.find((s) => s.id === chatId);
-      if (!target) {
-        console.warn("[Archive] Target session not found in state for ID:", chatId);
-        return prevSessions;
-      }
-
-      const updatedChat: ChatSession = {
-        ...target,
-        isArchived: true,
-        updatedAt: new Date().toISOString(),
-      };
-
-      const updatedSessions = prevSessions.map((s) => (s.id === chatId ? updatedChat : s));
-
+      console.log("[JWT DEBUG] session exists:", !!session);
+      console.log("[JWT DEBUG] session user id:", session?.user?.id);
       console.log(
-        "[ARCHIVE UI DEBUG] archived session after state update:",
-        updatedSessions.find((s) => s.id === chatId)
+        "[JWT DEBUG] access token exists:",
+        !!session?.access_token
       );
 
-      // If the archived chat is currently active, switch to another existing active chat
-      if (activeSessionId === chatId) {
-        const remainingActive = updatedSessions.filter(
-          (s) => !s.isArchived && !s.isDeleted
-        );
-        if (remainingActive.length > 0) {
-          nextActiveId = remainingActive[0].id;
-          nextActiveMode = remainingActive[0].mode || "general";
-        } else {
-          shouldCreateNew = true;
+      const archivePayload = {
+        id: chatId,
+        user_id: authUser?.id,
+        chat_id: chatId,
+        archived_at: new Date().toISOString(),
+      };
+
+      console.log("[RLS DEBUG] authError:", authError);
+      console.log("[RLS DEBUG] authUser.id:", authUser?.id);
+      console.log("[RLS DEBUG] payload.user_id:", archivePayload.user_id);
+      console.log(
+        "[RLS DEBUG] IDs MATCH:",
+        authUser?.id === archivePayload.user_id
+      );
+      console.log("[RLS DEBUG] payload:", archivePayload);
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc("check_my_auth_uid");
+
+      console.log("[RLS CONTEXT DEBUG] auth.uid from Postgres:", rpcData);
+      console.log("[RLS CONTEXT DEBUG] RPC error:", rpcError);
+
+      try {
+        const result = await supabase
+          .from("archived_conversations")
+          .insert(archivePayload)
+          .select();
+
+        console.log("[RLS DEBUG] insert data:", result.data);
+        console.log("[RLS DEBUG] insert error:", result.error);
+
+        if (result.error && (result.error.code === "23505" || result.error.message?.includes("duplicate"))) {
+          const upsertResult = await supabase
+            .from("archived_conversations")
+            .upsert(archivePayload, { onConflict: "id" })
+            .select();
+          console.log("[RLS DEBUG] upsert fallback data:", upsertResult.data);
+          console.log("[RLS DEBUG] upsert fallback error:", upsertResult.error);
         }
+      } catch (err) {
+        console.error("[Archive] Exception during archive insert:", err);
       }
-
-      setCustomToast({
-        title: "Chat Archived",
-        message: `"${target.title}" has been moved to your archive.`,
-        type: "success",
-      });
-
-      return updatedSessions;
-    });
-
-    console.log("Refreshing archived chats");
-    console.log("Refreshing active chats");
-
-    if (nextActiveId) {
-      console.log("[Archive] Active session switched to:", nextActiveId);
-      setActiveSessionId(nextActiveId);
-      setActiveMode(nextActiveMode);
-    } else if (shouldCreateNew) {
-      console.log("[Archive] No remaining active chats; handleNewSession invoked");
-      handleNewSession("general");
+    } else {
+      console.log("[Archive] No authenticated Supabase user found; archiving locally in state.");
     }
+
+    console.log("[ARCHIVE STATE DEBUG] chatId:", chatId);
+
+    const targetSession = sessions.find((s) => s.id === chatId);
+
+    const updatedSessions = sessions.map((s) =>
+      s.id === chatId
+        ? {
+            ...s,
+            isArchived: true,
+            updatedAt: new Date().toISOString(),
+          }
+        : s
+    );
+
+    const updatedTarget = updatedSessions.find((s) => s.id === chatId);
+
+    console.log("[ARCHIVE STATE DEBUG] target BEFORE:", targetSession);
+    console.log(
+      "[ARCHIVE STATE DEBUG] target BEFORE isArchived:",
+      targetSession?.isArchived
+    );
+    console.log("[ARCHIVE STATE DEBUG] target AFTER:", updatedTarget);
+    console.log(
+      "[ARCHIVE STATE DEBUG] target AFTER isArchived:",
+      updatedTarget?.isArchived
+    );
+
+    const remainingActive = updatedSessions.filter(
+      (s) => !s.isArchived && !s.isDeleted
+    );
+
+    console.log(
+      "[ARCHIVE STATE DEBUG] Recent Chats AFTER:",
+      remainingActive
+    );
+    console.log(
+      "[ARCHIVE STATE DEBUG] Archive AFTER:",
+      updatedSessions.filter((s) => s.isArchived)
+    );
+
+    if (updatedTarget) {
+      syncChatSummaryToSupabase(updatedTarget);
+    }
+
+    setSessions(updatedSessions);
+
+    console.log("[ACTIVE ARCHIVE DEBUG] archived chat:", chatId);
+    console.log("[ACTIVE ARCHIVE DEBUG] current active:", activeSessionId);
+    console.log("[ACTIVE ARCHIVE DEBUG] remaining active:", remainingActive);
+
+    if (activeSessionId === chatId) {
+      if (remainingActive.length > 0) {
+        const next = remainingActive[0];
+        console.log("[ACTIVE ARCHIVE DEBUG] switching to:", next?.id);
+        setActiveSessionId(next.id);
+        setActiveMode(next.mode || "general");
+      } else {
+        console.log("[ACTIVE ARCHIVE DEBUG] no remaining active chats; handleNewSession invoked");
+        handleNewSession("general");
+      }
+    }
+
+    setCustomToast({
+      title: "Chat Archived",
+      message: `"${targetSession?.title || "Chat"}" has been moved to your archive.`,
+      type: "success",
+    });
 
     console.log("archiveChat END");
   };

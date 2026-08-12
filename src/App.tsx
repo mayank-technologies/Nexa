@@ -2575,7 +2575,50 @@ export default function App() {
   };
 
   const handleReorderSessions = (updatedSessions: ChatSession[]) => {
-    setSessions(updatedSessions);
+    const oldSessionsMap = new Map(sessions.map((s) => [s.id, s.pinOrder]));
+
+    let pinnedIndex = 0;
+    const reorderedSessions = updatedSessions.map((s) => {
+      if (s.isPinned) {
+        const newOrder = pinnedIndex++;
+        return {
+          ...s,
+          pinOrder: newOrder,
+        };
+      }
+      return s;
+    });
+
+    const reorderedPinnedChats = reorderedSessions.filter((s) => s.isPinned);
+
+    console.log(
+      "[PIN SYNC DEBUG] reordered pinned chats:",
+      reorderedPinnedChats.map((chat) => ({
+        id: chat.id,
+        title: chat.title,
+        isPinned: chat.isPinned,
+        pinOrder: chat.pinOrder,
+      }))
+    );
+
+    setSessions(reorderedSessions);
+
+    const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
+    if (currentUid) {
+      safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(reorderedSessions));
+    }
+
+    reorderedPinnedChats.forEach((chat) => {
+      const oldPinOrder = oldSessionsMap.get(chat.id);
+      if (oldPinOrder !== chat.pinOrder) {
+        console.log("[PIN SYNC DEBUG] syncing changed pin order:", {
+          id: chat.id,
+          oldPinOrder,
+          newPinOrder: chat.pinOrder,
+        });
+        syncChatSummaryToSupabase(chat);
+      }
+    });
   };
 
   const handleClearChats = () => {

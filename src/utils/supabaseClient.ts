@@ -192,7 +192,7 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       created_at: chat.createdAt || new Date().toISOString(),
       updated_at: chat.updatedAt || new Date().toISOString(),
       is_pinned: chat.isPinned || false,
-      pin_order: chat.pinOrder || null,
+      pin_order: chat.pinOrder !== undefined && chat.pinOrder !== null ? chat.pinOrder : null,
       mode: chat.mode || "general",
       selected_engine_id: chat.selectedEngineId || null,
       user_email: effectiveEmail

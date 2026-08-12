@@ -40,6 +40,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 1. Check current active Supabase session
         const { data: { session } } = await supabase.auth.getSession();
         
+        console.log("SESSION EXISTS:", !!session);
+        console.log("AUTH USER ID:", session?.user?.id);
+        console.log("AUTH EMAIL:", session?.user?.email);
+        
         if (session && session.user) {
           const sUser = session.user;
           console.log("[Nexa AuthProvider] [LOG] Active Supabase session detected:", sUser.email);
@@ -49,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             .from("users")
             .select("*")
             .eq("id", sUser.id)
-            .single();
+            .maybeSingle();
 
           if (profile && !error) {
             console.log("[Nexa AuthProvider] [LOG] Profile loaded from Supabase:", profile);
@@ -80,22 +84,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await syncUserProfileToSupabase(initialProfile);
           }
         } else {
-          // Check localStorage cached user
-          const cachedUserStr = safeStorage.getItem("nexa_user");
-          if (cachedUserStr) {
-            try {
-              const cachedUser = JSON.parse(cachedUserStr);
-              if (cachedUser) {
-                console.log("[Nexa AuthProvider] [LOG] Restored user from offline cache:", cachedUser.email);
-                setUser(cachedUser);
-                setIsAuthLoading(false);
-                return;
-              }
-            } catch (_) {}
-          }
-
-          // Fallback to Guest
-          console.log("[Nexa AuthProvider] [LOG] No session detected. Setting Guest User.");
+          // No active Supabase auth session! Do NOT treat nexa_user in localStorage as an authenticated cloud user.
+          console.log("[Nexa AuthProvider] [LOG] No Supabase session detected. Setting Guest User.");
+          safeStorage.removeItem("nexa_user");
+          
           setUser({
             email: "guest@nexa.ai",
             fullName: "Guest User",
@@ -116,10 +108,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Listen to Supabase auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("[Nexa AuthProvider] [LOG] Supabase onAuthStateChange fired:", event);
-      if (event === "SIGNED_IN" && session?.user) {
+      console.log("[Nexa AuthProvider] [LOG] Supabase onAuthStateChange fired:", event, "session user:", session?.user?.email);
+      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") && session?.user) {
         const sUser = session.user;
-        const { data: profile } = await supabase.from("users").select("*").eq("id", sUser.id).single();
+        const { data: profile } = await supabase.from("users").select("*").eq("id", sUser.id).maybeSingle();
         if (profile) {
           setUser({
             uid: sUser.id,
@@ -130,8 +122,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             preferences: profile.preferences || { primaryLanguage: "English", rememberPersonalization: true, personalizationContext: "" },
             gamification: profile.gamification || { points: 0, unlockedBadges: [], stats: { chatsCompleted: 0, enginesUsed: [], deepResearchCompleted: 0, studyCompleted: 0, quizzesTaken: 0, perfectQuizzes: 0, factChecksCompleted: 0 } }
           });
+        } else {
+          const resolvedFullName = sUser.user_metadata?.full_name || sUser.email?.split("@")[0] || "User";
+          const initialProfile = {
+            uid: sUser.id,
+            email: sUser.email || "",
+            fullName: resolvedFullName,
+            isGuest: false,
+            avatarUrl: `https://api.dicebear.com/7.x/initials/svg?seed=${resolvedFullName}`,
+            preferences: { primaryLanguage: "English", rememberPersonalization: true, personalizationContext: "" },
+            gamification: { points: 0, unlockedBadges: [], stats: { chatsCompleted: 0, enginesUsed: [], deepResearchCompleted: 0, studyCompleted: 0, quizzesTaken: 0, perfectQuizzes: 0, factChecksCompleted: 0 } }
+          };
+          setUser(initialProfile);
+          await syncUserProfileToSupabase(initialProfile);
         }
-      } else if (event === "SIGNED_OUT") {
+      } else if (event === "SIGNED_OUT" || (!session && event !== "INITIAL_SESSION")) {
         setUser({
           email: "guest@nexa.ai",
           fullName: "Guest User",
@@ -139,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           avatarUrl: "https://api.dicebear.com/7.x/initials/svg?seed=Guest",
           preferences: { primaryLanguage: "English", rememberPersonalization: true, personalizationContext: "" },
         });
+        safeStorage.removeItem("nexa_user");
       }
     });
 
@@ -152,7 +158,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     
     console.log("[Nexa AuthProvider] [LOG] User state synchronized:", user.email, "IsGuest:", user.isGuest);
-    safeStorage.setItem("nexa_user", JSON.stringify(user));
+    if (!user.isGuest) {
+      safeStorage.setItem("nexa_user", JSON.stringify(user));
+    } else {
+      safeStorage.removeItem("nexa_user");
+    }
     
     if (!user.isGuest && user.uid) {
       const updateProfileInSupabase = async () => {

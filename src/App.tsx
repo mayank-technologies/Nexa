@@ -212,6 +212,12 @@ export default function App() {
     if (splashTimerDone && !isAuthLoading) {
       console.log("[Nexa Client] [LOG] Splash timer completed and auth loading finished. Exiting splash screen...");
       setShowSplash(false);
+      (async () => {
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log("SESSION EXISTS:", !!session);
+        console.log("AUTH USER ID:", session?.user?.id);
+        console.log("AUTH EMAIL:", session?.user?.email);
+      })();
     }
   }, [splashTimerDone, isAuthLoading]);
 
@@ -2298,9 +2304,13 @@ export default function App() {
     console.log("archiveChat START");
     console.log("chat.id", chatId);
 
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
+    const { data: { user: authUser }, error: authError } =
+      await supabase.auth.getUser();
+
+    console.log("[AUTH DEBUG] authError:", authError);
+    console.log("[AUTH DEBUG] authUser exists:", !!authUser);
+    console.log("[AUTH DEBUG] authUser.id:", authUser?.id);
+    console.log("[AUTH DEBUG] authUser.email:", authUser?.email);
 
     if (!authUser) {
       console.error("[Archive] No authenticated Supabase user");

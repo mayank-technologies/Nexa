@@ -2304,30 +2304,31 @@ export default function App() {
     console.log("archiveChat START");
     console.log("chat.id", chatId);
 
-    const { data: { user: authUser }, error: authError } =
-      await supabase.auth.getUser();
-
-    console.log("[AUTH DEBUG] authError:", authError);
-    console.log("[AUTH DEBUG] authUser exists:", !!authUser);
-    console.log("[AUTH DEBUG] authUser.id:", authUser?.id);
-    console.log("[AUTH DEBUG] authUser.email:", authUser?.email);
+    const {
+      data: { user: authUser },
+      error: authError,
+    } = await supabase.auth.getUser();
 
     if (!authUser) {
       console.error("[Archive] No authenticated Supabase user");
       return;
     }
 
-    const userId = authUser.id;
-    console.log("BEFORE ARCHIVE INSERT");
-    console.log("chatId =", chatId);
-    console.log("authUser =", authUser);
-    console.log("userId =", userId);
-    console.log("payload =", {
+    const archivePayload = {
       id: chatId,
-      user_id: userId,
+      user_id: authUser?.id,
       chat_id: chatId,
-      archived_at: new Date().toISOString()
-    });
+      archived_at: new Date().toISOString(),
+    };
+
+    console.log("[RLS DEBUG] authError:", authError);
+    console.log("[RLS DEBUG] authUser.id:", authUser?.id);
+    console.log("[RLS DEBUG] payload.user_id:", archivePayload.user_id);
+    console.log(
+      "[RLS DEBUG] IDs MATCH:",
+      authUser?.id === archivePayload.user_id
+    );
+    console.log("[RLS DEBUG] payload:", archivePayload);
 
     let data: any = null;
     let error: any = null;
@@ -2335,35 +2336,24 @@ export default function App() {
     try {
       const result = await supabase
         .from("archived_conversations")
-        .insert({
-          id: chatId,
-          user_id: userId,
-          chat_id: chatId,
-          archived_at: new Date().toISOString()
-        })
+        .insert(archivePayload)
         .select();
 
-      console.log(result.data);
-      console.log(result.error);
+      console.log("[RLS DEBUG] insert data:", result.data);
+      console.log("[RLS DEBUG] insert error:", result.error);
 
       data = result.data;
       error = result.error;
 
-      console.log("AFTER ARCHIVE INSERT", data, error);
-
       if (error && (error.code === "23505" || error.message?.includes("duplicate"))) {
         const upsertResult = await supabase
           .from("archived_conversations")
-          .upsert({
-            id: chatId,
-            user_id: userId,
-            chat_id: chatId,
-            archived_at: new Date().toISOString()
-          }, { onConflict: "id" })
+          .upsert(archivePayload, { onConflict: "id" })
           .select();
         data = upsertResult.data;
         error = upsertResult.error;
-        console.log("AFTER ARCHIVE UPSERT FALLBACK", data, error);
+        console.log("[RLS DEBUG] upsert fallback data:", data);
+        console.log("[RLS DEBUG] upsert fallback error:", error);
       }
     } catch (err) {
       console.error("[Archive] Exception during archive insert:", err);

@@ -815,24 +815,32 @@ export async function fetchChatsFromSupabase(userEmail: string, userId?: string)
       data = fallbackData;
     }
 
-    return (data || []).map((row) => ({
-      id: row.id,
-      title: row.title,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      isPinned: row.is_pinned || false,
-      isArchived: row.is_archived || archivedChatIds.has(row.id) || false,
-      isFavorite: row.is_favorite || false,
-      pinOrder: row.pin_order,
-      mode: row.mode || "general",
-      selectedEngineId: row.selected_engine_id,
-      userEmail: row.user_email,
-      userId: row.user_id,
-      isDeleted: row.is_deleted || false,
-      deletedAt: row.deleted_at,
-      autoDeleteAt: row.auto_delete_at,
-      messages: [] // loaded separately or via fetchAllChatsWithMessagesFromSupabase
-    })) as ChatSession[];
+    return (data || []).map((row) => {
+      console.log("[PIN OVERWRITE DEBUG] SUPABASE VALUE:", {
+        id: row.id,
+        title: row.title,
+        is_pinned: row.is_pinned,
+        pin_order: row.pin_order
+      });
+      return {
+        id: row.id,
+        title: row.title,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        isPinned: row.is_pinned || false,
+        isArchived: row.is_archived || archivedChatIds.has(row.id) || false,
+        isFavorite: row.is_favorite || false,
+        pinOrder: row.pin_order,
+        mode: row.mode || "general",
+        selectedEngineId: row.selected_engine_id,
+        userEmail: row.user_email,
+        userId: row.user_id,
+        isDeleted: row.is_deleted || false,
+        deletedAt: row.deleted_at,
+        autoDeleteAt: row.auto_delete_at,
+        messages: [] // loaded separately or via fetchAllChatsWithMessagesFromSupabase
+      };
+    }) as ChatSession[];
   } catch (err) {
     console.error("[Nexa Supabase] Failed to fetch chats:", err);
     return [];

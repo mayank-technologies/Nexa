@@ -981,6 +981,7 @@ export default function App() {
   const activeSessionIdRef = useRef(activeSessionId);
   const sessionsRef = useRef(sessions);
   const isJoiningSharedRef = useRef<boolean>(false);
+  const pinMutationsRef = useRef<Map<string, { isPinned: boolean; pinOrder: number | null | undefined; updatedAt: number }>>(new Map());
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -1169,6 +1170,7 @@ export default function App() {
       }
 
       const loadChats = async () => {
+        console.log("[PIN OVERWRITE DEBUG] BACKGROUND REFRESH:", new Date().toISOString());
         if (isJoiningSharedRef.current) {
           console.log("[Nexa Client] Skip loadChats because isJoiningSharedRef lock is active.");
           return;
@@ -1276,6 +1278,7 @@ export default function App() {
 
           let mergedSessionsResult: ChatSession[] = [];
           setSessions((prevSessions) => {
+            console.log("[PIN OVERWRITE DEBUG] sessions update source: loadChats");
             if (isJoiningSharedRef.current || isLoadingRef.current || isGeneratingRef.current) {
               return prevSessions;
             }
@@ -1289,10 +1292,49 @@ export default function App() {
               existingMsgs.forEach((m) => msgMap.set(m.id, m));
               const combinedMsgs = Array.from(msgMap.values());
 
-              return {
+              const localMutation = pinMutationsRef.current.get(summary.id);
+
+              console.log("[PIN LOAD DEBUG]", {
+                chatId: summary.id,
+                remoteIsPinned: summary.isPinned,
+                remotePinOrder: summary.pinOrder,
+                localIsPinned: existing?.isPinned,
+                localPinOrder: existing?.pinOrder,
+                hasLocalMutation: !!localMutation,
+              });
+
+              let finalIsPinned = summary.isPinned;
+              let finalPinOrder = summary.pinOrder;
+
+              if (localMutation) {
+                const isRecent = Date.now() - localMutation.updatedAt < 30000;
+                if (isRecent) {
+                  finalIsPinned = localMutation.isPinned;
+                  finalPinOrder = localMutation.pinOrder;
+                }
+                if (
+                  summary.isPinned === localMutation.isPinned &&
+                  (summary.pinOrder === localMutation.pinOrder || !localMutation.isPinned)
+                ) {
+                  pinMutationsRef.current.delete(summary.id);
+                }
+              }
+
+              const mergedChat = {
                 ...summary,
+                isPinned: finalIsPinned,
+                pinOrder: finalPinOrder,
+                isArchived: existing?.isArchived !== undefined ? existing.isArchived : summary.isArchived,
                 messages: combinedMsgs,
               };
+
+              console.log("[PIN LOAD DEBUG] FINAL MERGED:", {
+                chatId: mergedChat.id,
+                isPinned: mergedChat.isPinned,
+                pinOrder: mergedChat.pinOrder,
+              });
+
+              return mergedChat;
             });
 
             const localOnly = prevSessions.filter(
@@ -1300,6 +1342,23 @@ export default function App() {
             );
 
             mergedSessionsResult = [...localOnly, ...merged];
+
+            mergedSessionsResult.sort((a, b) => {
+              if (a.isPinned && !b.isPinned) return -1;
+              if (!a.isPinned && b.isPinned) return 1;
+              if (a.isPinned && b.isPinned) {
+                return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+              }
+              return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+            });
+
+            mergedSessionsResult.forEach((s) => {
+              console.log("[PIN OVERWRITE DEBUG] value being written:", {
+                id: s.id,
+                isPinned: s.isPinned,
+                pinOrder: s.pinOrder
+              });
+            });
             sessionsRef.current = mergedSessionsResult;
             safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(mergedSessionsResult));
             return mergedSessionsResult;
@@ -2549,12 +2608,18 @@ export default function App() {
   };
 
   const handlePinSession = (id: string) => {
+    console.log("[PIN OVERWRITE DEBUG] PINNED CHAT ID:", id);
+    const sessionToPin = sessions.find((s) => s.id === id);
+    console.log("[PIN OVERWRITE DEBUG] LOCAL BEFORE:", {
+      id: sessionToPin?.id,
+      isPinned: sessionToPin?.isPinned,
+      pinOrder: sessionToPin?.pinOrder
+    });
+
     console.log("[PIN HANDLER DEBUG] entered", {
       id,
       sessionsFound: sessions.some((s) => s.id === id),
     });
-
-    const sessionToPin = sessions.find((s) => s.id === id);
 
     console.log("[PIN HANDLER DEBUG] target before", {
       id: sessionToPin?.id,
@@ -2581,12 +2646,19 @@ export default function App() {
       const updated = prev.map((s) => {
         if (s.id === id) {
           const newPinned = !s.isPinned;
+          const newPinOrder = newPinned ? Date.now() : undefined;
           const updatedChat = {
             ...s,
             isPinned: newPinned,
-            pinOrder: newPinned ? Date.now() : undefined,
+            pinOrder: newPinOrder,
             updatedAt: new Date().toISOString(),
           };
+
+          pinMutationsRef.current.set(id, {
+            isPinned: newPinned,
+            pinOrder: newPinOrder,
+            updatedAt: Date.now(),
+          });
 
           console.log("[PIN HANDLER DEBUG] target after", {
             id: updatedChat?.id,
@@ -2619,6 +2691,11 @@ export default function App() {
     const reorderedSessions = updatedSessions.map((s) => {
       if (s.isPinned) {
         const newOrder = pinnedIndex++;
+        pinMutationsRef.current.set(s.id, {
+          isPinned: true,
+          pinOrder: newOrder,
+          updatedAt: Date.now(),
+        });
         return {
           ...s,
           pinOrder: newOrder,

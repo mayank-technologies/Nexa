@@ -184,13 +184,6 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
     const effectiveEmail = (userEmail || chat.userEmail || "guest@nexa.ai").toLowerCase().trim();
     const effectiveUserId = userId || (chat as any).userId || "guest";
 
-    console.log("[PIN DB TRACE] BEFORE UPDATE", {
-      chatId: chat.id,
-      userId: effectiveUserId,
-      isPinned: chat.isPinned,
-      pinOrder: chat.pinOrder,
-    });
-
     const payload: any = {
       id: chat.id,
       user_id: effectiveUserId,
@@ -203,6 +196,22 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       selected_engine_id: chat.selectedEngineId || null,
       user_email: effectiveEmail
     };
+
+    console.log("[CHAT DB WRITE]", {
+      source: "syncChatToSupabase",
+      id: payload.id,
+      user_id: payload.user_id,
+      is_pinned: payload.is_pinned,
+      pin_order: payload.pin_order,
+      timestamp: new Date().toISOString(),
+    });
+
+    console.log("[PIN DB TRACE] BEFORE UPDATE", {
+      chatId: chat.id,
+      userId: effectiveUserId,
+      isPinned: chat.isPinned,
+      pinOrder: chat.pinOrder,
+    });
 
     if (chat.isDeleted !== undefined) {
       payload.is_deleted = chat.isDeleted;

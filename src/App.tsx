@@ -1012,13 +1012,32 @@ export default function App() {
       try {
         const email = user?.email ? user.email.toLowerCase().trim() : "guest@nexa.ai";
         const uid = user?.uid || "guest";
-        console.log("[Nexa Client Background Sync] 📤 Syncing chat summary:", chat.id);
-        const success = await syncChatToSupabase(chat, email, uid);
+
+        let chatToSync = { ...chat };
+        const localMutation = pinMutationsRef.current.get(chat.id);
+        if (localMutation) {
+          if (Date.now() - localMutation.updatedAt < 30000) {
+            chatToSync.isPinned = localMutation.isPinned;
+            chatToSync.pinOrder = localMutation.pinOrder;
+          }
+        } else {
+          const currentInRef = sessionsRef.current.find((s) => s.id === chat.id);
+          if (currentInRef && currentInRef.isPinned !== undefined) {
+            chatToSync.isPinned = currentInRef.isPinned;
+            chatToSync.pinOrder = currentInRef.pinOrder;
+          }
+        }
+
+        console.log("[Nexa Client Background Sync] 📤 Syncing chat summary:", chatToSync.id, {
+          isPinned: chatToSync.isPinned,
+          pinOrder: chatToSync.pinOrder
+        });
+        const success = await syncChatToSupabase(chatToSync, email, uid);
         if (!success && retries > 0) {
-          console.warn(`[Nexa Sync] Chat sync failed for ${chat.id}. Retrying in 2s... (${retries} retries left)`);
-          setTimeout(() => syncChatSummaryToSupabase(chat, retries - 1), 2000);
+          console.warn(`[Nexa Sync] Chat sync failed for ${chatToSync.id}. Retrying in 2s... (${retries} retries left)`);
+          setTimeout(() => syncChatSummaryToSupabase(chatToSync, retries - 1), 2000);
         } else if (success) {
-          console.log("[Nexa Client Background Sync] ✅ Synced chat summary:", chat.id);
+          console.log("[Nexa Client Background Sync] ✅ Synced chat summary:", chatToSync.id);
         }
       } catch (e) {
         console.error("[Nexa Client Background Sync] ❌ Failed to sync chat summary:", e);
@@ -1318,6 +1337,10 @@ export default function App() {
                 ) {
                   pinMutationsRef.current.delete(summary.id);
                 }
+              } else if (existing?.isPinned && !summary.isPinned) {
+                console.log("[PIN LOAD MERGE PRESERVED] Preserving local isPinned: true for chat:", summary.id);
+                finalIsPinned = true;
+                finalPinOrder = existing.pinOrder;
               }
 
               const mergedChat = {
@@ -1412,10 +1435,12 @@ export default function App() {
       // Realtime listener for cross-device updates
       const channel = supabase
         .channel(`user-sync-${user.uid}`)
-        .on("postgres_changes", { event: "*", schema: "public", table: "chats" }, () => {
+        .on("postgres_changes", { event: "*", schema: "public", table: "chats" }, (payload) => {
+          console.log("[PIN REALTIME TRACE] postgres_changes chats event received", payload);
           loadChats();
         })
-        .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
+        .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
+          console.log("[PIN REALTIME TRACE] postgres_changes messages event received", payload);
           loadChats();
         })
         .subscribe();
@@ -2608,6 +2633,12 @@ export default function App() {
   };
 
   const handlePinSession = (id: string) => {
+    const mutationId = `pin-${Date.now()}`;
+    console.log("[PIN TRACE START]", {
+      mutationId,
+      chatId: id,
+      time: Date.now(),
+    });
     console.log("[PIN OVERWRITE DEBUG] PINNED CHAT ID:", id);
     const sessionToPin = sessions.find((s) => s.id === id);
     console.log("[PIN OVERWRITE DEBUG] LOCAL BEFORE:", {

@@ -184,7 +184,13 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
     const effectiveEmail = (userEmail || chat.userEmail || "guest@nexa.ai").toLowerCase().trim();
     const effectiveUserId = userId || (chat as any).userId || "guest";
 
-    console.log("[Nexa Supabase] Syncing chat session metadata:", chat.id, "User ID:", effectiveUserId, "Email:", effectiveEmail);
+    console.log("[PIN DB TRACE] BEFORE UPDATE", {
+      chatId: chat.id,
+      userId: effectiveUserId,
+      isPinned: chat.isPinned,
+      pinOrder: chat.pinOrder,
+    });
+
     const payload: any = {
       id: chat.id,
       user_id: effectiveUserId,
@@ -214,9 +220,15 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       payload.is_favorite = (chat as any).isFavorite;
     }
 
-    let { error } = await supabase
+    let { data, error } = await supabase
       .from("chats")
-      .upsert(payload, { onConflict: "id" });
+      .upsert(payload, { onConflict: "id" })
+      .select("id,user_id,is_pinned,pin_order");
+
+    console.log("[PIN DB TRACE] UPDATE RESULT", {
+      data,
+      error,
+    });
 
     if (error && (error.code === "42703" || error.message?.includes("column"))) {
       console.warn("[Nexa Supabase] Column missing in schema. Retrying sync without optional columns...");
@@ -404,9 +416,9 @@ export async function syncMessageToSupabase(chatId: string, message: Message, us
         updated_at: new Date().toISOString(),
         user_email: "guest@nexa.ai"
       };
-      await supabase.from("chats").upsert(parentPayload, { onConflict: "id" });
+      await supabase.from("chats").upsert(parentPayload, { onConflict: "id", ignoreDuplicates: true });
       try {
-        await supabase.from("conversations").upsert(parentPayload, { onConflict: "id" });
+        await supabase.from("conversations").upsert(parentPayload, { onConflict: "id", ignoreDuplicates: true });
       } catch (e) {}
     } catch (e) {
       console.warn("[Nexa Supabase] Non-blocking parent chat pre-upsert warning:", e);

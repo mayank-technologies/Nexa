@@ -1362,6 +1362,60 @@ export default function App() {
 
             mergedSessionsResult = [...localOnly, ...merged];
 
+            // Ensure all pinned chats have unique sequential orders (1..N) without duplicates
+            const pinnedList = mergedSessionsResult.filter((s) => s.isPinned);
+            if (pinnedList.length > 0) {
+              const seenOrders = new Set<number>();
+              let hasDuplicatesOrInvalid = false;
+              for (const p of pinnedList) {
+                if (typeof p.pinOrder !== "number" || !Number.isInteger(p.pinOrder) || p.pinOrder < 1 || seenOrders.has(p.pinOrder)) {
+                  hasDuplicatesOrInvalid = true;
+                  break;
+                }
+                seenOrders.add(p.pinOrder);
+              }
+
+              if (hasDuplicatesOrInvalid) {
+                console.log("[PIN LOAD HEALING] Duplicate or invalid pin_order detected in loadChats. Normalizing to unique sequential 1..N");
+                // Sort deterministically: by current valid pinOrder (ascending, invalid/nulls last), then updatedAt (newer first)
+                pinnedList.sort((a, b) => {
+                  const orderA = typeof a.pinOrder === "number" && a.pinOrder >= 1 ? a.pinOrder : 999;
+                  const orderB = typeof b.pinOrder === "number" && b.pinOrder >= 1 ? b.pinOrder : 999;
+                  if (orderA !== orderB) return orderA - orderB;
+                  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+                });
+
+                const fixedOrderMap = new Map<string, number>();
+                pinnedList.forEach((chat, index) => {
+                  const normalizedOrder = index + 1;
+                  fixedOrderMap.set(chat.id, normalizedOrder);
+                  if (chat.pinOrder !== normalizedOrder) {
+                    console.log(`[PIN LOAD HEALING] Healing chat ${chat.id} from pinOrder ${chat.pinOrder} -> ${normalizedOrder}`);
+                    chat.pinOrder = normalizedOrder;
+                    pinMutationsRef.current.set(chat.id, {
+                      isPinned: true,
+                      pinOrder: normalizedOrder,
+                      updatedAt: Date.now(),
+                    });
+                    // Persist normalized order to Supabase
+                    updateChatPinStatusInSupabase(chat.id, true, normalizedOrder, user?.uid).catch((err) =>
+                      console.warn("[PIN LOAD HEALING] Failed to persist normalized pinOrder:", err)
+                    );
+                  }
+                });
+
+                mergedSessionsResult = mergedSessionsResult.map((s) => {
+                  if (s.isPinned && fixedOrderMap.has(s.id)) {
+                    return {
+                      ...s,
+                      pinOrder: fixedOrderMap.get(s.id)!,
+                    };
+                  }
+                  return s;
+                });
+              }
+            }
+
             mergedSessionsResult.sort((a, b) => {
               if (a.isPinned && !b.isPinned) return -1;
               if (!a.isPinned && b.isPinned) return 1;
@@ -2628,6 +2682,50 @@ export default function App() {
     playUiSound("success");
   };
 
+  /**
+   * Deterministically calculate the next unique pin_order (1..10) from all currently pinned chats.
+   * - If no pinned chats exist, returns 1.
+   * - If existing pinned orders are [1], returns 2.
+   * - If [1, 2], returns 3.
+   * - If there are gaps or duplicates, safely and deterministically finds the lowest available integer in 1..10.
+   * - Never returns a pin_order already assigned to any currently pinned chat.
+   * - Preserves maximum of 10 pinned chats.
+   */
+  const calculateNextPinOrder = (otherPinnedChats: Array<{ id: string; pinOrder?: number | null }>): number => {
+    const usedOrders = new Set<number>();
+    let maxOrder = 0;
+
+    for (const chat of otherPinnedChats) {
+      if (typeof chat.pinOrder === "number" && Number.isInteger(chat.pinOrder) && chat.pinOrder >= 1) {
+        usedOrders.add(chat.pinOrder);
+        if (chat.pinOrder > maxOrder) {
+          maxOrder = chat.pinOrder;
+        }
+      }
+    }
+
+    // If no other pinned chats exist, start at 1
+    if (usedOrders.size === 0) {
+      return 1;
+    }
+
+    // If existing pinned orders are sequential without gaps and maxOrder < 10:
+    // e.g. [1] -> 2; [1, 2] -> 3; [1, 2, 3] -> 4
+    if (maxOrder === usedOrders.size && maxOrder < 10) {
+      return maxOrder + 1;
+    }
+
+    // If there are gaps, duplicates, or maxOrder >= 10:
+    // Safe deterministic strategy: find the first positive integer in 1..10 not yet used
+    for (let candidate = 1; candidate <= 10; candidate++) {
+      if (!usedOrders.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    return 10;
+  };
+
   const handlePinSession = async (id: string) => {
     const cleanId = (id || "").trim();
     if (!cleanId) return;
@@ -2639,16 +2737,38 @@ export default function App() {
       time: Date.now(),
     });
 
+    const pendingMutation = pinMutationsRef.current.get(cleanId);
     const sessionToPin =
       sessionsRef.current.find((s) => s.id === cleanId) ||
       sessions.find((s) => s.id === cleanId) ||
       (activeSessionId === cleanId ? activeSession : undefined);
 
-    const nextPinned = sessionToPin ? !sessionToPin.isPinned : true;
+    const isCurrentlyPinned = pendingMutation
+      ? pendingMutation.isPinned
+      : (sessionToPin ? !!sessionToPin.isPinned : false);
+
+    const nextPinned = !isCurrentlyPinned;
+
+    // Build consolidated map of ALL chats across sessionsRef, sessions state, and active mutations
+    const sessionMap = new Map<string, ChatSession>();
+    sessionsRef.current.forEach((s) => sessionMap.set(s.id, { ...s }));
+    sessions.forEach((s) => {
+      if (!sessionMap.has(s.id)) sessionMap.set(s.id, { ...s });
+    });
+    pinMutationsRef.current.forEach((mut, mutId) => {
+      const s = sessionMap.get(mutId);
+      if (s) {
+        s.isPinned = mut.isPinned;
+        s.pinOrder = mut.pinOrder;
+      }
+    });
+
+    const otherPinned = Array.from(sessionMap.values()).filter(
+      (s) => s.id !== cleanId && s.isPinned
+    );
 
     if (nextPinned) {
-      const currentPinnedCount = sessionsRef.current.filter((s) => s.isPinned).length;
-      if (currentPinnedCount >= 10) {
+      if (otherPinned.length >= 10) {
         setCustomToast({
           title: "Pin Limit Reached",
           message: "You can pin up to 10 chats. Unpin an existing chat to pin another.",
@@ -2659,60 +2779,62 @@ export default function App() {
     }
 
     // Calculate numeric pin_order (1 to 10 safe PostgreSQL 32-bit signed integer)
-    let nextPinOrder: number | null = null;
-    if (nextPinned) {
-      const otherPinned = sessionsRef.current.filter((s) => s.isPinned && s.id !== cleanId);
-      const maxOrder = otherPinned.reduce((max, s) => {
-        const order = typeof s.pinOrder === "number" ? s.pinOrder : 0;
-        return Math.max(max, order);
-      }, 0);
-      nextPinOrder = maxOrder + 1;
-    }
+    const nextPinOrder: number | null = nextPinned ? calculateNextPinOrder(otherPinned) : null;
 
     console.log("[PIN HANDLER] Executing pin transition:", {
       id: cleanId,
       title: sessionToPin?.title,
       isPinned: nextPinned,
       pinOrder: nextPinOrder,
+      otherPinnedOrders: otherPinned.map((p) => ({ id: p.id, pinOrder: p.pinOrder })),
     });
 
-    // Record in pinMutationsRef to prevent race conditions during sync
+    // Record in pinMutationsRef immediately
     pinMutationsRef.current.set(cleanId, {
       isPinned: nextPinned,
       pinOrder: nextPinOrder,
       updatedAt: Date.now(),
     });
 
-    // Optimistically update sessions state
-    setSessions((prev) => {
-      const updated = prev.map((s) => {
-        if (s.id === cleanId) {
-          return {
-            ...s,
-            isPinned: nextPinned,
-            pinOrder: nextPinOrder,
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return s;
-      });
-
-      updated.sort((a, b) => {
-        if (a.isPinned && !b.isPinned) return -1;
-        if (!a.isPinned && b.isPinned) return 1;
-        if (a.isPinned && b.isPinned) {
-          return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
-        }
-        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-      });
-
-      sessionsRef.current = updated;
-      const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
-      if (currentUid) {
-        safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(updated));
+    // Compute updated sessions list
+    let updatedSessions = sessionsRef.current.map((s) => {
+      if (s.id === cleanId) {
+        return {
+          ...s,
+          isPinned: nextPinned,
+          pinOrder: nextPinOrder,
+          updatedAt: new Date().toISOString(),
+        };
       }
-      return updated;
+      return s;
     });
+
+    if (!updatedSessions.some((s) => s.id === cleanId) && sessionToPin) {
+      updatedSessions.push({
+        ...sessionToPin,
+        isPinned: nextPinned,
+        pinOrder: nextPinOrder,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    updatedSessions.sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      if (a.isPinned && b.isPinned) {
+        return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+      }
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+
+    // SYNCHRONOUSLY update sessionsRef.current so any subsequent pin call sees this update immediately
+    sessionsRef.current = updatedSessions;
+    setSessions(updatedSessions);
+
+    const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
+    if (currentUid) {
+      safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(updatedSessions));
+    }
 
     // Await explicit database UPDATE in Supabase public.chats
     const effectiveUserId = user?.isGuest ? "guest" : user?.uid || "guest";
@@ -2724,34 +2846,32 @@ export default function App() {
 
       // Revert local state to previous
       if (sessionToPin) {
-        setSessions((prev) => {
-          const reverted = prev.map((s) => {
-            if (s.id === cleanId) {
-              return {
-                ...s,
-                isPinned: sessionToPin.isPinned,
-                pinOrder: sessionToPin.pinOrder,
-              };
-            }
-            return s;
-          });
-
-          reverted.sort((a, b) => {
-            if (a.isPinned && !b.isPinned) return -1;
-            if (!a.isPinned && b.isPinned) return 1;
-            if (a.isPinned && b.isPinned) {
-              return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
-            }
-            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-          });
-
-          sessionsRef.current = reverted;
-          const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
-          if (currentUid) {
-            safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(reverted));
+        const reverted = sessionsRef.current.map((s) => {
+          if (s.id === cleanId) {
+            return {
+              ...s,
+              isPinned: sessionToPin.isPinned,
+              pinOrder: sessionToPin.pinOrder,
+            };
           }
-          return reverted;
+          return s;
         });
+
+        reverted.sort((a, b) => {
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          if (a.isPinned && b.isPinned) {
+            return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+          }
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+
+        sessionsRef.current = reverted;
+        setSessions(reverted);
+
+        if (currentUid) {
+          safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(reverted));
+        }
       }
 
       setCustomToast({
@@ -2776,7 +2896,7 @@ export default function App() {
   const handleReorderSessions = (updatedSessions: ChatSession[]) => {
     const oldSessionsMap = new Map(sessions.map((s) => [s.id, s.pinOrder]));
 
-    let pinnedIndex = 0;
+    let pinnedIndex = 1;
     const reorderedSessions = updatedSessions.map((s) => {
       if (s.isPinned) {
         const newOrder = pinnedIndex++;
@@ -2805,6 +2925,7 @@ export default function App() {
       }))
     );
 
+    sessionsRef.current = reorderedSessions;
     setSessions(reorderedSessions);
 
     const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
@@ -2820,7 +2941,7 @@ export default function App() {
           oldPinOrder,
           newPinOrder: chat.pinOrder,
         });
-        updateChatPinStatusInSupabase(chat.id, true, chat.pinOrder ?? 0, user?.uid).catch((err) =>
+        updateChatPinStatusInSupabase(chat.id, true, chat.pinOrder ?? 1, user?.uid).catch((err) =>
           console.error("[PIN REORDER ERROR]", err)
         );
       }

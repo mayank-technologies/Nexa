@@ -345,7 +345,7 @@ export function Sidebar({
   const handleReorderPinned = (newPinnedOrder: ChatSession[]) => {
     const updatedPinned = newPinnedOrder.map((chat, idx) => ({
       ...chat,
-      pinOrder: idx,
+      pinOrder: idx + 1,
     }));
     const unpinnedIds = new Set(sessions.filter(s => !s.isPinned).map(s => s.id));
     const originalUnpinned = sessions.filter(s => unpinnedIds.has(s.id));

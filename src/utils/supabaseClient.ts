@@ -175,6 +175,126 @@ export async function syncUserProfileToSupabase(profile: UserProfile): Promise<b
 }
 
 /**
+ * Explicitly update the pinned status and pin order for a chat in Supabase.
+ * Executes an explicit UPDATE on public.chats (falling back to upsert if row does not exist yet).
+ */
+export async function updateChatPinStatusInSupabase(
+  chatId: string,
+  isPinned: boolean,
+  pinOrder: number | null,
+  userId?: string
+): Promise<{ success: boolean; data?: any; error?: string }> {
+  if (!chatId) return { success: false, error: "Missing chatId" };
+
+  try {
+    // Ensure pinOrder is a valid PostgreSQL 32-bit signed INTEGER (-2147483648 to 2147483647)
+    let sanitizedPinOrder: number | null = null;
+    if (isPinned && pinOrder !== null && pinOrder !== undefined) {
+      if (typeof pinOrder === "number" && pinOrder > 2147483647) {
+        sanitizedPinOrder = Math.floor(pinOrder / 1000);
+        if (sanitizedPinOrder > 2147483647) sanitizedPinOrder = 2147483647;
+      } else {
+        sanitizedPinOrder = Math.floor(pinOrder);
+      }
+    }
+
+    const updatePayload = {
+      is_pinned: isPinned,
+      pin_order: isPinned ? sanitizedPinOrder : null,
+      updated_at: new Date().toISOString(),
+    };
+
+    console.log("[CHAT DB WRITE] Explicit Pin Update:", {
+      source: "updateChatPinStatusInSupabase",
+      id: chatId,
+      userId,
+      is_pinned: updatePayload.is_pinned,
+      pin_order: updatePayload.pin_order,
+      timestamp: updatePayload.updated_at,
+    });
+
+    const { data, error } = await supabase
+      .from("chats")
+      .update(updatePayload)
+      .eq("id", chatId)
+      .select("id,user_id,title,is_pinned,pin_order");
+
+    if (error) {
+      console.error("[Nexa Supabase] Failed explicit pin update:", error.message, error.code);
+      return { success: false, error: error.message };
+    }
+
+    // If no row was updated because it doesn't exist yet in public.chats:
+    if (!data || data.length === 0) {
+      console.warn("[Nexa Supabase] Chat row did not exist yet for update, creating via upsert with pin state...");
+      const upsertPayload: any = {
+        id: chatId,
+        user_id: userId || "guest",
+        title: "Conversation",
+        is_pinned: isPinned,
+        pin_order: isPinned ? sanitizedPinOrder : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      const { data: upsertData, error: upsertErr } = await supabase
+        .from("chats")
+        .upsert(upsertPayload, { onConflict: "id" })
+        .select("id,user_id,title,is_pinned,pin_order");
+
+      if (upsertErr) {
+        console.error("[Nexa Supabase] Failed pin fallback upsert:", upsertErr.message);
+        return { success: false, error: upsertErr.message };
+      }
+      return { success: true, data: upsertData };
+    }
+
+    // Mirror to conversations table if present
+    try {
+      await supabase
+        .from("conversations")
+        .update(updatePayload)
+        .eq("id", chatId);
+    } catch (e) {
+      // Non-blocking
+    }
+
+    // Mirror to pinned_conversations table if present
+    try {
+      if (isPinned) {
+        await supabase
+          .from("pinned_conversations")
+          .upsert({
+            id: chatId,
+            chat_id: chatId,
+            user_id: userId || "guest",
+            pin_order: sanitizedPinOrder,
+            pinned_at: new Date().toISOString(),
+          }, { onConflict: "id" });
+      } else {
+        await supabase
+          .from("pinned_conversations")
+          .delete()
+          .eq("id", chatId);
+      }
+    } catch (e) {
+      // Non-blocking
+    }
+
+    console.log("[Nexa Supabase] ✅ Pin status successfully persisted in public.chats:", {
+      chatId,
+      isPinned,
+      pinOrder: sanitizedPinOrder,
+      rowsReturned: data?.length,
+    });
+
+    return { success: true, data };
+  } catch (err: any) {
+    console.error("[Nexa Supabase] Exception in updateChatPinStatusInSupabase:", err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
  * Sync a chat session metadata to Supabase.
  */
 export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, userId?: string): Promise<boolean> {
@@ -190,12 +310,27 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       title: chat.title || "Untitled Session",
       created_at: chat.createdAt || new Date().toISOString(),
       updated_at: chat.updatedAt || new Date().toISOString(),
-      is_pinned: chat.isPinned || false,
-      pin_order: chat.pinOrder !== undefined && chat.pinOrder !== null ? chat.pinOrder : null,
       mode: chat.mode || "general",
       selected_engine_id: chat.selectedEngineId || null,
       user_email: effectiveEmail
     };
+
+    // Only include pin attributes if chat is explicitly marked isPinned === true.
+    // If chat is not pinned, DO NOT include is_pinned/pin_order in general payload so that
+    // normal session updates (e.g. streaming messages, renaming) never overwrite a pinned status.
+    if (chat.isPinned === true) {
+      let sanitizedPinOrder: number | null = null;
+      if (chat.pinOrder !== undefined && chat.pinOrder !== null) {
+        if (typeof chat.pinOrder === "number" && chat.pinOrder > 2147483647) {
+          sanitizedPinOrder = Math.floor(chat.pinOrder / 1000);
+          if (sanitizedPinOrder > 2147483647) sanitizedPinOrder = 2147483647;
+        } else {
+          sanitizedPinOrder = Math.floor(chat.pinOrder);
+        }
+      }
+      payload.is_pinned = true;
+      payload.pin_order = sanitizedPinOrder;
+    }
 
     console.log("[CHAT DB WRITE]", {
       source: "syncChatToSupabase",

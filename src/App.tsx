@@ -76,7 +76,7 @@ import { ShareModal } from "./components/ShareModal";
 import { JoinModal } from "./components/JoinModal";
 import { ArchiveView } from "./components/ArchiveView";
 import { ConversationHeaderMenu } from "./components/ConversationHeaderMenu";
-import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchAllChatsWithMessagesFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase } from "./utils/supabaseClient";
+import { supabase, syncChatToSupabase, syncMessageToSupabase, fetchChatsFromSupabase, fetchAllChatsWithMessagesFromSupabase, fetchDeletedChatsFromSupabase, fetchMessagesFromSupabase, deleteChatFromSupabase, deleteMessageFromSupabase, updateChatPinStatusInSupabase } from "./utils/supabaseClient";
 import { safeStorage, copyToClipboard } from "./utils/storage";
 import { isPremiumUser } from "./utils/premium";
 import { soundManager, playUiSound } from "./utils/sounds";
@@ -1016,14 +1016,14 @@ export default function App() {
         let chatToSync = { ...chat };
         const localMutation = pinMutationsRef.current.get(chat.id);
         if (localMutation) {
-          if (Date.now() - localMutation.updatedAt < 30000) {
+          if (Date.now() - localMutation.updatedAt < 60000) {
             chatToSync.isPinned = localMutation.isPinned;
             chatToSync.pinOrder = localMutation.pinOrder;
           }
         } else {
           const currentInRef = sessionsRef.current.find((s) => s.id === chat.id);
-          if (currentInRef && currentInRef.isPinned !== undefined) {
-            chatToSync.isPinned = currentInRef.isPinned;
+          if (currentInRef && currentInRef.isPinned) {
+            chatToSync.isPinned = true;
             chatToSync.pinOrder = currentInRef.pinOrder;
           }
         }
@@ -2632,38 +2632,25 @@ export default function App() {
     playUiSound("success");
   };
 
-  const handlePinSession = (id: string) => {
+  const handlePinSession = async (id: string) => {
     const mutationId = `pin-${Date.now()}`;
     console.log("[PIN TRACE START]", {
       mutationId,
       chatId: id,
       time: Date.now(),
     });
-    console.log("[PIN OVERWRITE DEBUG] PINNED CHAT ID:", id);
-    const sessionToPin = sessions.find((s) => s.id === id);
-    console.log("[PIN OVERWRITE DEBUG] LOCAL BEFORE:", {
-      id: sessionToPin?.id,
-      isPinned: sessionToPin?.isPinned,
-      pinOrder: sessionToPin?.pinOrder
-    });
 
-    console.log("[PIN HANDLER DEBUG] entered", {
-      id,
-      sessionsFound: sessions.some((s) => s.id === id),
-    });
+    const sessionToPin = sessionsRef.current.find((s) => s.id === id) || sessions.find((s) => s.id === id);
+    if (!sessionToPin) {
+      console.warn("[PIN HANDLER] Session not found to pin/unpin:", id);
+      return;
+    }
 
-    console.log("[PIN HANDLER DEBUG] target before", {
-      id: sessionToPin?.id,
-      title: sessionToPin?.title,
-      isPinned: sessionToPin?.isPinned,
-      pinOrder: sessionToPin?.pinOrder,
-    });
+    const nextPinned = !sessionToPin.isPinned;
 
-    if (!sessionToPin) return;
-
-    if (!sessionToPin.isPinned) {
-      const pinnedCount = sessions.filter((s) => s.isPinned).length;
-      if (pinnedCount >= 10) {
+    if (nextPinned) {
+      const currentPinnedCount = sessionsRef.current.filter((s) => s.isPinned).length;
+      if (currentPinnedCount >= 10) {
         setCustomToast({
           title: "Pin Limit Reached",
           message: "You can pin up to 10 chats. Unpin an existing chat to pin another.",
@@ -2673,46 +2660,117 @@ export default function App() {
       }
     }
 
+    // Calculate numeric pin_order (1 to 10 safe PostgreSQL 32-bit signed integer)
+    let nextPinOrder: number | null = null;
+    if (nextPinned) {
+      const otherPinned = sessionsRef.current.filter((s) => s.isPinned && s.id !== id);
+      const maxOrder = otherPinned.reduce((max, s) => {
+        const order = typeof s.pinOrder === "number" ? s.pinOrder : 0;
+        return Math.max(max, order);
+      }, 0);
+      nextPinOrder = maxOrder + 1;
+    }
+
+    console.log("[PIN HANDLER] Executing pin transition:", {
+      id,
+      title: sessionToPin.title,
+      isPinned: nextPinned,
+      pinOrder: nextPinOrder,
+    });
+
+    // Record in pinMutationsRef to prevent race conditions during sync
+    pinMutationsRef.current.set(id, {
+      isPinned: nextPinned,
+      pinOrder: nextPinOrder,
+      updatedAt: Date.now(),
+    });
+
+    // Optimistically update sessions state
     setSessions((prev) => {
       const updated = prev.map((s) => {
         if (s.id === id) {
-          const newPinned = !s.isPinned;
-          const newPinOrder = newPinned ? Date.now() : undefined;
-          const updatedChat = {
+          return {
             ...s,
-            isPinned: newPinned,
-            pinOrder: newPinOrder,
+            isPinned: nextPinned,
+            pinOrder: nextPinOrder,
             updatedAt: new Date().toISOString(),
           };
-
-          pinMutationsRef.current.set(id, {
-            isPinned: newPinned,
-            pinOrder: newPinOrder,
-            updatedAt: Date.now(),
-          });
-
-          console.log("[PIN HANDLER DEBUG] target after", {
-            id: updatedChat?.id,
-            isPinned: updatedChat?.isPinned,
-            pinOrder: updatedChat?.pinOrder,
-          });
-
-          console.log("[PIN SUPABASE DEBUG] syncing", {
-            id: updatedChat.id,
-            isPinned: updatedChat.isPinned,
-            pinOrder: updatedChat.pinOrder,
-          });
-
-          syncChatSummaryToSupabase(updatedChat);
-
-          console.log("[PIN SUPABASE DEBUG] sync completed");
-
-          return updatedChat;
         }
         return s;
       });
+
+      updated.sort((a, b) => {
+        if (a.isPinned && !b.isPinned) return -1;
+        if (!a.isPinned && b.isPinned) return 1;
+        if (a.isPinned && b.isPinned) {
+          return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+        }
+        return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      });
+
+      sessionsRef.current = updated;
+      const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
+      if (currentUid) {
+        safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(updated));
+      }
       return updated;
     });
+
+    // Await explicit database UPDATE in Supabase public.chats
+    const effectiveUserId = user?.isGuest ? "guest" : user?.uid || "guest";
+    const updateResult = await updateChatPinStatusInSupabase(id, nextPinned, nextPinOrder, effectiveUserId);
+
+    if (!updateResult.success) {
+      console.error("[Nexa Pin] Database update failed. Reverting local state:", updateResult.error);
+      pinMutationsRef.current.delete(id);
+
+      // Revert local state to previous
+      setSessions((prev) => {
+        const reverted = prev.map((s) => {
+          if (s.id === id) {
+            return {
+              ...s,
+              isPinned: sessionToPin.isPinned,
+              pinOrder: sessionToPin.pinOrder,
+            };
+          }
+          return s;
+        });
+
+        reverted.sort((a, b) => {
+          if (a.isPinned && !b.isPinned) return -1;
+          if (!a.isPinned && b.isPinned) return 1;
+          if (a.isPinned && b.isPinned) {
+            return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+          }
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        });
+
+        sessionsRef.current = reverted;
+        const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
+        if (currentUid) {
+          safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(reverted));
+        }
+        return reverted;
+      });
+
+      setCustomToast({
+        title: "Sync Error",
+        message: "Failed to persist pin status to database.",
+        type: "warning",
+      });
+    } else {
+      console.log("[Nexa Pin] ✅ Database UPDATE verified successfully:", {
+        id,
+        is_pinned: nextPinned,
+        pin_order: nextPinOrder,
+      });
+      setCustomToast({
+        title: nextPinned ? "Chat Pinned" : "Chat Unpinned",
+        message: nextPinned ? `"${sessionToPin.title}" pinned to top.` : `"${sessionToPin.title}" unpinned.`,
+        type: "success",
+      });
+    }
   };
 
   const handleReorderSessions = (updatedSessions: ChatSession[]) => {
@@ -2762,7 +2820,9 @@ export default function App() {
           oldPinOrder,
           newPinOrder: chat.pinOrder,
         });
-        syncChatSummaryToSupabase(chat);
+        updateChatPinStatusInSupabase(chat.id, true, chat.pinOrder ?? 0, user?.uid).catch((err) =>
+          console.error("[PIN REORDER ERROR]", err)
+        );
       }
     });
   };

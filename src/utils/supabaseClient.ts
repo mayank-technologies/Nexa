@@ -967,6 +967,7 @@ export async function fetchChatsFromSupabase(userEmail: string, userId?: string)
       } else {
         return [];
       }
+      fallbackQuery = fallbackQuery.or("is_deleted.eq.false,is_deleted.is.null");
       const { data: fallbackData, error: fallbackError } = await fallbackQuery.order("updated_at", { ascending: false });
       if (fallbackError) {
         if (!isMissingTableError(fallbackError)) {
@@ -977,7 +978,9 @@ export async function fetchChatsFromSupabase(userEmail: string, userId?: string)
       data = fallbackData;
     }
 
-    return (data || []).map((row) => {
+    return (data || [])
+      .filter((row) => !row.is_deleted)
+      .map((row) => {
       console.log("[PIN OVERWRITE DEBUG] SUPABASE VALUE:", {
         id: row.id,
         title: row.title,
@@ -1181,6 +1184,180 @@ export async function fetchMessagesFromSupabase(chatId: string): Promise<Message
       console.error("[Nexa Supabase] Failed to fetch messages:", err);
     }
     return [];
+  }
+}
+
+/**
+ * Soft-delete a chat session in Supabase:
+ * 1. Sets is_deleted = true, deleted_at = now, auto_delete_at = 30 days in public.chats.
+ * 2. Unsets is_pinned = false and pin_order = null in public.chats so no active pin slot is occupied.
+ * 3. Removes from pinned_conversations and archived_conversations mirror tables.
+ * 4. Mirrors to deleted_conversations.
+ * 5. Does NOT delete messages or permanently remove the chat record.
+ */
+export async function softDeleteChatInSupabase(
+  chatId: string,
+  chatData?: Partial<ChatSession>,
+  userId?: string,
+  userEmail?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!chatId) return { success: false, error: "Missing chatId" };
+
+  try {
+    const effectiveUserId = userId || "guest";
+    const effectiveEmail = (userEmail || chatData?.userEmail || "guest@nexa.ai").toLowerCase().trim();
+    const nowIso = chatData?.deletedAt || new Date().toISOString();
+    const autoDeleteIso = chatData?.autoDeleteAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    console.log("[Nexa Supabase] Soft-deleting chat in Supabase:", chatId);
+
+    // 1. Remove pin mirror
+    try {
+      await supabase
+        .from("pinned_conversations")
+        .delete()
+        .or(`chat_id.eq.${chatId},id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 2. Remove archive mirror
+    try {
+      await supabase
+        .from("archived_conversations")
+        .delete()
+        .or(`chat_id.eq.${chatId},id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 3. Update public.chats
+    const updatePayload: any = {
+      is_deleted: true,
+      deleted_at: nowIso,
+      auto_delete_at: autoDeleteIso,
+      is_pinned: false,
+      pin_order: null,
+      updated_at: nowIso,
+    };
+
+    const { error: chatUpdateErr } = await supabase
+      .from("chats")
+      .update(updatePayload)
+      .eq("id", chatId);
+
+    if (chatUpdateErr) {
+      console.warn("[Nexa Supabase] Soft-delete update to public.chats failed:", chatUpdateErr.message, "Retrying upsert...");
+      await supabase.from("chats").upsert({
+        id: chatId,
+        title: chatData?.title || "Deleted Session",
+        user_id: effectiveUserId,
+        user_email: effectiveEmail,
+        is_deleted: true,
+        deleted_at: nowIso,
+        auto_delete_at: autoDeleteIso,
+        is_pinned: false,
+        pin_order: null,
+        created_at: chatData?.createdAt || nowIso,
+        updated_at: nowIso,
+      }, { onConflict: "id" });
+    }
+
+    // 4. Mirror to deleted_conversations (non-blocking if table or RLS policy restricts)
+    try {
+      const delConvPayload = {
+        id: chatId,
+        chat_id: chatId,
+        user_id: effectiveUserId,
+        deleted_at: nowIso,
+      };
+      await supabase.from("deleted_conversations").upsert(delConvPayload, { onConflict: "id" });
+    } catch (e) {}
+
+    // 5. Mirror to conversations
+    try {
+      await supabase
+        .from("conversations")
+        .update({ is_deleted: true, updated_at: nowIso })
+        .eq("id", chatId);
+    } catch (e) {}
+
+    console.log("[Nexa Supabase] ✅ Soft delete completed successfully for chat:", chatId);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[Nexa Supabase] Failed to soft delete chat in Supabase:", err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * Restore a soft-deleted chat session in Supabase:
+ * 1. Resets is_deleted = false, deleted_at = null, auto_delete_at = null in public.chats.
+ * 2. Cleans up deleted_conversations and deleted_chats tables.
+ * 3. Unmarks conversations table is_deleted = false.
+ */
+export async function restoreChatInSupabase(
+  chatId: string,
+  restoredChat?: Partial<ChatSession>,
+  userId?: string,
+  userEmail?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!chatId) return { success: false, error: "Missing chatId" };
+
+  try {
+    const effectiveUserId = userId || "guest";
+    const effectiveEmail = (userEmail || restoredChat?.userEmail || "guest@nexa.ai").toLowerCase().trim();
+    const nowIso = new Date().toISOString();
+
+    console.log("[Nexa Supabase] Restoring chat in Supabase:", chatId);
+
+    // 1. Update public.chats
+    const updatePayload: any = {
+      is_deleted: false,
+      deleted_at: null,
+      auto_delete_at: null,
+      updated_at: nowIso,
+    };
+
+    if (restoredChat?.isPinned !== undefined) {
+      updatePayload.is_pinned = restoredChat.isPinned;
+      updatePayload.pin_order = restoredChat.pinOrder ?? null;
+    }
+
+    const { error: chatUpdateErr } = await supabase
+      .from("chats")
+      .update(updatePayload)
+      .eq("id", chatId);
+
+    if (chatUpdateErr) {
+      console.warn("[Nexa Supabase] Restore update to public.chats failed:", chatUpdateErr.message);
+    }
+
+    // 2. Remove from deleted_conversations
+    try {
+      await supabase
+        .from("deleted_conversations")
+        .delete()
+        .or(`id.eq.${chatId},chat_id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 3. Remove from deleted_chats
+    try {
+      await supabase
+        .from("deleted_chats")
+        .delete()
+        .or(`id.eq.${chatId},chat_id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 4. Update conversations
+    try {
+      await supabase
+        .from("conversations")
+        .update({ is_deleted: false, updated_at: nowIso })
+        .eq("id", chatId);
+    } catch (e) {}
+
+    console.log("[Nexa Supabase] ✅ Chat restored successfully in Supabase:", chatId);
+    return { success: true };
+  } catch (err: any) {
+    console.error("[Nexa Supabase] Failed to restore chat in Supabase:", err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 

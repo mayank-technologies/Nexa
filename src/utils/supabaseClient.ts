@@ -1185,28 +1185,76 @@ export async function fetchMessagesFromSupabase(chatId: string): Promise<Message
 }
 
 /**
- * Delete a chat session completely from Supabase
+ * Delete a chat session completely from Supabase across all related tables.
+ * Deletes from:
+ * 1. public.chats
+ * 2. public.messages
+ * 3. public.conversations
+ * 4. public.archived_conversations
+ * 5. public.pinned_conversations
+ * 6. public.deleted_conversations
  */
-export async function deleteChatFromSupabase(chatId: string): Promise<boolean> {
+export async function deleteChatFromSupabase(
+  chatId: string,
+  userId?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!chatId) return { success: false, error: "Missing chatId" };
+
   try {
-    console.log("[Nexa Supabase] Deleting chat:", chatId);
+    console.log("[Nexa Supabase] Permanently deleting chat across tables:", chatId);
+
+    // 1. Delete associated messages
+    try {
+      await supabase.from("messages").delete().eq("chat_id", chatId);
+    } catch (e) {
+      console.warn("[Nexa Supabase] Failed to delete messages for chat:", chatId, e);
+    }
+
+    // 2. Delete from conversations (mirror table)
+    try {
+      await supabase.from("conversations").delete().eq("id", chatId);
+    } catch (e) {}
+
+    // 3. Delete from archived_conversations
+    try {
+      await supabase
+        .from("archived_conversations")
+        .delete()
+        .or(`chat_id.eq.${chatId},id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 4. Delete from pinned_conversations
+    try {
+      await supabase
+        .from("pinned_conversations")
+        .delete()
+        .or(`chat_id.eq.${chatId},id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 5. Delete from deleted_conversations
+    try {
+      await supabase
+        .from("deleted_conversations")
+        .delete()
+        .or(`chat_id.eq.${chatId},id.eq.${chatId}`);
+    } catch (e) {}
+
+    // 6. Delete from primary chats table
     const { error } = await supabase
       .from("chats")
       .delete()
       .eq("id", chatId);
 
     if (error) {
-      if (isMissingTableError(error)) {
-        console.warn("[Nexa Supabase] Table does not exist or not found in schema cache.");
-      } else {
-        console.error("[Nexa Supabase] Error deleting chat from Supabase:", error.message);
-      }
-      return false;
+      console.error("[Nexa Supabase] Error deleting chat from public.chats:", error.message);
+      return { success: false, error: error.message };
     }
-    return true;
-  } catch (err) {
+
+    console.log("[Nexa Supabase] ✅ Chat successfully deleted from public.chats:", chatId);
+    return { success: true };
+  } catch (err: any) {
     console.error("[Nexa Supabase] Failed to delete chat from Supabase:", err);
-    return false;
+    return { success: false, error: err?.message || String(err) };
   }
 }
 

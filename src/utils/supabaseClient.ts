@@ -182,7 +182,8 @@ export async function updateChatPinStatusInSupabase(
   chatId: string,
   isPinned: boolean,
   pinOrder: number | null,
-  userId?: string
+  userId?: string,
+  sessionDetails?: Partial<ChatSession>
 ): Promise<{ success: boolean; data?: any; error?: string }> {
   if (!chatId) return { success: false, error: "Missing chatId" };
 
@@ -227,15 +228,20 @@ export async function updateChatPinStatusInSupabase(
     // If no row was updated because it doesn't exist yet in public.chats:
     if (!data || data.length === 0) {
       console.warn("[Nexa Supabase] Chat row did not exist yet for update, creating via upsert with pin state...");
+      const resolvedTitle = sessionDetails?.title || "Conversation";
       const upsertPayload: any = {
         id: chatId,
         user_id: userId || "guest",
-        title: "Conversation",
+        title: resolvedTitle,
         is_pinned: isPinned,
         pin_order: isPinned ? sanitizedPinOrder : null,
-        created_at: new Date().toISOString(),
+        mode: sessionDetails?.mode || "general",
+        created_at: sessionDetails?.createdAt || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
+      if (sessionDetails?.userEmail) {
+        upsertPayload.user_email = sessionDetails.userEmail;
+      }
       const { data: upsertData, error: upsertErr } = await supabase
         .from("chats")
         .upsert(upsertPayload, { onConflict: "id" })

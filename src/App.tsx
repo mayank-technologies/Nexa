@@ -1337,10 +1337,6 @@ export default function App() {
                 ) {
                   pinMutationsRef.current.delete(summary.id);
                 }
-              } else if (existing?.isPinned && !summary.isPinned) {
-                console.log("[PIN LOAD MERGE PRESERVED] Preserving local isPinned: true for chat:", summary.id);
-                finalIsPinned = true;
-                finalPinOrder = existing.pinOrder;
               }
 
               const mergedChat = {
@@ -2633,20 +2629,22 @@ export default function App() {
   };
 
   const handlePinSession = async (id: string) => {
+    const cleanId = (id || "").trim();
+    if (!cleanId) return;
+
     const mutationId = `pin-${Date.now()}`;
     console.log("[PIN TRACE START]", {
       mutationId,
-      chatId: id,
+      chatId: cleanId,
       time: Date.now(),
     });
 
-    const sessionToPin = sessionsRef.current.find((s) => s.id === id) || sessions.find((s) => s.id === id);
-    if (!sessionToPin) {
-      console.warn("[PIN HANDLER] Session not found to pin/unpin:", id);
-      return;
-    }
+    const sessionToPin =
+      sessionsRef.current.find((s) => s.id === cleanId) ||
+      sessions.find((s) => s.id === cleanId) ||
+      (activeSessionId === cleanId ? activeSession : undefined);
 
-    const nextPinned = !sessionToPin.isPinned;
+    const nextPinned = sessionToPin ? !sessionToPin.isPinned : true;
 
     if (nextPinned) {
       const currentPinnedCount = sessionsRef.current.filter((s) => s.isPinned).length;
@@ -2663,7 +2661,7 @@ export default function App() {
     // Calculate numeric pin_order (1 to 10 safe PostgreSQL 32-bit signed integer)
     let nextPinOrder: number | null = null;
     if (nextPinned) {
-      const otherPinned = sessionsRef.current.filter((s) => s.isPinned && s.id !== id);
+      const otherPinned = sessionsRef.current.filter((s) => s.isPinned && s.id !== cleanId);
       const maxOrder = otherPinned.reduce((max, s) => {
         const order = typeof s.pinOrder === "number" ? s.pinOrder : 0;
         return Math.max(max, order);
@@ -2672,14 +2670,14 @@ export default function App() {
     }
 
     console.log("[PIN HANDLER] Executing pin transition:", {
-      id,
-      title: sessionToPin.title,
+      id: cleanId,
+      title: sessionToPin?.title,
       isPinned: nextPinned,
       pinOrder: nextPinOrder,
     });
 
     // Record in pinMutationsRef to prevent race conditions during sync
-    pinMutationsRef.current.set(id, {
+    pinMutationsRef.current.set(cleanId, {
       isPinned: nextPinned,
       pinOrder: nextPinOrder,
       updatedAt: Date.now(),
@@ -2688,7 +2686,7 @@ export default function App() {
     // Optimistically update sessions state
     setSessions((prev) => {
       const updated = prev.map((s) => {
-        if (s.id === id) {
+        if (s.id === cleanId) {
           return {
             ...s,
             isPinned: nextPinned,
@@ -2718,41 +2716,43 @@ export default function App() {
 
     // Await explicit database UPDATE in Supabase public.chats
     const effectiveUserId = user?.isGuest ? "guest" : user?.uid || "guest";
-    const updateResult = await updateChatPinStatusInSupabase(id, nextPinned, nextPinOrder, effectiveUserId);
+    const updateResult = await updateChatPinStatusInSupabase(cleanId, nextPinned, nextPinOrder, effectiveUserId, sessionToPin);
 
     if (!updateResult.success) {
       console.error("[Nexa Pin] Database update failed. Reverting local state:", updateResult.error);
-      pinMutationsRef.current.delete(id);
+      pinMutationsRef.current.delete(cleanId);
 
       // Revert local state to previous
-      setSessions((prev) => {
-        const reverted = prev.map((s) => {
-          if (s.id === id) {
-            return {
-              ...s,
-              isPinned: sessionToPin.isPinned,
-              pinOrder: sessionToPin.pinOrder,
-            };
-          }
-          return s;
-        });
+      if (sessionToPin) {
+        setSessions((prev) => {
+          const reverted = prev.map((s) => {
+            if (s.id === cleanId) {
+              return {
+                ...s,
+                isPinned: sessionToPin.isPinned,
+                pinOrder: sessionToPin.pinOrder,
+              };
+            }
+            return s;
+          });
 
-        reverted.sort((a, b) => {
-          if (a.isPinned && !b.isPinned) return -1;
-          if (!a.isPinned && b.isPinned) return 1;
-          if (a.isPinned && b.isPinned) {
-            return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
-          }
-          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-        });
+          reverted.sort((a, b) => {
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+            if (a.isPinned && b.isPinned) {
+              return (a.pinOrder ?? 0) - (b.pinOrder ?? 0);
+            }
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+          });
 
-        sessionsRef.current = reverted;
-        const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
-        if (currentUid) {
-          safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(reverted));
-        }
-        return reverted;
-      });
+          sessionsRef.current = reverted;
+          const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
+          if (currentUid) {
+            safeStorage.setItem(`nexa_sessions_${currentUid}`, JSON.stringify(reverted));
+          }
+          return reverted;
+        });
+      }
 
       setCustomToast({
         title: "Sync Error",
@@ -2761,13 +2761,13 @@ export default function App() {
       });
     } else {
       console.log("[Nexa Pin] ✅ Database UPDATE verified successfully:", {
-        id,
+        id: cleanId,
         is_pinned: nextPinned,
         pin_order: nextPinOrder,
       });
       setCustomToast({
         title: nextPinned ? "Chat Pinned" : "Chat Unpinned",
-        message: nextPinned ? `"${sessionToPin.title}" pinned to top.` : `"${sessionToPin.title}" unpinned.`,
+        message: nextPinned ? `"${sessionToPin?.title || "Chat"}" pinned to top.` : `"${sessionToPin?.title || "Chat"}" unpinned.`,
         type: "success",
       });
     }

@@ -354,14 +354,18 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       pinOrder: chat.pinOrder,
     });
 
-    if (chat.isDeleted !== undefined) {
-      payload.is_deleted = chat.isDeleted;
-    }
-    if (chat.deletedAt !== undefined) {
-      payload.deleted_at = chat.deletedAt;
-    }
-    if (chat.autoDeleteAt !== undefined) {
-      payload.auto_delete_at = chat.autoDeleteAt;
+    if (chat.isDeleted === true) {
+      payload.is_deleted = true;
+      if (chat.deletedAt !== undefined) {
+        payload.deleted_at = chat.deletedAt;
+      }
+      if (chat.autoDeleteAt !== undefined) {
+        payload.auto_delete_at = chat.autoDeleteAt;
+      }
+    } else {
+      payload.is_deleted = false;
+      payload.deleted_at = null;
+      payload.auto_delete_at = null;
     }
     if ((chat as any).isArchived !== undefined) {
       payload.is_archived = (chat as any).isArchived;
@@ -501,6 +505,14 @@ export async function syncChatToSupabase(chat: ChatSession, userEmail?: string, 
       } catch (e) {
         console.warn("[Nexa Supabase] deleted_chats mirror exception:", e);
       }
+    } else {
+      // Active / restored chat: purge any leftover rows from mirror tables
+      try {
+        await supabase.from("deleted_conversations").delete().or(`id.eq.${chat.id},chat_id.eq.${chat.id}`);
+      } catch (e) {}
+      try {
+        await supabase.from("deleted_chats").delete().or(`id.eq.${chat.id},chat_id.eq.${chat.id}`);
+      } catch (e) {}
     }
 
     // Sync all messages inside chat if present
@@ -1338,17 +1350,17 @@ export async function restoreChatInSupabase(
   restoredChat?: Partial<ChatSession>,
   userId?: string,
   userEmail?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; data?: any }> {
   if (!chatId) return { success: false, error: "Missing chatId" };
 
   try {
-    const effectiveUserId = userId || "guest";
+    const effectiveUserId = userId || (restoredChat as any)?.userId || "guest";
     const effectiveEmail = (userEmail || restoredChat?.userEmail || "guest@nexa.ai").toLowerCase().trim();
     const nowIso = new Date().toISOString();
 
-    console.log("[Nexa Supabase] Restoring chat in Supabase:", chatId);
+    console.log("[Nexa Supabase] Restoring chat in Supabase:", chatId, "effectiveUserId:", effectiveUserId);
 
-    // 1. Update public.chats
+    // 1. Update public.chats with select to detect affected rows
     const updatePayload: any = {
       is_deleted: false,
       deleted_at: null,
@@ -1356,18 +1368,90 @@ export async function restoreChatInSupabase(
       updated_at: nowIso,
     };
 
+    if (effectiveUserId && effectiveUserId !== "guest") {
+      updatePayload.user_id = effectiveUserId;
+    }
+    if (effectiveEmail) {
+      updatePayload.user_email = effectiveEmail;
+    }
+
     if (restoredChat?.isPinned !== undefined) {
       updatePayload.is_pinned = restoredChat.isPinned;
       updatePayload.pin_order = restoredChat.pinOrder ?? null;
     }
 
-    const { error: chatUpdateErr } = await supabase
+    const { data: updatedRows, error: chatUpdateErr } = await supabase
       .from("chats")
       .update(updatePayload)
-      .eq("id", chatId);
+      .eq("id", chatId)
+      .select("*");
 
     if (chatUpdateErr) {
-      console.warn("[Nexa Supabase] Restore update to public.chats failed:", chatUpdateErr.message);
+      console.warn("[Nexa Supabase] Restore update to public.chats returned error:", chatUpdateErr.message);
+    }
+
+    let finalRow: any = updatedRows?.[0];
+
+    // If 0 rows were updated, execute upsert to guarantee restoration
+    if (!finalRow) {
+      console.warn("[Nexa Supabase] Restore update affected 0 rows. Executing upsert fallback for chat:", chatId);
+      const upsertPayload: any = {
+        id: chatId,
+        title: restoredChat?.title || "Restored Session",
+        user_id: effectiveUserId,
+        user_email: effectiveEmail,
+        is_deleted: false,
+        deleted_at: null,
+        auto_delete_at: null,
+        mode: restoredChat?.mode || "general",
+        selected_engine_id: restoredChat?.selectedEngineId || null,
+        is_pinned: restoredChat?.isPinned ?? false,
+        pin_order: restoredChat?.pinOrder ?? null,
+        created_at: restoredChat?.createdAt || nowIso,
+        updated_at: nowIso,
+      };
+
+      const { data: upsertRows, error: upsertErr } = await supabase
+        .from("chats")
+        .upsert(upsertPayload, { onConflict: "id" })
+        .select("*");
+
+      if (upsertErr) {
+        console.error("[Nexa Supabase] Restore upsert fallback failed:", upsertErr.message);
+        return { success: false, error: upsertErr.message };
+      }
+      finalRow = upsertRows?.[0];
+    }
+
+    // Immediately SELECT the row from public.chats to strictly verify DB state
+    let { data: verifyRow, error: verifyErr } = await supabase
+      .from("chats")
+      .select("id, title, user_id, user_email, is_deleted, deleted_at, auto_delete_at, updated_at")
+      .eq("id", chatId)
+      .maybeSingle();
+
+    if (verifyErr || !verifyRow) {
+      console.error("[Nexa Supabase] Verification SELECT failed after restore:", verifyErr?.message);
+      return { success: false, error: verifyErr?.message || "Verification SELECT failed" };
+    }
+
+    console.log("[Nexa Supabase] Post-restore verified row in public.chats:", verifyRow);
+
+    if (verifyRow.is_deleted !== false || verifyRow.deleted_at !== null || verifyRow.auto_delete_at !== null) {
+      console.error("[Nexa Supabase] Warning: DB row still had deleted flags, forcing clean update...");
+      await supabase
+        .from("chats")
+        .update({ is_deleted: false, deleted_at: null, auto_delete_at: null, updated_at: nowIso })
+        .eq("id", chatId);
+
+      const reCheck = await supabase
+        .from("chats")
+        .select("id, title, user_id, user_email, is_deleted, deleted_at, auto_delete_at, updated_at")
+        .eq("id", chatId)
+        .maybeSingle();
+      if (reCheck.data) {
+        verifyRow = reCheck.data;
+      }
     }
 
     // 2. Remove from deleted_conversations
@@ -1394,8 +1478,8 @@ export async function restoreChatInSupabase(
         .eq("id", chatId);
     } catch (e) {}
 
-    console.log("[Nexa Supabase] ✅ Chat restored successfully in Supabase:", chatId);
-    return { success: true };
+    console.log("[Nexa Supabase] ✅ Chat restored successfully and verified in Supabase:", chatId);
+    return { success: true, data: verifyRow };
   } catch (err: any) {
     console.error("[Nexa Supabase] Failed to restore chat in Supabase:", err);
     return { success: false, error: err?.message || String(err) };

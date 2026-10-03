@@ -23,7 +23,7 @@ import { ChatSession, UserProfile, Message } from "../types";
 interface RecentlyDeletedProps {
   user: UserProfile;
   deletedSessions: ChatSession[];
-  onRestore: (id: string) => void;
+  onRestore: (id: string, session?: ChatSession) => void;
   onDeleteForever: (id: string) => void;
   onEmptyAll: () => void;
   isLoading: boolean;
@@ -196,7 +196,10 @@ export function RecentlyDeleted({
       if (currentProgress >= 100) {
         clearInterval(interval);
         setTimeout(() => {
-          selectedIds.forEach(id => onRestore(id));
+          selectedIds.forEach((id) => {
+            const found = deletedSessions.find((s) => s.id === id);
+            onRestore(id, found);
+          });
           setShreddingState({ isActive: false, progress: 0, actionType: null, totalCount: 0 });
           setSelectedIds([]);
         }, 500);
@@ -519,7 +522,7 @@ export function RecentlyDeleted({
                     {/* Action buttons */}
                     <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-850/60 mt-4 pt-3 gap-3">
                       <button
-                        onClick={() => onRestore(session.id)}
+                        onClick={() => onRestore(session.id, session)}
                         className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-bold text-slate-650 dark:text-slate-350 hover:text-[#C96A3D] dark:hover:text-[#C96A3D] bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-850 border border-slate-200 dark:border-slate-800/80 rounded-xl cursor-pointer transition-all active:scale-98"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />

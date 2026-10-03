@@ -2382,18 +2382,21 @@ export default function App() {
     setUndoToast({
       message: `Chat "${sessionToDelete?.title || "Chat"}" moved to Recycle Bin.`,
       action: () => {
-        handleRestoreSession(cleanId);
+        handleRestoreSession(cleanId, deletedEntry);
       },
       actionLabel: "Undo",
     });
   };
 
-  const handleRestoreSession = async (id: string) => {
+  const handleRestoreSession = async (id: string, fallbackSession?: ChatSession) => {
     playUiSound("success");
     const cleanId = (id || "").trim();
     if (!cleanId) return;
 
-    const chatToRestore =
+    deletedChatIdsRef.current.delete(cleanId);
+
+    let chatToRestore: ChatSession | undefined =
+      fallbackSession ||
       deletedSessions.find((s) => s.id === cleanId) ||
       (() => {
         const currentUid = user?.isGuest ? "guest@nexa.ai" : user?.uid || "guest@nexa.ai";
@@ -2407,15 +2410,54 @@ export default function App() {
         return undefined;
       })();
 
+    // If not found in local memory or storage, fetch from Supabase
     if (!chatToRestore) {
-      console.warn("[Nexa Restore] Could not find deleted chat to restore:", cleanId);
-      return;
+      console.log("[Nexa Restore] Chat not in local state, querying Supabase for restore:", cleanId);
+      try {
+        const { data: dbRow } = await supabase.from("chats").select("*").eq("id", cleanId).maybeSingle();
+        if (dbRow) {
+          const msgs = await fetchMessagesFromSupabase(cleanId);
+          chatToRestore = {
+            id: dbRow.id,
+            title: dbRow.title || "Restored Session",
+            createdAt: dbRow.created_at,
+            updatedAt: new Date().toISOString(),
+            messages: msgs || [],
+            mode: dbRow.mode || "general",
+            userEmail: dbRow.user_email || user?.email || "guest@nexa.ai",
+            isPinned: dbRow.is_pinned || false,
+            pinOrder: dbRow.pin_order,
+            isDeleted: false,
+          };
+        }
+      } catch (e) {
+        console.warn("[Nexa Restore] DB query fallback failed:", e);
+      }
     }
 
-    deletedChatIdsRef.current.delete(cleanId);
+    if (!chatToRestore) {
+      console.warn("[Nexa Restore] Could not find deleted chat to restore:", cleanId);
+      chatToRestore = {
+        id: cleanId,
+        title: "Restored Chat",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+        isPinned: false,
+        pinOrder: null,
+        mode: "general",
+        isDeleted: false,
+        userEmail: user?.email || "guest@nexa.ai"
+      };
+    }
+
+    const effectiveUserId = user?.uid || (chatToRestore as any)?.userId || (chatToRestore as any)?.user_id;
+    const effectiveEmail = user?.email || chatToRestore?.userEmail || "guest@nexa.ai";
 
     const restoredSession: ChatSession = {
       ...chatToRestore,
+      userId: effectiveUserId,
+      userEmail: effectiveEmail,
       isDeleted: false,
       deletedAt: undefined,
       autoDeleteAt: undefined,
@@ -2439,9 +2481,14 @@ export default function App() {
     setActiveMode(restoredSession.mode || "general");
 
     // Restore in Supabase: reset is_deleted, clean up recycle bin mirror tables
-    console.log("[Nexa Restore] Restoring chat in Supabase:", cleanId);
-    await restoreChatInSupabase(cleanId, restoredSession, user?.uid, user?.email || "guest@nexa.ai");
-    await syncChatToSupabase(restoredSession, user?.email || "guest@nexa.ai", user?.uid);
+    console.log("[Nexa Restore] Restoring chat in Supabase:", cleanId, "effectiveUserId:", effectiveUserId);
+    const restoreResult = await restoreChatInSupabase(cleanId, restoredSession, effectiveUserId, effectiveEmail);
+    if (!restoreResult.success) {
+      console.error("[Nexa Restore] Supabase restore failed:", restoreResult.error);
+    } else {
+      console.log("[Nexa Restore] ✅ Supabase restore verified successfully:", restoreResult.data);
+    }
+    await syncChatToSupabase(restoredSession, effectiveEmail, effectiveUserId);
 
     setUndoToast({
       message: `Chat "${restoredSession.title || "Chat"}" restored to Chat Log.`,

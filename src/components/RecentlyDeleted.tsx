@@ -28,6 +28,7 @@ interface RecentlyDeletedProps {
   onEmptyAll: () => void;
   isLoading: boolean;
   onClose: () => void;
+  onRefresh?: () => void;
 }
 
 type SortOption = "date_newest" | "date_oldest" | "name_az" | "messages_count";
@@ -40,6 +41,7 @@ export function RecentlyDeleted({
   onEmptyAll,
   isLoading,
   onClose,
+  onRefresh,
 }: RecentlyDeletedProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("date_newest");
@@ -62,6 +64,13 @@ export function RecentlyDeleted({
     actionType: null,
     totalCount: 0
   });
+
+  // Load latest state from server on mount
+  useEffect(() => {
+    if (onRefresh) {
+      onRefresh();
+    }
+  }, []);
 
   // Keep selectedIds in sync when sessions are removed
   useEffect(() => {

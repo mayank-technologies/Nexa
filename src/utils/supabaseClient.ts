@@ -1030,6 +1030,8 @@ export async function fetchDeletedChatsFromSupabase(userEmail: string, userId?: 
       query = query.eq("user_id", userId);
     } else if (normalizedEmail) {
       query = query.or(`user_email.ilike.${normalizedEmail},user_email.eq.${normalizedEmail}`);
+    } else {
+      query = query.or("user_email.eq.guest@nexa.ai,user_id.eq.guest");
     }
 
     const { data, error } = await query
@@ -1038,22 +1040,26 @@ export async function fetchDeletedChatsFromSupabase(userEmail: string, userId?: 
 
     if (!error && data && data.length > 0) {
       for (const row of data) {
+        const delDate = row.deleted_at || row.updated_at || new Date().toISOString();
+        const autoDelDate = row.auto_delete_at || new Date(new Date(delDate).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
         resultsMap[row.id] = {
           id: row.id,
           title: row.title || "Deleted Session",
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
+          createdAt: row.created_at || delDate,
+          updatedAt: row.updated_at || delDate,
           isPinned: row.is_pinned || false,
           pinOrder: row.pin_order,
           mode: row.mode || "general",
           selectedEngineId: row.selected_engine_id,
-          userEmail: row.user_email,
+          userEmail: row.user_email || normalizedEmail || "guest@nexa.ai",
           isDeleted: true,
-          deletedAt: row.deleted_at,
-          autoDeleteAt: row.auto_delete_at,
+          deletedAt: delDate,
+          autoDeleteAt: autoDelDate,
           messages: []
         };
       }
+    } else if (error) {
+      console.warn("[Nexa Supabase] Primary deleted chats fetch returned error:", error.message);
     }
 
     // Secondary fetch from deleted_conversations
@@ -1200,7 +1206,7 @@ export async function softDeleteChatInSupabase(
   chatData?: Partial<ChatSession>,
   userId?: string,
   userEmail?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; data?: ChatSession }> {
   if (!chatId) return { success: false, error: "Missing chatId" };
 
   try {
@@ -1227,36 +1233,55 @@ export async function softDeleteChatInSupabase(
         .or(`chat_id.eq.${chatId},id.eq.${chatId}`);
     } catch (e) {}
 
-    // 3. Update public.chats
-    const updatePayload: any = {
+    // 3. Upsert public.chats so chat is guaranteed to persist even if never synced before
+    const upsertPayload: any = {
+      id: chatId,
+      title: chatData?.title || "Deleted Session",
+      user_id: effectiveUserId,
+      user_email: effectiveEmail,
       is_deleted: true,
       deleted_at: nowIso,
       auto_delete_at: autoDeleteIso,
       is_pinned: false,
       pin_order: null,
+      mode: chatData?.mode || "general",
+      selected_engine_id: chatData?.selectedEngineId || null,
+      created_at: chatData?.createdAt || nowIso,
       updated_at: nowIso,
     };
 
-    const { error: chatUpdateErr } = await supabase
+    let savedRow: any = null;
+    const { data: upsertData, error: chatUpsertErr } = await supabase
       .from("chats")
-      .update(updatePayload)
-      .eq("id", chatId);
+      .upsert(upsertPayload, { onConflict: "id" })
+      .select();
 
-    if (chatUpdateErr) {
-      console.warn("[Nexa Supabase] Soft-delete update to public.chats failed:", chatUpdateErr.message, "Retrying upsert...");
-      await supabase.from("chats").upsert({
-        id: chatId,
-        title: chatData?.title || "Deleted Session",
-        user_id: effectiveUserId,
-        user_email: effectiveEmail,
-        is_deleted: true,
-        deleted_at: nowIso,
-        auto_delete_at: autoDeleteIso,
-        is_pinned: false,
-        pin_order: null,
-        created_at: chatData?.createdAt || nowIso,
-        updated_at: nowIso,
-      }, { onConflict: "id" });
+    if (chatUpsertErr) {
+      console.warn("[Nexa Supabase] Soft-delete upsert to public.chats failed:", chatUpsertErr.message, "Falling back to update...");
+      const { data: updateData } = await supabase
+        .from("chats")
+        .update({
+          is_deleted: true,
+          deleted_at: nowIso,
+          auto_delete_at: autoDeleteIso,
+          is_pinned: false,
+          pin_order: null,
+          updated_at: nowIso,
+        })
+        .eq("id", chatId)
+        .select();
+      savedRow = updateData?.[0];
+    } else {
+      savedRow = upsertData?.[0];
+    }
+
+    // Also persist messages in Supabase if present
+    if (chatData?.messages && chatData.messages.length > 0) {
+      for (const msg of chatData.messages) {
+        try {
+          await syncMessageToSupabase(chatId, msg, effectiveUserId);
+        } catch (e) {}
+      }
     }
 
     // 4. Mirror to deleted_conversations (non-blocking if table or RLS policy restricts)
@@ -1278,8 +1303,24 @@ export async function softDeleteChatInSupabase(
         .eq("id", chatId);
     } catch (e) {}
 
+    const fullDeletedRecord: ChatSession = {
+      id: chatId,
+      title: chatData?.title || savedRow?.title || "Deleted Session",
+      createdAt: chatData?.createdAt || savedRow?.created_at || nowIso,
+      updatedAt: nowIso,
+      isPinned: false,
+      pinOrder: null,
+      mode: chatData?.mode || savedRow?.mode || "general",
+      selectedEngineId: chatData?.selectedEngineId || savedRow?.selected_engine_id || null,
+      userEmail: effectiveEmail,
+      isDeleted: true,
+      deletedAt: nowIso,
+      autoDeleteAt: autoDeleteIso,
+      messages: chatData?.messages || [],
+    };
+
     console.log("[Nexa Supabase] ✅ Soft delete completed successfully for chat:", chatId);
-    return { success: true };
+    return { success: true, data: fullDeletedRecord };
   } catch (err: any) {
     console.error("[Nexa Supabase] Failed to soft delete chat in Supabase:", err);
     return { success: false, error: err?.message || String(err) };
